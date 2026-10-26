@@ -1,0 +1,10 @@
+- id: session-persistence-jsonl
+  disabled: true
+- id: agent-loop
+  inject: [sessionPersistence]
+- insert:
+    - id: contextmesh-session-persistence
+      name: dsh-contextmesh
+      config:
+        endpoint: !!js process.env.CONTEXTMESH_ENDPOINT || 'http://127.0.0.1:8787'
+        tokenEnv: CONTEXTMESH_TOKEN

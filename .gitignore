@@ -7,3 +7,5 @@ coverage/
 .DS_Store
 .contextmesh/
 *.log
+.cordis/
+_tmp_*

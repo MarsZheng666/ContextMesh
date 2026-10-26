@@ -1,0 +1,13 @@
+packages:
+  - packages/adapter-deepseek
+allowBuilds:
+  embedded-postgres: true
+  '@embedded-postgres/darwin-arm64': true
+  '@embedded-postgres/darwin-x64': true
+  '@embedded-postgres/linux-x64': true
+  esbuild: true
+  '@deepseek-ai/dsh-subprocess-local': true
+  koffi: true
+  node-pty: true
+  '@google/genai': false
+  protobufjs: false

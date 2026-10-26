@@ -2,6 +2,12 @@
 
 日期：2026-10-26。
 
+## M0 实施更新
+
+用户已要求开始 M0。实现采用 TypeScript ESM、Node 24、Fastify、Zod/JSON Schema、pg 与 PostgreSQL；插件兼容性固定到官方 npm 包 0.2.1-rc.3、Cordis 4.0.5。具体依赖由 pnpm-lock.yaml 固定。先前“建议”表保留为预研时的历史记录；当前实现与限制见 [M0 说明](m0.md)。
+
+为完整保留合法 JSON 中的 NUL 与未配对 Unicode，header、事件和幂等结果使用 JSON 文本存入 TEXT，序号和写权采用独立列；HTTP 校验禁止自动类型转换。额外 incarnation 区分同一 ID 在空 Session 删除后的重用。异常写权不自动接管，只有确认旧执行者已停止且旧租约到期后才能显式恢复。
+
 ## 用户本次明确确认的方向
 
 1. 主仓库为 `https://github.com/MarsZheng666/ContextMesh.git`，后续项目开发在该仓库进行。

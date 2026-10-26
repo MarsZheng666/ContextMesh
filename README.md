@@ -2,7 +2,11 @@
 
 模型无关的分布式上下文服务。以 DeepSeek Harness 插件为首个集成对象，逐步支持远程 Session 持久化、跨机器 Handoff、跨模型任务接力，以及异构 Coding Agent。
 
-当前阶段：源码预研与 MVP 设计，尚无可运行服务或插件。主仓库：[MarsZheng666/ContextMesh](https://github.com/MarsZheng666/ContextMesh)。
+当前阶段：M0 远程持久化已实现，包含 HTTP 服务、PostgreSQL、DeepSeek Harness 插件与 CLI。主仓库：[MarsZheng666/ContextMesh](https://github.com/MarsZheng666/ContextMesh)。
+
+使用 Node 24，运行 `pnpm install --frozen-lockfile`、`pnpm build`；完整启动和插件接入步骤见 [M0 使用与恢复说明](docs/m0.md)。`pnpm check` 验证格式、类型、构建和数据库/插件测试。
+
+当前支持 Session 远程保存、正常关闭后的恢复，以及确认旧进程停止后的显式故障恢复。M1 跨机器主动 Handoff、M2 跨模型接力尚未实现。
 
 ## 项目记录
 
@@ -10,6 +14,8 @@
 - [DeepSeek Harness 源码预研](docs/research/deepseek-harness.md)
 - [固定的上游版本与文件校验记录](docs/research/upstream-lock.json)
 - [本轮验证与未执行事项](docs/research/validation.md)
+- [M0 使用、接口与运行限制](docs/m0.md)
+- [M0 已执行验证与未验证边界](docs/m0-validation.md)
 - [MVP、接口与验收标准](docs/design/mvp.md)
 - [项目结构与实施顺序](docs/design/project-structure.md)
 - [Git 与 PR 工作流](CONTRIBUTING.md)

@@ -1,0 +1,18 @@
+{
+  "repository": "https://github.com/deepseek-ai/deepseek-harness",
+  "commit": "22ddee3792402c3e70ec5f86a63c3e3e895a2f60",
+  "files": [
+    {
+      "path": "packages/session/session-persistence/tests/contract.ts",
+      "sha256": "03a87ca65d0f3fab6c73c78b2c36c7e246dc18d8ccff9d483edc5cd9753e4788",
+      "localChange": "relative service import replaced with the public npm package; legacy-format fixture assertion routed through unknown for TypeScript 6",
+      "adaptedSha256": "b58107343529b081c349d9d93371a70859a45cb0b75445f94dce47e6428fe869"
+    },
+    {
+      "path": "packages/session/session-persistence/tests/live-write-contract.ts",
+      "sha256": "08b01dcd4282ab47a772e16a81cca01defe5e89e185c66767a22d51481738d78",
+      "localChange": "relative service import replaced with the public npm package",
+      "adaptedSha256": "b15d479f1b33ee0b89d0c1d82880e8e6f66b0947e6fcf616afa416257dd2bf99"
+    }
+  ]
+}
