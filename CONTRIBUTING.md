@@ -1,26 +1,35 @@
-# 开发与 PR 工作流
+# Contributing to ContextMesh
 
-## 当前仓库状态
+Thanks for helping improve ContextMesh. Use [GitHub Issues](https://github.com/MarsZheng666/ContextMesh/issues) to report a bug or discuss a feature before starting a larger change.
 
-2026-10-26 核对时远程仓库为空，本地克隆的 origin 指向 `MarsZheng666/ContextMesh`。本轮使用本地 `feature/deepseek-persistence-research` 分支，所有改动只在本地。
+## Development setup
 
-远程没有首个提交时，无法以正常的远程 `main` 作为 PR base。不要用一个无共同历史的孤立 main 去比较 feature，也不要为了创建 PR 自动推送 main。
+Use Node.js 24.9+ and the pinned pnpm version from `package.json`.
 
-首次发布前，向用户说明并取得对以下具体操作的授权：先将一个最小的空基线提交发布到 `main`，让现有 feature 提交以该基线为共同祖先，再发布 feature 并创建 PR。若仓库届时已有 main，应 fetch 后保留本地成果，把改动移到 main 派生的 feature 上再检查，不覆盖远端。当前仅记录流程，不创建或推送远程基线。
+```sh
+corepack enable
+pnpm install --frozen-lockfile
+pnpm build
+pnpm check
+```
 
-## 常规流程
+The test suite starts an isolated PostgreSQL instance when `TEST_DATABASE_URL` is unset. If you provide that variable, point it at a dedicated test database. Ordinary tests do not need model API credentials.
 
-1. 读取仓库适用说明，确认工作区和 origin，fetch 并确认 base；保留用户已有改动。
-2. 从已有 main 新建 `feature/<topic>`；修复可使用 `fix/<topic>`。每个 PR 有明确范围。
-3. 在本地实现、检查和提交，记录实际执行的验证；不把计划执行写成已通过。
-4. 将 diff、结果、限制和 PR 描述准备为可审查内容。获得该次推送授权后，才推送 feature 并创建 PR。
-5. 不直接向 main 提交业务改动，不擅自合并，不 force push；需要重写已发布历史时另行说明。
+## Pull requests
 
-## 本项目的验证约定
+1. Create a `feature/` or `fix/` branch from the repository's default branch.
+2. Keep the change focused and update user-facing documentation alongside behavior changes.
+3. Run checks relevant to the change. Use `pnpm check` for runtime changes; check formatting and links for documentation-only changes.
+4. Open a pull request explaining the problem, the resulting behavior, and the checks you ran.
 
-- 本轮只有文档：检查相对链接、固定上游链接的路径和行号、来源校验记录、JSON 格式，以及 Git 空白错误。
-- 远程后端实现：运行上游持久化及实时写入两组契约，再补网络故障、请求重试、并发写权和 fencing 场景。
-- Handoff 实现：运行两个独立进程的接续测试，涵盖关闭失败、目录映射、工作区不一致和过期写权。
-- 模型接力：先用假模型验证路由和事件，再在明确配置凭证后运行真实模型验收。普通测试不需要密钥。
+Keep `README.md` and `README.zh.md` aligned. Put installation and API guidance in `docs/`; keep personal research notes, deployment-instance records, verification reports, and PR drafts outside the public repository.
 
-不提交凭证、会话正文、用户代码副本、上游整仓副本或本地临时运行数据。项目许可证尚未由用户选择，不擅自添加许可证承诺。
+## Persistence changes
+
+Preserve native Session data, contiguous event ordering, single-writer ownership, and idempotent retries. Changes to these behaviors should include relevant contract or integration coverage. Never point tests at a production database or replay real user sessions as test fixtures.
+
+The adapted upstream fixtures in `tests/upstream/` retain their original license and source metadata. Preserve those files and update their recorded hashes only when intentionally updating the fixtures.
+
+## Private data
+
+Do not commit credentials, `.env` files, conversation exports, local database files, or personal machine configuration. `.contextmesh/` is ignored and can hold local runtime data and notes.

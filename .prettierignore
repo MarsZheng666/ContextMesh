@@ -4,4 +4,3 @@ dist/
 tests/upstream/
 .contextmesh/
 pnpm-lock.yaml
-docs/research/upstream-lock.json

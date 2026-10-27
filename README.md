@@ -1,28 +1,109 @@
 # ContextMesh
 
-模型无关的分布式上下文服务。以 DeepSeek Harness 插件为首个集成对象，逐步支持远程 Session 持久化、跨机器 Handoff、跨模型任务接力，以及异构 Coding Agent。
+English | [中文](README.zh.md)
 
-当前阶段：M0 远程持久化已实现，包含 HTTP 服务、PostgreSQL、DeepSeek Harness 插件与 CLI。主仓库：[MarsZheng666/ContextMesh](https://github.com/MarsZheng666/ContextMesh)。
+**Remote session persistence for coding agents.**
 
-使用 Node 24，运行 `pnpm install --frozen-lockfile`、`pnpm build`；完整启动和插件接入步骤见 [M0 使用与恢复说明](docs/m0.md)。`pnpm check` 验证格式、类型、构建和数据库/插件测试。
+ContextMesh gives agent sessions a shared home beyond a single machine. It preserves conversation history, tool calls, and execution events in PostgreSQL, so a session can be closed on one machine and resumed on another.
 
-当前支持 Session 远程保存、正常关闭后的恢复，以及确认旧进程停止后的显式故障恢复。M1 跨机器主动 Handoff、M2 跨模型接力尚未实现。
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) is the first integration. The longer-term goal is a model-independent context service for cross-machine handoff, cross-model relay, and different coding agents.
 
-## 项目记录
+[Getting started](docs/getting-started.md) · [Plugin API](docs/api/deepseek-adapter.md) · [Deployment](docs/deployment.md)
 
-- [方向、已确认决策与上下文恢复限制](docs/decisions.md)
-- [DeepSeek Harness 源码预研](docs/research/deepseek-harness.md)
-- [固定的上游版本与文件校验记录](docs/research/upstream-lock.json)
-- [本轮验证与未执行事项](docs/research/validation.md)
-- [M0 使用、接口与运行限制](docs/m0.md)
-- [M0 已执行验证与未验证边界](docs/m0-validation.md)
-- [DeepSeek 持久化插件接口与内部流程](docs/api/deepseek-adapter.md)
-- [双机器部署、连接与接续验证](docs/deployment.md)
-- [MVP、接口与验收标准](docs/design/mvp.md)
-- [项目结构与实施顺序](docs/design/project-structure.md)
-- [Git 与 PR 工作流](CONTRIBUTING.md)
-- [本地 PR 描述草稿](docs/pr-draft.md)
+## Developer preview
 
-首个技术闭环：机器 A 保存并停止 Session，机器 B 从远端恢复同一 Session，在确认工作目录和代码版本后继续任务。跨模型先在同一 Harness 内验证；异构 Agent 通过明确的上下文交接格式逐步接入。
+ContextMesh is in **developer preview**. The current release provides remote Session storage and recovery for DeepSeek Harness **0.2.1-rc.3**. APIs may change as the project evolves.
 
-源码结论固定于 DeepSeek Harness commit `22ddee3792402c3e70ec5f86a63c3e3e895a2f60`，预研日期为 2026-10-26。接口仍处于预稳定阶段，升级前需要重新核对。
+Automatic handoff, workspace synchronization, and cross-model relay are planned. Today, close the source session before resuming it elsewhere, and prepare the target workspace separately.
+
+## What it does
+
+- **Preserve native history.** Store messages, tool calls, tool results, and Session events without replacing them with summaries.
+- **Resume across machines.** Connect multiple Harness installations to the same service and continue a session after its writer closes.
+- **Keep one writer.** Leases and write epochs prevent competing clients from appending to the same session.
+- **Self-host the storage.** Run the HTTP service with PostgreSQL, using a local connection, an SSH tunnel, or HTTPS.
+
+```text
+DeepSeek Harness A ─┐
+                   ├── ContextMesh ── PostgreSQL
+DeepSeek Harness B ─┘
+```
+
+## Quick start
+
+Requires **Node.js 24.9+**, **pnpm 11.25.0**, and a compatible DeepSeek Harness installation. The local development database is included; you can also use your own PostgreSQL instance.
+
+### 1. Build from source
+
+```sh
+git clone https://github.com/MarsZheng666/ContextMesh.git
+cd ContextMesh
+corepack enable
+pnpm install --frozen-lockfile
+pnpm build
+cp .env.example .env
+```
+
+Set `CONTEXTMESH_TOKEN` in `.env` to a long random value. Generate one with:
+
+```sh
+node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
+```
+
+### 2. Start the service
+
+Start the local PostgreSQL process in one terminal:
+
+```sh
+pnpm db:local
+```
+
+In another terminal, from the repository root:
+
+```sh
+pnpm start
+```
+
+The API listens on `http://127.0.0.1:8787`. Local database files remain in `.contextmesh/postgres` between runs.
+
+### 3. Connect DeepSeek Harness
+
+From the repository root, set the same token used by the service and install the built plugin into your Web profile:
+
+```sh
+export CONTEXTMESH_ENDPOINT=http://127.0.0.1:8787
+export CONTEXTMESH_TOKEN='your-token-from-.env'
+dsh plugin --profile web add "file:$PWD/packages/adapter-deepseek"
+dsh --profile web
+```
+
+The plugin replaces the profile's JSONL persistence provider. See [getting started](docs/getting-started.md) for profile setup, configuration, and recovery.
+
+## Inspect sessions
+
+```sh
+pnpm cli list
+pnpm cli stat SESSION_ID
+pnpm cli export SESSION_ID
+```
+
+Export writes the native session log to standard output. The CLI reads connection settings from the repository's `.env`.
+
+## Roadmap
+
+| Capability                                | Status    |
+| ----------------------------------------- | --------- |
+| Remote Session persistence and recovery   | Available |
+| Controlled handoff with workspace mapping | Planned   |
+| Cross-model task relay within one Harness | Planned   |
+| Additional coding-agent integrations      | Planned   |
+
+## Development
+
+```sh
+pnpm check
+```
+
+Runs formatting, upstream fixture integrity checks, type checking, builds, and tests. The suite uses an isolated PostgreSQL instance and does not require model API credentials.
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md), or [open an issue](https://github.com/MarsZheng666/ContextMesh/issues) for bugs and feature requests.
