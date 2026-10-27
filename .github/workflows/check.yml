@@ -1,0 +1,28 @@
+name: Checks
+on:
+  push:
+  pull_request:
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: contextmesh
+          POSTGRES_PASSWORD: contextmesh-tests
+          POSTGRES_DB: contextmesh
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U contextmesh"
+          --health-interval 3s --health-timeout 3s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://contextmesh:contextmesh-tests@127.0.0.1:5432/contextmesh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
