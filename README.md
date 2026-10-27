@@ -16,6 +16,8 @@
 - [本轮验证与未执行事项](docs/research/validation.md)
 - [M0 使用、接口与运行限制](docs/m0.md)
 - [M0 已执行验证与未验证边界](docs/m0-validation.md)
+- [DeepSeek 持久化插件接口与内部流程](docs/api/deepseek-adapter.md)
+- [双机器部署、连接与接续验证](docs/deployment.md)
 - [MVP、接口与验收标准](docs/design/mvp.md)
 - [项目结构与实施顺序](docs/design/project-structure.md)
 - [Git 与 PR 工作流](CONTRIBUTING.md)

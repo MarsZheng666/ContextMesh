@@ -1,0 +1,62 @@
+{
+  "testedAt": "2026-10-26",
+  "sourceCommit": "6db621a",
+  "harnessVersion": "0.2.1-rc.3",
+  "pluginVersion": "0.1.0",
+  "model": "deepseek-flash",
+  "driver": "Official DSH sdk-minimal profile over JSON-RPC",
+  "apiRestartedBetweenRemoteAndLocalReturn": true,
+  "stages": [
+    {
+      "stage": "local-first",
+      "platform": "macOS arm64",
+      "eventCount": 14,
+      "eventsSha256": "698cc6490fc1faf6a673347e48a13323bffef767a9627e942c7e2cb2a75be4fa",
+      "previousPrefixPreserved": true,
+      "exitCode": 0,
+      "finishedAt": "2026-10-26T11:24:31.693Z"
+    },
+    {
+      "stage": "remote",
+      "platform": "Ubuntu 22.04 x86_64",
+      "eventCount": 25,
+      "eventsSha256": "78fae5ca5663988c9a7ba7494df989b72aec46f9d56c44a4a7c3445674a48f2e",
+      "previousPrefixPreserved": true,
+      "exitCode": 0,
+      "finishedAt": "2026-10-26T11:31:06.237Z"
+    },
+    {
+      "stage": "local-return",
+      "platform": "macOS arm64",
+      "eventCount": 36,
+      "eventsSha256": "ff25544638e93ab7957e62557e241f2ab5c8408b35692ddeef8b42ddb0af7bb8",
+      "previousPrefixPreserved": true,
+      "exitCode": 0,
+      "finishedAt": "2026-10-26T11:31:42.939Z"
+    }
+  ],
+  "artifactsSha256": {
+    "dist/server.js": "3b9d92c6d07ae9971c53cf9d1cb678db7794a5ccf3b020e71441f2d373ca09fb",
+    "dsh-contextmesh.tgz": "d8686ee1ce67a761a8ae8f9d00f6b0c0985e070b6925fea3ff8115ffb5ddd9b9"
+  },
+  "web": [
+    {
+      "name": "remote",
+      "authStatus": 303,
+      "pageStatus": 200,
+      "title": "DeepSeek Harness"
+    },
+    {
+      "name": "local",
+      "authStatus": 303,
+      "pageStatus": 200,
+      "title": "DSH Local Build"
+    }
+  ],
+  "limitations": [
+    "Sequential Session/model-context continuity; no automated M1 Handoff",
+    "No file, attachment-byte or terminal-process transfer",
+    "Web authentication, HTML and provider status checked; no browser interaction validation",
+    "Title-cache recovery was separately checked through the local DSH API after this three-stage run"
+  ]
+}
