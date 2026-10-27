@@ -10,8 +10,8 @@
   "scripts": {
     "build": "tsup && pnpm --filter dsh-contextmesh build",
     "typecheck": "tsc --noEmit",
-    "test": "pnpm build && vitest run",
-    "test:integration": "vitest run tests/integration tests/conformance",
+    "test": "pnpm build && node --import tsx scripts/test.ts",
+    "test:integration": "node --import tsx scripts/test.ts tests/integration tests/conformance",
     "start": "node --env-file-if-exists=.env dist/server.js",
     "dev": "node --env-file-if-exists=.env --import tsx apps/server/src/main.ts",
     "cli": "node --env-file-if-exists=.env --import tsx apps/cli/src/main.ts",
