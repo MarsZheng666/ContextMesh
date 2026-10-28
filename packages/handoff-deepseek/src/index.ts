@@ -62,6 +62,20 @@ export async function apply(ctx: Context, config: Config) {
   )
   local = await listenLocal(stateDir, (command) => service.command(command))
   ctx.provide('contextmeshHandoff', service)
+  ctx.inject(['sessionController'], (nativeCtx) => {
+    if (nativeCtx.sessionController.modelRelayVersion !== 1)
+      throw new Error('Install the pinned ContextMesh model relay bridge')
+    nativeCtx.effect(
+      () =>
+        nativeCtx.sessionController.installModelRelay(
+          (request) =>
+            service.command({ action: 'select-model', ...request }) as Promise<{
+              selected: typeof request
+            }>,
+        ),
+      'contextmesh: durable model selection',
+    )
+  })
   ctx.inject(['connection'], (connectionCtx) => {
     connectionCtx.effect(
       () =>

@@ -1,11 +1,24 @@
 import { z } from 'zod'
+import type { ModelRoute } from '../../../protocol/src/model-relay.js'
+const modelChoice = z.object({
+  provider: z.string(),
+  model: z.string(),
+  name: z.string().optional(),
+})
 import { en, type Key } from './locales.js'
 import type { ListDirectory } from './directory.js'
 export const snapshotSchema = z.object({
   nodeId: z.string(),
   name: z.string(),
+  models: z.array(modelChoice).optional(),
+  modelSwitching: z.array(z.string()).optional(),
   nodes: z.array(
-    z.object({ id: z.string(), name: z.string(), online: z.boolean() }),
+    z.object({
+      id: z.string(),
+      name: z.string(),
+      online: z.boolean(),
+      models: z.array(modelChoice).optional(),
+    }),
   ),
   projects: z.array(z.object({ id: z.string(), name: z.string() })),
   mappings: z.array(z.object({ projectId: z.string(), root: z.string() })),
@@ -65,9 +78,96 @@ export interface ViewState {
   error?: Error
   takingOver?: readonly string[]
   projectSetup?: ProjectSetup
+  modelSelecting?: readonly string[]
 }
 export class UiModel {
   private takeovers = new Map<string, Promise<boolean>>()
+  private takeoverTargets = new Map<string, string>()
+  private selections = new Map<
+    string,
+    { promise: Promise<void>; finish: () => void }
+  >()
+  async beforeModelSelect(
+    sessionId: string,
+    previous: ModelRoute | null,
+    target: ModelRoute,
+    t: (key: Key) => string,
+  ): Promise<true | undefined> {
+    try {
+      if (
+        previous &&
+        previous.provider !== target.provider &&
+        !this.confirmTakeover(`${t('providerConfirm')} ${target.provider}`)
+      )
+        return true
+      const data = snapshotSchema.parse(
+        await this.request({ action: 'status' }),
+      )
+      this.set({ ...this.state, data, error: undefined })
+      const session = data.sessions.find((s) => s.id === sessionId)
+      if (session?.activeNodeId && session.activeNodeId !== data.nodeId) {
+        await this.ensureOwned(sessionId, t, undefined, target)
+        return true
+      }
+      if (this.selections.has(sessionId))
+        throw new ControlError('MODEL_RELAY_BUSY', t('MODEL_RELAY_BUSY'))
+      let finish!: () => void
+      const promise = new Promise<void>((resolve) => {
+        finish = resolve
+      })
+      this.selections.set(sessionId, { promise, finish })
+      this.set({
+        ...this.state,
+        modelSelecting: [...(this.state.modelSelecting ?? []), sessionId],
+      })
+      return undefined
+    } catch (error) {
+      this.set({
+        ...this.state,
+        error: error instanceof Error ? error : new Error(String(error)),
+      })
+      return true
+    }
+  }
+  finishModelSelect(sessionId: string) {
+    this.selections.get(sessionId)?.finish()
+    this.selections.delete(sessionId)
+    this.set({
+      ...this.state,
+      modelSelecting: this.state.modelSelecting?.filter(
+        (id) => id !== sessionId,
+      ),
+    })
+  }
+  async waitForModelSelect(sessionId: string, signal?: AbortSignal) {
+    const pending = this.selections.get(sessionId)
+    if (pending)
+      await new Promise<void>((resolve, reject) => {
+        const aborted = () => {
+          cleanup()
+          reject(signal?.reason ?? this.abort.signal.reason)
+        }
+        const cleanup = () => {
+          signal?.removeEventListener('abort', aborted)
+          this.abort.signal.removeEventListener('abort', aborted)
+        }
+        signal?.addEventListener('abort', aborted, { once: true })
+        this.abort.signal.addEventListener('abort', aborted, { once: true })
+        if (signal?.aborted || this.abort.signal.aborted) aborted()
+        void pending.promise.then(() => {
+          cleanup()
+          resolve()
+        })
+      })
+    signal?.throwIfAborted()
+    if (this.abort.signal.aborted) throw this.abort.signal.reason
+    const data = snapshotSchema.parse(await this.request({ action: 'status' }))
+    if (data.modelSwitching?.includes(sessionId))
+      throw new ControlError(
+        'MODEL_RELAY_UNCONFIRMED',
+        en.MODEL_RELAY_UNCONFIRMED,
+      )
+  }
   private setupPending?: {
     sessionId: string
     promise: Promise<boolean>
@@ -184,14 +284,24 @@ export class UiModel {
     sessionId: string,
     t: (key: Key) => string,
     signal?: AbortSignal,
+    targetModel?: ModelRoute,
   ): Promise<boolean> {
     const existing = this.takeovers.get(sessionId)
-    if (existing) return existing
-    const operation = this.acquireHere(sessionId, t, signal)
+    if (existing) {
+      if (
+        targetModel &&
+        this.takeoverTargets.get(sessionId) !== JSON.stringify(targetModel)
+      )
+        throw new ControlError('MODEL_RELAY_BUSY', en.MODEL_RELAY_BUSY)
+      return existing
+    }
+    const operation = this.acquireHere(sessionId, t, signal, targetModel)
     this.takeovers.set(sessionId, operation)
+    this.takeoverTargets.set(sessionId, JSON.stringify(targetModel))
     const clear = () => {
       if (this.takeovers.get(sessionId) === operation)
         this.takeovers.delete(sessionId)
+      this.takeoverTargets.delete(sessionId)
       this.set({
         ...this.state,
         takingOver: this.state.takingOver?.filter((id) => id !== sessionId),
@@ -204,6 +314,7 @@ export class UiModel {
     sessionId: string,
     t: (key: Key) => string,
     signal?: AbortSignal,
+    targetModel?: ModelRoute,
   ): Promise<boolean> {
     const friendly = (code: string) =>
       new ControlError(code, t(code in en ? (code as Key) : 'TAKEOVER_FAILED'))
@@ -221,14 +332,14 @@ export class UiModel {
       !data.mappings.some((m) => m.projectId === session.projectId)
     ) {
       if (!(await this.showProjectSetup(data, session, signal))) return false
-      return this.acquireHere(sessionId, t, signal)
+      return this.acquireHere(sessionId, t, signal, targetModel)
     }
     signal?.throwIfAborted()
     if (
       !this
         .confirmTakeover(`${t('takeoverConfirm')} ${session.activeNodeName ?? t('remote')}
 
-${t('takeoverEffect')}`)
+${t('takeoverEffect')}${targetModel ? '\n\n' + t('targetModel') + ': ' + targetModel.provider + '/' + targetModel.model + '\n' + t('providerNotice') : ''}`)
     )
       return false
     this.set({
@@ -240,6 +351,7 @@ ${t('takeoverEffect')}`)
         action: 'takeover',
         sessionId,
         confirmed: true,
+        ...(targetModel ? { targetModel } : {}),
         operationId: crypto.randomUUID(),
       }),
     )
@@ -374,6 +486,8 @@ ${t('takeoverEffect')}`)
   }
   close() {
     clearInterval(this.timer)
+    for (const selection of this.selections.values()) selection.finish()
+    this.selections.clear()
     this.cancelProjectSetup()
     this.abort.abort()
     this.listeners.clear()

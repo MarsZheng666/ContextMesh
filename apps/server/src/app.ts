@@ -1,4 +1,5 @@
 import Fastify from 'fastify'
+import { registerModelRelayRoutes } from './model-relay.js'
 import { registerHandoffRoutes } from './handoff.js'
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { z } from 'zod'
@@ -85,6 +86,7 @@ export function buildServer(options: ServerOptions) {
     body: z.toJSONSchema(body, { target: 'draft-7' }),
   })
   registerHandoffRoutes(app, options.store, ns)
+  registerModelRelayRoutes(app, options.store, ns)
   app.get('/health/live', async () => ({ ok: true }))
   app.get('/health/ready', async () => {
     await options.store.pool.query('SELECT 1')
@@ -97,8 +99,9 @@ export function buildServer(options: ServerOptions) {
         'takeover-v1',
         'project-setup-v1',
         'directory-handoff-v1',
+        'model-relay-v1',
       ],
-      schemaVersion: 3,
+      schemaVersion: 4,
     }
   })
   app.post('/v1/sessions', { schema: schema(createSchema) }, async (req) =>

@@ -1,8 +1,7 @@
 diff --git a/lib/client.js b/lib/client.js
-index c246e9d5e9375e94b5de4a301f1cb2ccd7ed244f..e99955a3996eaa867f627832617094d0f6f71dce 100644
 --- a/lib/client.js
 +++ b/lib/client.js
-@@ -2272,6 +2272,7 @@ window.__ModuleLoader__.load({
+@@ -2272,6 +2272,7 @@
  				this.sessionId = sessionId;
  				this.remote = remote;
  				this.options = options;
@@ -10,7 +9,7 @@ index c246e9d5e9375e94b5de4a301f1cb2ccd7ed244f..e99955a3996eaa867f627832617094d0
  				this.projections = options.projections ?? new ProjectionValueStore();
  				this.address = options.address;
  				this.parentAvailable = options.parentAvailable;
-@@ -2634,9 +2635,18 @@ window.__ModuleLoader__.load({
+@@ -2634,9 +2635,18 @@
  				this.blankBit = blank;
  				this.notifier.markDirty();
  			}
@@ -29,7 +28,7 @@ index c246e9d5e9375e94b5de4a301f1cb2ccd7ed244f..e99955a3996eaa867f627832617094d0
  				this.notifier.markDirty();
  			}
  			/**
-@@ -3129,7 +3139,8 @@ window.__ModuleLoader__.load({
+@@ -3129,7 +3139,8 @@
  						}
  						this.sessions.get(engaged.sessionId)?.handleBlank(false);
  					},
@@ -39,7 +38,7 @@ index c246e9d5e9375e94b5de4a301f1cb2ccd7ed244f..e99955a3996eaa867f627832617094d0
  				});
  			}
  			effectiveBlank(summary) {
-@@ -3270,6 +3281,7 @@ window.__ModuleLoader__.load({
+@@ -3270,6 +3281,7 @@
  							for (const s of this.summaries) {
  								const session = this.sessions.get(s.sessionId);
  								if (session === void 0) continue;
@@ -47,7 +46,7 @@ index c246e9d5e9375e94b5de4a301f1cb2ccd7ed244f..e99955a3996eaa867f627832617094d0
  								session.handleBlank(this.effectiveBlank(s));
  								session.handleRunning(s.running);
  							}
-@@ -3475,7 +3487,10 @@ window.__ModuleLoader__.load({
+@@ -3475,7 +3487,10 @@
  			handleSessionAdded(summary) {
  				this.mergeSummary(summary);
  				if (!this.disposed && summary.running) this.engagedSessions.add(summary.sessionId);
@@ -59,7 +58,7 @@ index c246e9d5e9375e94b5de4a301f1cb2ccd7ed244f..e99955a3996eaa867f627832617094d0
  				if (summary.projections !== void 0) this.applyListBlock(summary.sessionId, summary.projections);
  			}
  			/**
-@@ -3518,7 +3533,7 @@ window.__ModuleLoader__.load({
+@@ -3518,7 +3533,7 @@
  				if (durableSubagent) this.sessions.get(sessionId)?.handleRunning(false);
  				else this.sessions.get(sessionId)?.handleRemoved();
  				const catalog = this.projectionStores.get(sessionId)?.values().subagentCatalog;
@@ -69,18 +68,21 @@ index c246e9d5e9375e94b5de4a301f1cb2ccd7ed244f..e99955a3996eaa867f627832617094d0
  				this.projectionInflight.get(sessionId)?.controller.abort();
  				this.projectionInflight.delete(sessionId);
 diff --git a/lib/index.js b/lib/index.js
-index 730b8a4116b1a81ecb72273a9629ae55bebbb4c5..cff8809f6f21fd5947e769c035b1b26881673f6f 100644
 --- a/lib/index.js
 +++ b/lib/index.js
-@@ -310,6 +310,7 @@ var ApiSessionAgentController = class {
+@@ -310,8 +310,10 @@
  	* @param selection - validated selection to record and apply.
  	*/
  	selectForNextRequest(agent, selection) {
-+        this.ctx.agents.assertInputAllowed(agent.id);
- 		agent.session.append("model/selection", selection);
+-		agent.session.append("model/selection", selection);
++        this.ctx.agents.assertLifecycleAllowed(agent.id);
++		const committed = agent.session.append("model/selection", selection);
  		this.selectionFor(agent).current = selection;
++        return committed.seq;
  	}
-@@ -1066,10 +1067,12 @@ var SessionCommandController = class {
+ 	/**
+ 	* Let a matching durable request header retire the execution cache.
+@@ -1066,10 +1068,12 @@
  		return { accepted: true };
  	}
  	async resolveAgent(sessionId) {
@@ -97,7 +99,7 @@ index 730b8a4116b1a81ecb72273a9629ae55bebbb4c5..cff8809f6f21fd5947e769c035b1b268
  	rejectCreation(error) {
  		if (remoteErrorOf(error) !== void 0) throw error;
  		if (error instanceof ApiSessionPresetConflict) throw new RemoteError("agent-preset/conflict", error.message, {
-@@ -2671,6 +2674,7 @@ let SessionController = (() => {
+@@ -2671,6 +2675,7 @@
  	let _projections_decorators;
  	let _control_decorators;
  	return class SessionController extends _classSuper {
@@ -105,7 +107,7 @@ index 730b8a4116b1a81ecb72273a9629ae55bebbb4c5..cff8809f6f21fd5947e769c035b1b268
  		static {
  			const _metadata = typeof Symbol === "function" && Symbol.metadata ? Object.create(_classSuper[Symbol.metadata] ?? null) : void 0;
  			_list_decorators = [Remote("list")];
-@@ -2930,7 +2934,8 @@ let SessionController = (() => {
+@@ -2930,7 +2935,8 @@
  		];
  		static Config = z.object({
  			nativeOpen: z.boolean(),
@@ -115,7 +117,7 @@ index 730b8a4116b1a81ecb72273a9629ae55bebbb4c5..cff8809f6f21fd5947e769c035b1b268
  		});
  		agents = __runInitializers(this, _instanceExtraInitializers);
  		commands;
-@@ -2965,7 +2970,8 @@ let SessionController = (() => {
+@@ -2965,7 +2971,8 @@
  				await Promise.allSettled([...this.promotions]);
  			}, "session-controller.promotions");
  			this.history = new SessionHistoryController(ctx, (observation) => {
@@ -125,7 +127,7 @@ index 730b8a4116b1a81ecb72273a9629ae55bebbb4c5..cff8809f6f21fd5947e769c035b1b268
  			});
  			this.listState = new ApiSessionList(ctx, resolved.listWorkSliceMs);
  			this.fileApplications = internals.fileApplications ?? nativeFileApplications;
-@@ -2981,7 +2987,12 @@ let SessionController = (() => {
+@@ -2981,7 +2988,12 @@
  				ctx.emit("api-session/added", this.listState.summaryFor(session));
  			});
  			ctx.on("session/disposed", (session) => {
@@ -138,7 +140,7 @@ index 730b8a4116b1a81ecb72273a9629ae55bebbb4c5..cff8809f6f21fd5947e769c035b1b268
  			});
  			const publishAgentAvailability = ({ agent }) => {
  				if (ctx.sessions.get(agent.id) === agent.session) ctx.emit("api-session/added", this.listState.summaryFor(agent.session));
-@@ -3088,7 +3099,7 @@ let SessionController = (() => {
+@@ -3088,16 +3100,34 @@
  		* @returns the created or reused Session identity and its preset when configured.
  		*/
  		create(request) {
@@ -147,16 +149,37 @@ index 730b8a4116b1a81ecb72273a9629ae55bebbb4c5..cff8809f6f21fd5947e769c035b1b268
  		}
  		/**
  		* Select one Session-local model after explicitly resuming the Session; save the default in the background.
-@@ -3096,7 +3107,7 @@ let SessionController = (() => {
+ 		* @param request - Session identity and requested model selection.
  		* @returns the normalized selection installed for the Session, without waiting for default persistence.
  		*/
- 		selectModel(request) {
+-		selectModel(request) {
 -			return this.commands.selectModel(request);
-+			return this.ctx.agents.activity(request.sessionId,()=>this.commands.selectModel(request));
- 		}
+-		}
++        modelRelayVersion = 1;
++        modelRelay;
++        /** Host-only admission hook; one owner, removed with its plugin scope. */
++        installModelRelay(handler) {
++            if (this.modelRelay) throw new Error("model relay already installed");
++            this.modelRelay = handler;
++            return () => { if (this.modelRelay === handler) this.modelRelay = undefined; };
++        }
++        /** Install a validated selection, including during controlled unpublished setup. Never saves global defaults. */
++        installModelSelection(agent, selection) {
++            this.ctx.agents.assertLifecycleAllowed(agent.id);
++            return this.commands.agents.selectForNextRequest(agent, selection);
++        }
++        async selectModel(request) {
++            if (!this.modelRelay) return this.ctx.agents.activity(request.sessionId,()=>this.commands.selectModel(request));
++            try { return await this.modelRelay(request); }
++            catch (error) {
++                if (error instanceof RemoteError) throw error;
++                throw new RemoteError("session/model-unavailable", String(error?.code ?? "MODEL_RELAY_FAILED") + ": " + String(error?.message ?? error), {});
++            }
++        }
  		/**
  		* Select the first available account model after login when no provider API key is configured.
-@@ -3194,7 +3205,7 @@ let SessionController = (() => {
+ 		* @returns after saving the first available model or retaining the existing default.
+@@ -3194,7 +3224,7 @@
  		* @returns the accepted title and durable event sequence.
  		*/
  		rename(request) {
@@ -165,7 +188,7 @@ index 730b8a4116b1a81ecb72273a9629ae55bebbb4c5..cff8809f6f21fd5947e769c035b1b268
  		}
  		/**
  		* Fork one cold-readable exact event prefix into a new Session. An omitted
-@@ -3227,7 +3238,7 @@ let SessionController = (() => {
+@@ -3227,7 +3257,7 @@
  				...clientTimeZone === void 0 ? {} : { clientTimeZone },
  				...principal === void 0 ? {} : { principal }
  			};
@@ -174,7 +197,7 @@ index 730b8a4116b1a81ecb72273a9629ae55bebbb4c5..cff8809f6f21fd5947e769c035b1b268
  		}
  		/**
  		* Read one image proven reachable from the addressed Session log.
-@@ -3243,7 +3254,7 @@ let SessionController = (() => {
+@@ -3243,7 +3273,7 @@
  		* @returns acknowledgement that the queue mutation was applied.
  		*/
  		updateQueue(request) {
@@ -184,10 +207,9 @@ index 730b8a4116b1a81ecb72273a9629ae55bebbb4c5..cff8809f6f21fd5947e769c035b1b268
  		/**
  		* Cancel one active Agent turn without dropping its pending inbox.
 diff --git a/lib/types/index.d.ts b/lib/types/index.d.ts
-index 08bb851544825573cafc632ff9616d0c4c493790..6fba8fbe7b1f0fa85dd19245e06020920c4dd858 100644
 --- a/lib/types/index.d.ts
 +++ b/lib/types/index.d.ts
-@@ -20,6 +20,8 @@ declare module '@deepseek-ai/cordis' {
+@@ -20,6 +20,8 @@
  }
  /** Session Controller deployment policy. */
  export interface Config {
@@ -196,10 +218,14 @@ index 08bb851544825573cafc632ff9616d0c4c493790..6fba8fbe7b1f0fa85dd19245e0602092
      /** Override platform desktop-opener detection. */
      readonly nativeOpen?: boolean;
      /** Positive integral milliseconds of list work before yielding between complete rows. */
-@@ -44,6 +46,7 @@ export interface SessionControllerInternals {
+@@ -44,6 +46,11 @@
  }
  /** Host service backing the generated `ctx.remote.session` namespace. */
  export declare class SessionController extends TypertRemoteService {
++    readonly modelRelayVersion: 1;
++    installModelRelay(handler: (request: SessionSelectModelRequest) => Promise<SessionSelectModelValue>): () => void;
++    installModelSelection(agent: import('@deepseek-ai/dsh-agent').Agent, selection: Omit<SessionSelectModelRequest, 'sessionId'>): number;
++
 +    readonly lifecycleControlVersion: 1;
      static inject: string[];
      static Config: z<Config, ResolvedConfig>;

@@ -59,7 +59,10 @@ export class HandoffClient {
   private update(record: HandoffRecord, operationId: string = randomUUID()) {
     return { ...this.identity, operationId, revision: record.revision }
   }
-  async register(name: string) {
+  async register(
+    name: string,
+    models: Array<{ provider: string; model: string; name: string }> = [],
+  ) {
     return this.mesh.request('/v1/nodes/register', {
       ...this.identity,
       operationId: randomUUID(),
@@ -69,6 +72,8 @@ export class HandoffClient {
         takeoverVersion: 1,
         projectSetupVersion: 1,
         directoryHandoffVersion: 1,
+        modelRelayVersion: 1,
+        models,
         harness: '0.2.1-rc.3',
         adapter: 'deepseek',
       },
@@ -93,6 +98,15 @@ export class HandoffClient {
           instanceId: z.uuid(),
           online: z.boolean(),
           lastSeen: z.string(),
+          models: z
+            .array(
+              z.object({
+                provider: z.string(),
+                model: z.string(),
+                name: z.string(),
+              }),
+            )
+            .optional(),
         }),
       )
       .parse(await this.mesh.request('/v1/nodes'))
@@ -185,6 +199,7 @@ export class HandoffClient {
     sessionId: string,
     expectedSourceNodeId: string,
     operationId: string = randomUUID(),
+    targetModel?: HandoffManifest['model'],
   ) {
     return takeoverRecord.parse(
       await this.mesh.request(
@@ -194,6 +209,7 @@ export class HandoffClient {
           operationId,
           expectedSourceNodeId,
           confirmed: true,
+          ...(targetModel ? { targetModel } : {}),
         },
       ),
     )

@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto'
+import { z } from 'zod'
 import type { PoolClient } from 'pg'
-import { BasePostgresStore } from './base.js'
+import { ModelRelayPostgresStore } from './model-relay.js'
 import { MeshError } from '../../protocol/src/index.js'
 import {
+  modelRoute,
   takeoverRecord,
   type TakeoverRecord,
   handoffManifest,
@@ -47,7 +49,7 @@ const active = [
   'recovery_required',
 ]
 
-export class PostgresStore extends BasePostgresStore {
+export class PostgresStore extends ModelRelayPostgresStore {
   private record(r: HandoffRow): HandoffRecord {
     return {
       id: r.id,
@@ -193,10 +195,14 @@ export class PostgresStore extends BasePostgresStore {
   async listNodes(ns: string) {
     return (
       await this.pool.query(
-        'SELECT id,name,instance_id AS "instanceId",last_seen AS "lastSeen",last_seen > clock_timestamp()-($2::double precision * interval \'1 millisecond\') AS online FROM cm_nodes WHERE namespace=$1 ORDER BY name,id LIMIT 100',
+        'SELECT id,name,capabilities,instance_id AS "instanceId",last_seen AS "lastSeen",last_seen > clock_timestamp()-($2::double precision * interval \'1 millisecond\') AS online FROM cm_nodes WHERE namespace=$1 ORDER BY name,id LIMIT 100',
         [ns, this.nodeTimeoutMs],
       )
-    ).rows
+    ).rows.map((row) => ({
+      ...row,
+      capabilities: undefined,
+      models: JSON.parse(row.capabilities).models ?? [],
+    }))
   }
   async registerProject(
     ns: string,
@@ -305,6 +311,11 @@ export class PostgresStore extends BasePostgresStore {
         const s = await this.session(db, ns, id)
         if (!s.materialized)
           throw new MeshError('NOT_READY', 'flush the source session first')
+        if (s.active_model_relay)
+          throw new MeshError(
+            'MODEL_RELAY_BUSY',
+            'settle the pending model switch first',
+          )
         if (s.active_handoff)
           throw new MeshError(
             'HANDOFF_IN_PROGRESS',
@@ -347,6 +358,16 @@ export class PostgresStore extends BasePostgresStore {
             'update the same plugin on both devices before taking over a plain-directory conversation',
           )
 
+        if (
+          r.manifest.targetModel &&
+          [sourceNode, targetNode].some(
+            (node) => JSON.parse(node.capabilities).modelRelayVersion !== 1,
+          )
+        )
+          throw new MeshError(
+            'MODEL_RELAY_UNSUPPORTED',
+            'update both devices before changing models during handoff',
+          )
         const h = (
           await db.query(
             'SELECT * FROM cm_handles WHERE namespace=$1 AND id=$2',
@@ -397,7 +418,10 @@ export class PostgresStore extends BasePostgresStore {
             Number(intent.source_epoch) !== r.sourceEpoch ||
             intent.target_node !== r.targetNodeId ||
             intent.target_instance !== target.instance_id ||
-            intent.handoff_operation !== r.operationId
+            intent.handoff_operation !== r.operationId ||
+            JSON.stringify(
+              intent.target_model ? JSON.parse(intent.target_model) : undefined,
+            ) !== JSON.stringify(r.manifest.targetModel)
           )
             throw new MeshError(
               'TAKEOVER_CHANGED',
@@ -594,6 +618,32 @@ export class PostgresStore extends BasePostgresStore {
             'OWNERSHIP_LOST',
             'target initialization or current writer is not confirmed',
           )
+        const targetModel = handoffManifest.parse(
+          this.decode(row.manifest),
+        ).targetModel
+        if (targetModel) {
+          const events = (
+            await db.query(
+              'SELECT event FROM cm_events WHERE namespace=$1 AND session_id=$2 AND seq >= $3 AND seq < $4 ORDER BY seq',
+              [ns, s.id, row.final_seq, r.nextSeq],
+            )
+          ).rows.map((e) =>
+            z
+              .object({ type: z.string(), data: z.unknown() })
+              .parse(this.decode(e.event)),
+          )
+          const last = events.filter((e) => e.type === 'model/selection').at(-1)
+          if (
+            !last ||
+            JSON.stringify(modelRoute.parse(last.data)) !==
+              JSON.stringify(targetModel) ||
+            events.some((e) => e.type === 'request/header')
+          )
+            throw new MeshError(
+              'MODEL_RELAY_UNCONFIRMED',
+              'target model must be saved before activation completes',
+            )
+        }
         await db.query(
           'UPDATE cm_sessions SET active_handoff=NULL WHERE namespace=$1 AND id=$2',
           [ns, s.id],
@@ -917,6 +967,9 @@ export class PostgresStore extends BasePostgresStore {
       errorCode: row.error_code,
       error: row.error,
       expiresAt: new Date(String(row.expires_at)).getTime(),
+      ...(row.target_model
+        ? { targetModel: JSON.parse(String(row.target_model)) }
+        : {}),
     })
   }
   private async expireTakeovers(db: Pick<PoolClient, 'query'>, ns: string) {
@@ -932,6 +985,7 @@ export class PostgresStore extends BasePostgresStore {
       operationId: string
       expectedSourceNodeId: string
       confirmed: true
+      targetModel?: HandoffManifest['model']
     },
   ) {
     return this.operation(
@@ -950,6 +1004,11 @@ export class PostgresStore extends BasePostgresStore {
           throw new MeshError(
             'TAKEOVER_UNAVAILABLE',
             'cannot confirm a live source writer; explicit recovery may be required',
+          )
+        if (session.active_model_relay)
+          throw new MeshError(
+            'MODEL_RELAY_BUSY',
+            'settle the pending model switch first',
           )
         if (session.active_handoff)
           throw new MeshError(
@@ -1002,7 +1061,10 @@ export class PostgresStore extends BasePostgresStore {
         if (prior) {
           if (
             prior.target_node === request.nodeId &&
-            prior.target_instance === request.instanceId
+            prior.target_instance === request.instanceId &&
+            JSON.stringify(
+              prior.target_model ? JSON.parse(prior.target_model) : undefined,
+            ) === JSON.stringify(request.targetModel)
           )
             return this.takeover(prior)
           throw new MeshError(
@@ -1012,7 +1074,7 @@ export class PostgresStore extends BasePostgresStore {
         }
         const row = (
           await db.query(
-            'INSERT INTO cm_takeovers(namespace,id,session_id,incarnation,source_node,source_instance,source_handle,source_epoch,target_node,target_instance,handoff_operation) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *',
+            'INSERT INTO cm_takeovers(namespace,id,session_id,incarnation,source_node,source_instance,source_handle,source_epoch,target_node,target_instance,handoff_operation,target_model) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *',
             [
               ns,
               request.operationId,
@@ -1025,6 +1087,7 @@ export class PostgresStore extends BasePostgresStore {
               request.nodeId,
               request.instanceId,
               randomUUID(),
+              request.targetModel ? JSON.stringify(request.targetModel) : null,
             ],
           )
         ).rows[0]!

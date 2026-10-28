@@ -14,6 +14,10 @@ const names = new Set([
   'handoff-cancel',
   'resume',
   'history',
+  'models',
+  'model-select',
+  'model-relay-status',
+  'takeover',
 ])
 export async function runLocal(input: string[]): Promise<boolean> {
   const args = [...input],
@@ -26,10 +30,69 @@ export async function runLocal(input: string[]): Promise<boolean> {
     stateDir = args[index + 1]!
     args.splice(index, 2)
   }
-  const [name, id, value] = args
+  const option = (name: string) => {
+    const index = args.indexOf(name)
+    if (index < 0) return undefined
+    const value = args[index + 1]
+    if (!value || value.startsWith('--'))
+      throw new Error(name + ' requires a value')
+    args.splice(index, 2)
+    return value
+  }
+  const provider = option('--provider'),
+    chosen = option('--model'),
+    reasoningEffort = option('--reasoning-effort'),
+    operationId = option('--operation-id')
+  const confirm = args.includes('--confirm')
+  if (confirm) args.splice(args.indexOf('--confirm'), 1)
+  if ((provider && !chosen) || (!provider && chosen))
+    throw new Error('--provider and --model must be supplied together')
+  const targetModel =
+    provider && chosen
+      ? {
+          provider,
+          model: chosen,
+          ...(reasoningEffort ? { reasoningEffort } : {}),
+        }
+      : undefined
+  const [name, id, value, modelId] = args
   if (!name || !names.has(name)) return false
   let command: unknown
   switch (name) {
+    case 'models':
+      command = { action: 'models' }
+      break
+    case 'model-relay-status':
+      if (!id) throw new Error('Usage: model-relay-status <operation-id>')
+      command = { action: 'model-relay-status', operationId: id }
+      break
+    case 'model-select':
+      if (!id || !value || !modelId)
+        throw new Error(
+          'Usage: model-select <session-id> <provider> <model> [--reasoning-effort value] [--operation-id uuid]',
+        )
+      command = {
+        action: 'select-model',
+        sessionId: id,
+        provider: value,
+        model: modelId,
+        ...(reasoningEffort ? { reasoningEffort } : {}),
+        ...(operationId ? { operationId } : {}),
+      }
+      break
+    case 'takeover':
+      if (!id || !confirm)
+        throw new Error(
+          'Usage: takeover <session-id> --confirm [--provider provider --model model]',
+        )
+      command = {
+        action: 'takeover',
+        sessionId: id,
+        confirmed: true,
+        ...(targetModel ? { targetModel } : {}),
+        ...(operationId ? { operationId } : {}),
+      }
+      break
     case 'devices':
     case 'projects':
     case 'remote-list':
@@ -42,13 +105,18 @@ export async function runLocal(input: string[]): Promise<boolean> {
       break
     case 'map':
       if (!id || !value)
-        throw new Error('Usage: map <project-id> <local-git-root>')
+        throw new Error('Usage: map <project-id> <local-directory>')
       command = { action: 'mapping', projectId: id, root: value }
       break
     case 'handoff':
       if (!id || !value)
         throw new Error('Usage: handoff <session-id> <target-node-id>')
-      command = { action: 'handoff', sessionId: id, targetNodeId: value }
+      command = {
+        action: 'handoff',
+        sessionId: id,
+        targetNodeId: value,
+        ...(targetModel ? { targetModel } : {}),
+      }
       break
     case 'handoff-cancel':
       if (!id) throw new Error('Usage: handoff-cancel <handoff-id>')

@@ -9,9 +9,16 @@ import { brandString } from '@deepseek-ai/dsh-brand'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { en, zh } from './locales.js'
 import { UiModel } from './state.js'
+import type { ModelRoute } from '../../../protocol/src/model-relay.js'
 import { RemotePanel, HandoffDock, SessionDevice } from './view.js'
 declare module '@deepseek-ai/cordis' {
   interface Events {
+    'model-selection/before-select'(
+      sessionId: SessionId,
+      previous: ModelRoute | null,
+      target: ModelRoute,
+    ): true | undefined | Promise<true | undefined>
+    'model-selection/after-select'(sessionId: SessionId): void
     'conversation/before-send'(
       sessionId: SessionId,
       signal?: AbortSignal,
@@ -23,7 +30,17 @@ export function apply(ctx: Context) {
   const model = new UiModel(undefined, (path, signal) =>
     ctx.uiWorkspace.listDirectory(path, signal),
   )
+  ctx.on('model-selection/before-select', (id, previous, target) =>
+    model.beforeModelSelect(
+      id,
+      previous,
+      target,
+      ctx.locale.bind('contextmesh'),
+    ),
+  )
+  ctx.on('model-selection/after-select', (id) => model.finishModelSelect(id))
   ctx.on('conversation/before-send', async (id, signal) => {
+    await model.waitForModelSelect(id, signal)
     return (await model.ensureOwned(id, ctx.locale.bind('contextmesh'), signal))
       ? undefined
       : true

@@ -25,12 +25,14 @@ export interface Row {
   lease_valid: boolean
   recovery_required: boolean
   active_handoff: string | null
+  active_model_relay: string | null
 }
 interface HandleRow {
   id: string
   session_id: string
   incarnation: string
   access: 'read' | 'write'
+  instance_id: string
   epoch: string
   closed: boolean
 }
@@ -294,6 +296,11 @@ export class BasePostgresStore {
         if (!row.materialized && row.creator_instance !== request.instanceId)
           throw new MeshError('NOT_FOUND', `session "${id}" not found`, 404)
         if (request.access === 'write') {
+          if (row.active_model_relay)
+            throw new MeshError(
+              'MODEL_RELAY_BUSY',
+              'settle the pending model switch first',
+            )
           if (row.active_handoff)
             throw new MeshError(
               'HANDOFF_IN_PROGRESS',

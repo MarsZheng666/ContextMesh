@@ -1,5 +1,26 @@
 export const en = {
   app: 'ContextMesh',
+  targetModel: 'Continue with model',
+  keepModel: 'Keep the current model',
+  switchingModel: 'Saving model selection…',
+  providerConfirm:
+    'Future messages will send the required conversation history to this provider. Continue?',
+  providerNotice:
+    'The next request sends the required conversation history to the selected provider.',
+  MODEL_RELAY_BUSY:
+    'Wait for the current model switch or handoff to finish. Your draft is kept.',
+  MODEL_RELAY_UNCONFIRMED:
+    'The model selection has not been confirmed saved. Keep this device open and check its connection before retrying.',
+  MODEL_RELAY_UNSUPPORTED:
+    'Update ContextMesh server and the same plugin on both devices before switching models.',
+  MODEL_RELAY_CHANGED:
+    'The conversation or model changed. Refresh and select the model again.',
+  MODEL_CONTEXT_TOO_SMALL:
+    'This model may not fit the conversation. Choose a larger context window; history has been kept.',
+  MODEL_CAPABILITIES_UNKNOWN:
+    'This model must declare text support and its context window before relay.',
+  MODEL_HISTORY_UNSUPPORTED:
+    'Finish pending tools and remove unsupported attachments before switching models.',
   DIRECTORY_HANDOFF_UNSUPPORTED:
     'Update the server and the same plugin on both devices to continue conversations from plain folders.',
   browseDirectory: 'Browse folders…',
@@ -141,6 +162,22 @@ export const en = {
 export type Key = keyof typeof en
 export const zh: Record<Key, string> = {
   app: 'ContextMesh',
+  targetModel: '继续使用的模型',
+  keepModel: '沿用当前模型',
+  switchingModel: '正在保存模型选择…',
+  providerConfirm: '后续消息会将所需会话历史发送给此提供方，是否继续？',
+  providerNotice: '下一次请求会将所需会话历史发送给选定的模型提供方。',
+  MODEL_RELAY_BUSY: '请等待当前模型切换或交接完成，草稿已保留。',
+  MODEL_RELAY_UNCONFIRMED:
+    '尚未确认模型选择已保存，请保持本设备运行并检查连接后重试。',
+  MODEL_RELAY_UNSUPPORTED:
+    '请更新 ContextMesh 服务端及两端的同一个插件后再切换模型。',
+  MODEL_RELAY_CHANGED: '会话或模型已变化，请刷新后重新选择。',
+  MODEL_CONTEXT_TOO_SMALL:
+    '当前模型的上下文窗口可能不足，请选择更大窗口的模型，历史已保留。',
+  MODEL_CAPABILITIES_UNKNOWN: '模型需声明文本支持及上下文窗口，才能用于接力。',
+  MODEL_HISTORY_UNSUPPORTED:
+    '请先完成待处理工具，并移除不支持的附件后再切换模型。',
   DIRECTORY_HANDOFF_UNSUPPORTED:
     '请更新服务端和两端的同一个插件，以接管普通目录中的会话。',
   browseDirectory: '浏览选择目录…',
