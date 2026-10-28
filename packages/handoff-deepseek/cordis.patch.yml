@@ -1,0 +1,17 @@
+- id: session-controller
+  config: { backgroundActivation: false }
+- id: session-persistence-jsonl
+  disabled: true
+- id: agent-loop
+  inject: [sessionPersistence]
+- insert:
+    - id: contextmesh-session-persistence
+      name: dsh-contextmesh
+      config:
+        endpoint: !!js process.env.CONTEXTMESH_ENDPOINT || 'http://127.0.0.1:8787'
+        tokenEnv: CONTEXTMESH_TOKEN
+- insert:
+    - id: contextmesh-handoff
+      name: dsh-contextmesh-handoff
+      config:
+        nodeName: !!js process.env.CONTEXTMESH_NODE_NAME || undefined

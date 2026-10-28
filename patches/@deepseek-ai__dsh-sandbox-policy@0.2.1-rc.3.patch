@@ -1,0 +1,38 @@
+diff --git a/lib/index.js b/lib/index.js
+index 38b7b6c35bdda8edad721fe1f1944cd527d67e48..60fac6b795c3e6471aa0f606e47de8dc8798369c 100644
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -94,6 +94,10 @@ const sandboxModeStateSchema = z.union([
+ * mode log and immutable cwd travel together to every enforcing capability.
+ */
+ var SandboxPolicyService = class extends Service {
++ workspaceControlVersion = 1;
++ machineWorkspaces = new WeakMap();
++ bindWorkspace(session, root) { this.machineWorkspaces.set(session, resolveWorkspaceRoot(root)); }
++
+ 	static Config = z$1.object({
+ 		mode: z$1.union([
+ 			"read-only",
+@@ -142,7 +146,7 @@ var SandboxPolicyService = class extends Service {
+ 		const { session } = request;
+ 		return {
+ 			mode: request.mode ?? (session === void 0 ? void 0 : this.overrideOf(session)) ?? this.defaultMode,
+-			workspaceRoot: resolveWorkspaceRoot(session?.header.cwd ?? this.workspaceRoot),
++			workspaceRoot: resolveWorkspaceRoot((session === undefined ? undefined : this.machineWorkspaces.get(session)) ?? session?.header.cwd ?? this.workspaceRoot),
+ 			...session === void 0 ? {} : { sessionId: session.id }
+ 		};
+ 	}
+diff --git a/lib/types/index.d.ts b/lib/types/index.d.ts
+index d948701edc6d9ed7045d11c7bc499a7aebb19f09..cf5737637e9f496f9bc32bd7c792d57fc3e90991 100644
+--- a/lib/types/index.d.ts
++++ b/lib/types/index.d.ts
+@@ -69,6 +69,9 @@ declare module '@deepseek-ai/dsh-session-projection/types' {
+  * mode log and immutable cwd travel together to every enforcing capability.
+  */
+ export declare class SandboxPolicyService extends Service {
++    readonly workspaceControlVersion: 1;
++    /** Bind an approved machine-local workspace without changing historical Session data or mode. */
++    bindWorkspace(session: Session, root: string): void;
+     static Config: z<Config>;
+     static inject: string[];
+     /** The deployment default mode — the fallback beneath a session override. */

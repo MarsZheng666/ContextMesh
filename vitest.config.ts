@@ -1,7 +1,7 @@
 import { defineConfig } from 'vitest/config'
 export default defineConfig({
   test: {
-    include: ['tests/**/*.spec.ts'],
+    include: ['tests/**/*.spec.{ts,tsx}'],
     fileParallelism: false,
     // Keep network I/O scheduling live while contracts advance batching timers.
     fakeTimers: {

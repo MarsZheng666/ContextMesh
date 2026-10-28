@@ -1,0 +1,14 @@
+diff --git a/lib/client.js b/lib/client.js
+index a557fe74fd2bdfc23e071588a104b76a29862113..f31f5a73ae92aaf8aeb68a0d51c15b15b14c5c71 100644
+--- a/lib/client.js
++++ b/lib/client.js
+@@ -4683,6 +4683,9 @@ window.__ModuleLoader__.load({
+ 			* @returns the Host admission outcome; local attachment preparation failures reject.
+ 			*/
+ 			async sendSession(session, text, attachmentIds, mode, signal) {
++                // Defer prompt admission until an extension has confirmed local execution ownership.
++                if (await this.ctx.serial("conversation/before-send", session.sessionId, signal) === true) return { kind: "error" };
++                signal?.throwIfAborted();
+ 				const attachments = this.resolveDraftAttachments(attachmentIds);
+ 				if (attachments.length !== attachmentIds.length) throw new Error("conversation.sendSession: one or more draft attachments are no longer available");
+ 				const uploads = this.fileUploads.getSnapshot();

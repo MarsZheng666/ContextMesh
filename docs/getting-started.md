@@ -1,5 +1,7 @@
 # Getting started
 
+Install one complete plugin for remote persistence, handoff and confirmed takeover.
+
 This guide connects a DeepSeek Harness profile to a self-hosted ContextMesh service. Use Node.js 24.9+, pnpm 11.25.0, and DeepSeek Harness 0.2.1-rc.3.
 
 ## Build and configure
@@ -49,24 +51,17 @@ The API defaults to `http://127.0.0.1:8787`. `GET /health/ready` requires the co
 
 ## Install the Harness plugin
 
-Use a compatible `dsh` installation. For example:
+Use the pinned runtime built in this repository and install the single complete plugin from its root:
 
 ```sh
-npm install -g @deepseek-ai/dsh@0.2.1-rc.3
-```
-
-From the ContextMesh repository root, export the service connection settings and install the built plugin into the intended profile:
-
-```sh
+export DSH_HOME="$HOME/.dsh-contextmesh"
 export CONTEXTMESH_ENDPOINT=http://127.0.0.1:8787
 export CONTEXTMESH_TOKEN='your-token-from-.env'
-dsh plugin --profile web add "file:$PWD/packages/adapter-deepseek"
-dsh --profile web
+pnpm exec dsh plugin --profile web add "link:$PWD/packages/handoff-deepseek"
+pnpm exec dsh --profile web
 ```
 
-Harness does not automatically load the ContextMesh repository's `.env`; the plugin reads its token from the launching environment. Install into a separate profile or `DSH_HOME` if you want to keep an existing setup independent.
-
-The bundle disables `session-persistence-jsonl` and mounts the remote provider. Native Session operations then use ContextMesh. The service stores session logs; DSH continues to provide the chat UI and agent runtime.
+The complete plugin loads persistence internally and creates only one ContextMesh installation entry. See the [handoff guide](handoff.md) for device names, directory mapping, handoff and confirmed takeover before sending. Harness reads the service token from its launching environment rather than automatically loading this repository's `.env`.
 
 ### sdk-minimal profiles
 

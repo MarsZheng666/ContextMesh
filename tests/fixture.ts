@@ -47,6 +47,11 @@ export async function fixture() {
     )
     await app.close()
     for (const table of [
+      'cm_session_summaries',
+      'cm_handoffs',
+      'cm_project_mappings',
+      'cm_projects',
+      'cm_nodes',
       'cm_events',
       'cm_handles',
       'cm_operations',
@@ -63,6 +68,9 @@ export async function fixture() {
       throw new AggregateError(errors, 'context teardown failed')
   })
   return {
+    defer: (cleanup: () => Promise<void>) => {
+      cleanups.push(cleanup)
+    },
     store,
     app,
     namespace,

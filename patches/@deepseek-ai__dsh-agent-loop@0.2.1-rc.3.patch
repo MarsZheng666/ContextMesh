@@ -1,0 +1,79 @@
+diff --git a/lib/index.js b/lib/index.js
+index 332c382bc90be78ab38b595c99f046f9d15d3f27..8ea42c22ffc9b7dd74a3701d2e216fafc8457cda 100644
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -71,7 +71,8 @@ var ReactLoopInbox = class {
+ 	projections;
+ 	session;
+ 	dispatch;
+-	constructor(projections, session, dispatch) {
++	constructor(projections, session, dispatch, admit = () => {}) {
++        this.admit = admit;
+ 		this.projections = projections;
+ 		this.session = session;
+ 		this.dispatch = dispatch;
+@@ -156,7 +157,9 @@ var ReactLoopInbox = class {
+ 	* @param inserted - messages to insert at the resolved position.
+ 	* @returns messages removed by the splice.
+ 	*/
+-	splice(target, start, deleteCount, inserted) {
++	spliceRuntime(target, start, deleteCount, inserted) { return this.mutate(target, start, deleteCount, inserted, true); }
++    splice(target, start, deleteCount, inserted) {
++        if (inserted.length) this.admit();
+ 		return this.mutate(target, start, deleteCount, inserted, true);
+ 	}
+ 	/** Locate one pending identity across both owned lists. */
+@@ -777,7 +780,7 @@ var ReactLoopAgent = class {
+ 		this.dispatch = agentEvents(loopCtx, this);
+ 		this.scope = createScope(loopCtx, this);
+ 		this.ctx = this.scope.ctx;
+-		this.inbox = new ReactLoopInbox(this.ctx.sessionProjections, session, this.dispatch);
++		this.inbox = new ReactLoopInbox(this.ctx.sessionProjections, session, this.dispatch, () => loopCtx.agents.assertInputAllowed(id));
+ 		/* v8 ignore next -- the loop registers its own turnBoundary unit, so the key is always present */
+ 		const lastTurn = this.loopCtx.sessionProjections.stateOf(session, "turnBoundary")?.lastTurn ?? 0;
+ 		this.phase = {
+@@ -798,6 +801,7 @@ var ReactLoopAgent = class {
+ 		if (status !== previousStatus) this.dispatch.emit("agent/status", { status });
+ 	}
+ 	send(message, target, wakeup) {
++        this.loopCtx.agents.assertInputAllowed(this.id);
+ 		const wakingAfterAbort = wakeup && this.phase.kind !== "idle" && this.phase.abort.signal.aborted;
+ 		const resolvedTarget = wakingAfterAbort ? "next-turn" : target;
+ 		this.inbox.splice(resolvedTarget, Infinity, 0, [message]);
+@@ -820,6 +824,7 @@ var ReactLoopAgent = class {
+ 		if (this.phase.kind !== "idle") this.phase.abort.abort(cause);
+ 	}
+ 	runMaintenance(job) {
++        this.loopCtx.agents.assertLifecycleAllowed(this.id);
+ 		if (this.phase.kind !== "idle") throw new Error(`agent "${this.id}" already has active work`);
+ 		const done = Promise.withResolvers();
+ 		const maintenance = {
+@@ -1163,7 +1168,7 @@ var ReactLoopAgent = class {
+ 				if (finish.kind === "max-tokens") return { kind: "max-tokens" };
+ 				const toolCalls = message.content.filter((block) => block.type === "tool-call");
+ 				if (toolCalls.length === 0) return { kind: "completed" };
+-				const { concluded } = await executeToolCalls(this.loopCtx, turn, step, toolCalls, signal, (context) => this.inbox.splice("next-step", this.inbox.nextStep.length, 0, [context]));
++				const { concluded } = await executeToolCalls(this.loopCtx, turn, step, toolCalls, signal, (context) => this.inbox.spliceRuntime("next-step", this.inbox.nextStep.length, 0, [context]));
+ 				return concluded ? { kind: "completed" } : null;
+ 			} catch (error) {
+ 				if (!live.ended) live.abandon();
+@@ -1541,6 +1546,7 @@ function validateConfiguredAgents(agents) {
+ }
+ /** Concrete agent factory and driver service. */
+ var AgentLoop = class extends Service {
++ controlVersion = 1;
+ 	static inject = [
+ 		"agents",
+ 		"sessions",
+diff --git a/lib/types/index.d.ts b/lib/types/index.d.ts
+index be9292f235ee91af25cb92ea853a16865b87875a..47321a6e22e890c0eb19ca23a87a2186c421eee8 100644
+--- a/lib/types/index.d.ts
++++ b/lib/types/index.d.ts
+@@ -97,6 +97,7 @@ export interface Config {
+ }
+ /** Concrete agent factory and driver service. */
+ export declare class AgentLoop extends Service implements AgentFactory {
++    readonly controlVersion: 1;
+     static inject: string[];
+     /** Runtime schema for declarative agents. */
+     static Config: z<{

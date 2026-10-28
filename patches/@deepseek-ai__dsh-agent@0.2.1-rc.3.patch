@@ -1,0 +1,147 @@
+diff --git a/lib/index.js b/lib/index.js
+index 1003c2c4d75e6dd32e8cc5499f5040155798c3e0..e4ee75b0a35ea1982911970b7d0c372c7abf56f9 100644
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -319,7 +319,84 @@ const DISPOSED_INITIATOR_MESSAGE = "agent initiator scope is disposed";
+ * boundaries. Returned Promise boundaries drain during teardown, except a
+ * nested lineage that starts an owning-fiber unload is excluded from its own drain.
+ */
++// ContextMesh lifecycle control v1: explicit, instance-owned admission and stop authority.
+ var AgentRegistry = class extends Service {
++ controlVersion = 1;
++ controls = new Map();
++ controlRuns = new AsyncLocalStorage();
++ controlPending = new Map();
++ controlHandles = new WeakMap();
++ controlError(code, id) {
++  return Object.assign(new Error(`session "${id}": ${code}`), { name: "AgentControlError", code });
++ }
++ isControlled(id) { return this.controls.has(id); }
++ assertInputAllowed(id) {
++  if (this.controls.has(id)) throw this.controlError("SESSION_FROZEN", id);
++ }
++ assertLifecycleAllowed(id) {
++  const record = this.controls.get(id);
++  if (record && this.controlRuns.getStore()?.record !== record) throw this.controlError("SESSION_FROZEN", id);
++ }
++ lifecycleOptions(id, options) {
++  const scope = this.controlRuns.getStore();
++  if (!scope?.setup || scope.record !== this.controls.get(id)) return options;
++  const extra = scope.setup;
++  return {...options, setup: async (ctx, agent) => {
++   const first = await options.setup?.(ctx, agent);
++   const second = await extra(ctx, agent);
++   return {commit() { first?.commit(); second?.commit(); }};
++  }};
++ }
++ activity(id, operation) {
++  this.assertInputAllowed(id);
++  const pending=this.controlPending.get(id)??new Set(); this.controlPending.set(id,pending);
++  const result=Promise.resolve().then(operation); pending.add(result);
++  const done=()=>{pending.delete(result);if(!pending.size)this.controlPending.delete(id)};
++  result.then(done,done); return result;
++ }
++ trackLifecycle(id, build) {
++  this.assertLifecycleAllowed(id);
++  const pending = this.controlPending.get(id) ?? new Set();
++  this.controlPending.set(id, pending);
++  const operation = Promise.resolve().then(build).then(async handle => {
++   try { this.assertLifecycleAllowed(id); }
++   catch (error) { await handle.dispose(); throw error; }
++   this.controlHandles.set(handle.agent, handle);
++   return handle;
++  });
++  pending.add(operation);
++  const settled = () => { pending.delete(operation); if (!pending.size) this.controlPending.delete(id); };
++  operation.then(settled, settled);
++  return operation;
++ }
++ acquireControl(id) {
++  if (this.controls.has(id)) throw this.controlError("SESSION_FROZEN", id);
++  const record = {};
++  this.controls.set(id, record);
++  const assertHeld = () => { if (this.controls.get(id) !== record) throw this.controlError("CONTROL_RELEASED", id); };
++  return {
++   sessionId: id,
++   run: (operation, setup) => { assertHeld(); return this.controlRuns.run({record, setup}, operation); },
++   ownedHandle: () => { assertHeld(); const agent=this.get(id), handle=agent && this.controlHandles.get(agent); if (!handle) throw this.controlError("UNSUPPORTED_OWNER",id); return handle; },
++   quiesce: async () => { assertHeld(); await Promise.allSettled([...(this.controlPending.get(id) ?? [])]); assertHeld(); },
++   stop: async () => {
++    assertHeld();
++    await Promise.allSettled([...(this.controlPending.get(id) ?? [])]);
++    assertHeld();
++    const agent = this.get(id);
++    if (!agent) {
++     if (this.ctx.get("sessions")?.get(id)) throw this.controlError("UNSUPPORTED_OWNER", id);
++     return;
++    }
++    const handle = this.controlHandles.get(agent);
++    if (!handle) throw this.controlError("UNSUPPORTED_OWNER", id);
++    if (agent.status !== "idle") throw this.controlError("AGENT_BUSY", id);
++    if (agent.inbox.nextTurn.length || agent.inbox.nextStep.length) throw this.controlError("PENDING_INPUT", id);
++    await handle.dispose();
++   },
++   release: () => { if (this.controls.get(id) === record) this.controls.delete(id); }
++  };
++ }
+ 	store = /* @__PURE__ */ new Map();
+ 	factory;
+ 	initiators = new AsyncLocalStorage();
+@@ -454,7 +531,7 @@ var AgentRegistry = class extends Service {
+ 		const ownerCtx = this.ctx;
+ 		const { target } = this.requireFactory();
+ 		const receiver = getTraceable(ownerCtx, target);
+-		return Reflect.apply(target.createAgent, receiver, [ownerCtx, options]);
++		return this.trackLifecycle(options.sessionId, () => Reflect.apply(target.createAgent, receiver, [ownerCtx, this.lifecycleOptions(options.sessionId, options)]));
+ 	}
+ 	/**
+ 	* Load a persisted session and resume an agent on it through the registered
+@@ -467,7 +544,7 @@ var AgentRegistry = class extends Service {
+ 		const ownerCtx = this.ctx;
+ 		const { target } = this.requireFactory();
+ 		const receiver = getTraceable(ownerCtx, target);
+-		return Reflect.apply(target.resume, receiver, [ownerCtx, options]);
++		return this.trackLifecycle(options.resumeSessionId, () => Reflect.apply(target.resume, receiver, [ownerCtx, this.lifecycleOptions(options.resumeSessionId, options)]));
+ 	}
+ 	/**
+ 	* Register a live agent with source `startup`. Rejects if the id is already registered or a
+@@ -511,6 +588,7 @@ var AgentRegistry = class extends Service {
+ 	*/
+ 	enter(agent, owner) {
+ 		const id = agent.id;
++        this.assertLifecycleAllowed(id);
+ 		if (id !== agent.session.id) throw new Error(`agent id "${id}" does not match session id "${agent.session.id}"`);
+ 		const carrier = scopeTarget(agent, agent);
+ 		if (this.store.has(id)) throw new Error(`agent "${id}" is already registered`);
+diff --git a/lib/types/index.d.ts b/lib/types/index.d.ts
+index 7554fe521964858f8464212534334507e1a7e632..36556f966b551b7398963a29ca1a9abade5f7b48 100644
+--- a/lib/types/index.d.ts
++++ b/lib/types/index.d.ts
+@@ -195,7 +195,27 @@ export interface AgentFactory {
+  * boundaries. Returned Promise boundaries drain during teardown, except a
+  * nested lineage that starts an owning-fiber unload is excluded from its own drain.
+  */
++/** Exclusive input freeze and controlled lifecycle authority. Release only after owned work settles. */
++export interface AgentControl {
++    readonly sessionId: SessionId;
++    /** Allow create/resume/maintenance in this asynchronous scope; direct input stays frozen. */
++    run<T>(operation: () => T, setup?: AgentSetup): T;
++    /** Return the actual registry-tracked lifecycle handle while this control is held. */
++    ownedHandle(): AgentHandle;
++    /** Join admitted creation, then dispose an idle, empty-inbox, registry-owned Agent. */
++    quiesce(): Promise<void>;
++    stop(): Promise<void>;
++    /** Reopen admission. The caller must settle stop and controlled resume before release. */
++    release(): void;
++}
+ export declare class AgentRegistry extends Service {
++    readonly controlVersion: 1;
++    acquireControl(id: SessionId): AgentControl;
++    activity<T>(id: SessionId, operation: () => Promise<T>): Promise<T>;
++    /** Whether an explicit lifecycle control currently owns this Session. */
++    isControlled(id: SessionId): boolean;
++    assertInputAllowed(id: SessionId): void;
++    assertLifecycleAllowed(id: SessionId): void;
+     private store;
+     private factory;
+     private readonly initiators;
