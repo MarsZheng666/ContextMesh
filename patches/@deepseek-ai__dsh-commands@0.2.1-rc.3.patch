@@ -1,0 +1,16 @@
+diff --git a/lib/index.js b/lib/index.js
+index bc72ae650e3cb6e04bb0244927e8f3cf60609492..8ccce6d99bc45c4dd5fa70a78737f68e14024e0c 100644
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -325,6 +325,11 @@ let CommandRuntime = (() => {
+ 		*   `undefined` when syntax or name does not resolve.
+ 		*/
+ 		async execute(agent, line, submittedAttachments, signal) {
++            const registry=this.ctx.get("agents");
++            const run=()=>this.executeAdmitted(agent,line,submittedAttachments,signal);
++            return registry?.activity ? registry.activity(agent.id,run) : run();
++        }
++        async executeAdmitted(agent, line, submittedAttachments, signal) {
+ 			const parsed = parseCommand(line);
+ 			if (parsed === void 0) return void 0;
+ 			const command = this.view(agent).get(parsed.name);

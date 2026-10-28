@@ -8,18 +8,19 @@ ContextMesh gives agent sessions a shared home beyond a single machine. It prese
 
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) is the first integration. The longer-term goal is a model-independent context service for cross-machine handoff, cross-model relay, and different coding agents.
 
-[Getting started](docs/getting-started.md) · [Plugin API](docs/api/deepseek-adapter.md) · [Deployment](docs/deployment.md)
+[Getting started](docs/getting-started.md) · [Plugin API](docs/api/deepseek-adapter.md) · [Handoff](docs/handoff.md) · [Deployment](docs/deployment.md)
 
 ## Developer preview
 
-ContextMesh is in **developer preview**. The current release provides remote Session storage and recovery for DeepSeek Harness **0.2.1-rc.3**. APIs may change as the project evolves.
+ContextMesh is in **developer preview**. M1 provides remote Session storage and coordinated cross-machine handoff for the pinned DeepSeek Harness **0.2.1-rc.3** runtime. APIs may change as the project evolves.
 
-Automatic handoff, workspace synchronization, and cross-model relay are planned. Today, close the source session before resuming it elsewhere, and prepare the target workspace separately.
+Hand off a conversation to a folder on another device, with shared titles, a remote session panel and a single writer. Plain folders need no Git; code workspaces still require the same clean Git commit on both devices. M1 requires the explicit DSH compatibility patches shipped in this repository. File synchronization and cross-model relay remain planned.
 
 ## What it does
 
 - **Preserve native history.** Store messages, tool calls, tool results, and Session events without replacing them with summaries.
-- **Resume across machines.** Connect multiple Harness installations to the same service and continue a session after its writer closes.
+- **Hand off across machines.** Validate both workspaces, stop the source Agent, and restore its conversation on the designated device.
+- **Find shared sessions.** Browse project groups, shared titles, history, current ownership and progress from the DSH sidebar.
 - **Keep one writer.** Leases and write epochs prevent competing clients from appending to the same session.
 - **Self-host the storage.** Run the HTTP service with PostgreSQL, using a local connection, an SSH tunnel, or HTTPS.
 
@@ -68,16 +69,16 @@ The API listens on `http://127.0.0.1:8787`. Local database files remain in `.con
 
 ### 3. Connect DeepSeek Harness
 
-From the repository root, set the same token used by the service and install the built plugin into your Web profile:
+Use the pinned, patched runtime built above and install the complete plugin. It includes remote persistence and the handoff UI in one installed entry:
 
 ```sh
 export CONTEXTMESH_ENDPOINT=http://127.0.0.1:8787
 export CONTEXTMESH_TOKEN='your-token-from-.env'
-dsh plugin --profile web add "file:$PWD/packages/adapter-deepseek"
-dsh --profile web
+pnpm exec dsh plugin --profile web add "link:$PWD/packages/handoff-deepseek"
+pnpm exec dsh --profile web
 ```
 
-The plugin replaces the profile's JSONL persistence provider. See [getting started](docs/getting-started.md) for profile setup, configuration, and recovery.
+Follow the [handoff guide](docs/handoff.md) to configure device names, workspace mapping, and upgrades from the earlier two-plugin installation. See [getting started](docs/getting-started.md) for server setup.
 
 ## Inspect sessions
 
@@ -94,7 +95,7 @@ Export writes the native session log to standard output. The CLI reads connectio
 | Capability                                | Status    |
 | ----------------------------------------- | --------- |
 | Remote Session persistence and recovery   | Available |
-| Controlled handoff with workspace mapping | Planned   |
+| Controlled handoff with workspace mapping | M1 preview |
 | Cross-model task relay within one Harness | Planned   |
 | Additional coding-agent integrations      | Planned   |
 

@@ -12,9 +12,9 @@ ContextMesh 让 Agent 的会话不再局限于一台机器。它将对话历史�
 
 ## 开发者预览
 
-ContextMesh 目前处于**开发者预览**阶段。当前版本为 DeepSeek Harness **0.2.1-rc.3** 提供远程 Session 存储和恢复，接口可能随开发调整。
+ContextMesh 目前处于**开发者预览**阶段。M1 为本仓库锁定的 DeepSeek Harness **0.2.1-rc.3** 提供远程 Session 存储和协调交接，接口可能随开发调整。
 
-自动交接、工作区同步和跨模型接力仍在规划中。目前跨机器接续需要先关闭来源会话，并单独准备目标机器的代码工作区。
+支持将会话交接到另一台设备上的目录，共享标题并显示当前设备。普通目录无需 Git；代码工作区仍校验两端相同、干净的 Git 提交。M1 需要本仓库随附的显式 DSH 兼容补丁，文件同步与跨模型接力属于后续阶段。
 
 ## 核心能力
 
@@ -28,6 +28,8 @@ DeepSeek Harness A ─┐
                    ├── ContextMesh ── PostgreSQL
 DeepSeek Harness B ─┘
 ```
+
+M1 已加入同一 Harness 的跨机器交接、共享标题、远程会话面板和 CLI。使用本仓库锁定的运行时及显式兼容补丁，普通目录可直接接管；代码工作区需在两端准备相同、干净的 Git commit。见 [跨机器交接指南](docs/handoff.zh.md)。文件同步与跨模型接力属于后续阶段。
 
 ## 快速开始
 
@@ -68,16 +70,16 @@ API 默认地址为 `http://127.0.0.1:8787`。停止后，本地数据库文件�
 
 ### 3. 接入 DeepSeek Harness
 
-在仓库根目录设置与服务端相同的 Token，将构建好的插件安装到 Web profile：
+使用上面构建的锁定补丁运行时，安装完整插件。远程持久化和交接界面只需一个安装项：
 
 ```sh
 export CONTEXTMESH_ENDPOINT=http://127.0.0.1:8787
 export CONTEXTMESH_TOKEN='your-token-from-.env'
-dsh plugin --profile web add "file:$PWD/packages/adapter-deepseek"
-dsh --profile web
+pnpm exec dsh plugin --profile web add "link:$PWD/packages/handoff-deepseek"
+pnpm exec dsh --profile web
 ```
 
-插件会替换该 profile 的 JSONL 持久化后端。profile 配置、完整参数和恢复操作见[快速开始指南](docs/getting-started.zh.md)。
+设备名称、工作区映射和旧双插件配置的升级步骤见[交接指南](docs/handoff.zh.md)。服务端配置见[快速开始指南](docs/getting-started.zh.md)。
 
 ## 查看会话
 
@@ -94,7 +96,7 @@ export 将原生会话日志输出到标准输出。CLI 从仓库根目录的 `.
 | 能力                            | 状态   |
 | ------------------------------- | ------ |
 | 远程 Session 持久化与恢复       | 已支持 |
-| 带工作区映射的受控交接          | 规划中 |
+| 带工作区映射的受控交接          | M1 预览 |
 | 同一 Harness 内的跨模型任务接力 | 规划中 |
 | 更多 Coding Agent 集成          | 规划中 |
 

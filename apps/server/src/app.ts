@@ -1,4 +1,5 @@
 import Fastify from 'fastify'
+import { registerHandoffRoutes } from './handoff.js'
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { z } from 'zod'
 import { PostgresStore } from '../../../packages/storage-postgres/src/index.js'
@@ -83,6 +84,7 @@ export function buildServer(options: ServerOptions) {
   const schema = (body: z.ZodType) => ({
     body: z.toJSONSchema(body, { target: 'draft-7' }),
   })
+  registerHandoffRoutes(app, options.store, ns)
   app.get('/health/live', async () => ({ ok: true }))
   app.get('/health/ready', async () => {
     await options.store.pool.query('SELECT 1')
@@ -90,6 +92,13 @@ export function buildServer(options: ServerOptions) {
       ok: true,
       protocolVersion: PROTOCOL_VERSION,
       leaseMs: options.store.leaseMs,
+      features: [
+        'handoff-v1',
+        'takeover-v1',
+        'project-setup-v1',
+        'directory-handoff-v1',
+      ],
+      schemaVersion: 3,
     }
   })
   app.post('/v1/sessions', { schema: schema(createSchema) }, async (req) =>

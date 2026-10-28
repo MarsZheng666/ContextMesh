@@ -1,5 +1,7 @@
 # 快速开始
 
+只需安装一个完整插件，即可使用远程持久化、跨机器交接和确认接管。
+
 本指南介绍如何把 DeepSeek Harness profile 接入自行部署的 ContextMesh 服务。需要 Node.js 24.9+、pnpm 11.25.0 和 DeepSeek Harness 0.2.1-rc.3。
 
 ## 构建与配置
@@ -49,24 +51,17 @@ API 默认地址为 `http://127.0.0.1:8787`。`GET /health/ready` 需要配置�
 
 ## 安装 Harness 插件
 
-使用兼容的 `dsh` 安装。例如：
+使用本仓库已经构建的锁定运行时，在仓库根目录安装唯一的完整插件：
 
 ```sh
-npm install -g @deepseek-ai/dsh@0.2.1-rc.3
-```
-
-在 ContextMesh 仓库根目录导出连接配置，将构建好的插件安装到目标 profile：
-
-```sh
+export DSH_HOME="$HOME/.dsh-contextmesh"
 export CONTEXTMESH_ENDPOINT=http://127.0.0.1:8787
 export CONTEXTMESH_TOKEN='your-token-from-.env'
-dsh plugin --profile web add "file:$PWD/packages/adapter-deepseek"
-dsh --profile web
+pnpm exec dsh plugin --profile web add "link:$PWD/packages/handoff-deepseek"
+pnpm exec dsh --profile web
 ```
 
-Harness 不会自动读取 ContextMesh 仓库的 `.env`；插件从启动环境读取 Token。如果需要保留已有配置，请使用独立的 profile 或 `DSH_HOME`。
-
-安装 bundle 会禁用 `session-persistence-jsonl`，挂载远程持久化服务。之后原生 Session 操作通过 ContextMesh 保存；聊天界面和 Agent 运行仍由 DSH 提供。
+完整插件自动加载持久化组件，安装列表只有一个 ContextMesh 条目。设备命名、项目目录映射、主动交接和发送时确认接管见[会话交接指南](handoff.zh.md)。Harness 从启动环境读取服务令牌，不会自动读取本仓库的 `.env`。
 
 ### sdk-minimal profile
 

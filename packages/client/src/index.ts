@@ -99,6 +99,7 @@ export class MeshClient {
       .object({
         protocolVersion: z.literal(1),
         leaseMs: z.number().int().positive(),
+        features: z.array(z.string()).optional(),
       })
       .parse(await this.request('/health/ready'))
   }

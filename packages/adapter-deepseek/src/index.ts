@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { isDeepStrictEqual } from 'node:util'
 import { Context, type Fiber } from '@deepseek-ai/cordis'
 import schema from '@deepseek-ai/schemastery'
@@ -122,7 +123,52 @@ function decodedEvents(header: SessionHeader, input: unknown): SessionEvent[] {
   validateStoredEvents(header, events)
   return events
 }
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    contextmesh: RemoteSessionPersistence
+  }
+}
 export class RemoteSessionPersistence extends SessionPersistence {
+  private readonly claims = new AsyncLocalStorage<{
+    remote: RemoteHandle
+    used: boolean
+  }>()
+  private readonly lostListeners = new Set<(id: SessionId) => void>()
+  onOwnershipLost(listener: (id: SessionId) => void): () => void {
+    this.lostListeners.add(listener)
+    return () => {
+      this.lostListeners.delete(listener)
+    }
+  }
+  ownershipLost(id: SessionId): void {
+    for (const listener of this.lostListeners) {
+      try {
+        listener(id)
+      } catch (error) {
+        this.report(`ownership listener failed: ${String(error)}`)
+      }
+    }
+  }
+  writerClaim(id: SessionId): RemoteHandle {
+    const writer = this.writers.get(id)
+    if (!writer) throw new SessionOwnershipLostError(id)
+    return writer.claim()
+  }
+  async withClaim<T>(remote: RemoteHandle, run: () => Promise<T>): Promise<T> {
+    if (remote.access !== 'write' || this.writers.has(remote.session.id))
+      throw new Error('handoff claim is not available for adoption')
+    const slot = { remote, used: false }
+    return this.claims.run(slot, async () => {
+      try {
+        const result = await run()
+        if (!slot.used) throw new Error('resume did not consume handoff claim')
+        return result
+      } finally {
+        if (!slot.used) await this.client.close(remote, randomUUID())
+      }
+    })
+  }
+
   readonly handles = new Set<RemoteSessionHandle>()
   readonly writers = new Map<string, RemoteSessionHandle>()
   private readonly acquisitions = new Set<Promise<SessionHandle>>()
@@ -208,7 +254,16 @@ export class RemoteSessionPersistence extends SessionPersistence {
     let handle: RemoteSessionHandle | undefined
     let remote: RemoteHandle | undefined
     try {
-      remote = await this.client.open(id, access, options?.signal)
+      const slot = this.claims.getStore()
+      if (access === 'write' && slot) {
+        if (slot.used || slot.remote.session.id !== id)
+          throw new Error(
+            'handoff claim must be consumed exactly once by its Session',
+          )
+        slot.used = true
+        remote = slot.remote
+        await this.client.renew(remote)
+      } else remote = await this.client.open(id, access, options?.signal)
       assertStoredId(id, storedHeader(remote.session))
       handle = this.adopt(remote)
       // A write open validates the complete log before returning ownership to a driver.
@@ -307,7 +362,7 @@ class RemoteSessionHandle implements SessionHandle {
         void this.owner.client
           .renew(this.remote)
           .catch(() => {
-            this.lost = true
+            this.markLost()
             this.owner.report(
               `contextmesh: session "${this.id}" lost write ownership; stop this agent and recover explicitly`,
             )
@@ -318,6 +373,16 @@ class RemoteSessionHandle implements SessionHandle {
       }, owner.config.renewalMs ?? 15000)
       this.heartbeat.unref()
     }
+  }
+  claim(): RemoteHandle {
+    this.assertOpen('claim')
+    this.assertWrite('claim')
+    return structuredClone(this.remote)
+  }
+  private markLost(): void {
+    if (this.lost) return
+    this.lost = true
+    this.owner.ownershipLost(this.id)
   }
   private assertOpen(op: string): void {
     if (this.closing) throw new SessionHandleClosedError(this.id, op)
@@ -396,7 +461,7 @@ class RemoteSessionHandle implements SessionHandle {
       this.unknownAppend = undefined
     } catch (error) {
       if (error instanceof MeshError && error.code === 'OWNERSHIP_LOST')
-        this.lost = true
+        this.markLost()
       throw mapped(error, this.id, 'append')
     }
   }
@@ -539,6 +604,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       name: 'contextmesh-persistence-service',
       apply(serviceCtx: Context) {
         service = new RemoteSessionPersistence(serviceCtx, client, config)
+        serviceCtx.provide('contextmesh', service)
       },
     })
     yield serviceFiber.dispose
