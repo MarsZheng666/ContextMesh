@@ -8,6 +8,13 @@ const modelChoice = z.object({
 import { en, type Key } from './locales.js'
 import type { ListDirectory } from './directory.js'
 export const snapshotSchema = z.object({
+  connection: z
+    .object({
+      endpoint: z.string(),
+      role: z.enum(['owner', 'device']),
+      nodeId: z.string().nullable(),
+    })
+    .optional(),
   nodeId: z.string(),
   name: z.string(),
   models: z.array(modelChoice).optional(),
@@ -416,6 +423,7 @@ ${t('takeoverEffect')}${targetModel ? '\n\n' + t('targetModel') + ': ' + targetM
   private state: ViewState = {}
   private listeners = new Set<() => void>()
   private abort = new AbortController()
+  private failures = 0
   private refreshing: Promise<void> | undefined
   private timer: ReturnType<typeof setInterval> | undefined
   getSnapshot = () => this.state
@@ -435,7 +443,10 @@ ${t('takeoverEffect')}${targetModel ? '\n\n' + t('targetModel') + ': ' + targetM
       credentials: 'same-origin',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(command),
-      signal: this.abort.signal,
+      signal: AbortSignal.any([this.abort.signal, AbortSignal.timeout(15000)]),
+    }).catch((error) => {
+      if (this.abort.signal.aborted) throw error
+      throw new ControlError('CONNECTION_LOST', en.CONNECTION_LOST)
     })
     const envelope = z
       .object({
@@ -451,8 +462,12 @@ ${t('takeoverEffect')}${targetModel ? '\n\n' + t('targetModel') + ': ' + targetM
       .parse(await response.json())
     if (!response.ok || !envelope.ok)
       throw new ControlError(
-        envelope.error?.code ?? 'FAILED',
-        envelope.error?.message ?? response.statusText,
+        envelope.error?.code === 'UNAVAILABLE'
+          ? 'CONNECTION_LOST'
+          : (envelope.error?.code ?? 'FAILED'),
+        envelope.error?.code === 'UNAVAILABLE'
+          ? en.CONNECTION_LOST
+          : (envelope.error?.message ?? response.statusText),
       )
     return envelope.value
   }
@@ -460,6 +475,7 @@ ${t('takeoverEffect')}${targetModel ? '\n\n' + t('targetModel') + ': ' + targetM
     if (this.refreshing) return this.refreshing
     this.refreshing = this.request({ action: 'status' })
       .then((value) => {
+        this.failures = 0
         this.set({
           ...this.state,
           data: snapshotSchema.parse(value),
@@ -467,6 +483,7 @@ ${t('takeoverEffect')}${targetModel ? '\n\n' + t('targetModel') + ': ' + targetM
         })
       })
       .catch((error) => {
+        this.failures = Math.min(4, this.failures + 1)
         if (!this.abort.signal.aborted)
           this.set({
             ...this.state,
@@ -479,13 +496,18 @@ ${t('takeoverEffect')}${targetModel ? '\n\n' + t('targetModel') + ': ' + targetM
     return this.refreshing
   }
   start() {
-    void this.refresh()
-    this.timer = setInterval(() => {
-      void this.refresh()
-    }, 2500)
+    const poll = async () => {
+      await this.refresh()
+      if (!this.abort.signal.aborted)
+        this.timer = setTimeout(
+          () => void poll(),
+          Math.min(30000, 2500 * 2 ** this.failures),
+        )
+    }
+    void poll()
   }
   close() {
-    clearInterval(this.timer)
+    clearTimeout(this.timer)
     for (const selection of this.selections.values()) selection.finish()
     this.selections.clear()
     this.cancelProjectSetup()

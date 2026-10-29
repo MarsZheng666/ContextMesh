@@ -1,3 +1,4 @@
+import { setTimeout as delay } from 'node:timers/promises'
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import {
@@ -75,7 +76,7 @@ export class MeshClient {
         if (signal?.aborted) throw signal.reason
         if (error instanceof MeshError && error.status < 500) throw error
         if (attempt < (this.config.retries ?? 2))
-          await new Promise((resolve) => setTimeout(resolve, 25 * 2 ** attempt))
+          await delay(Math.min(2000, 100 * 2 ** attempt), undefined, { signal })
       }
     }
     const operation =

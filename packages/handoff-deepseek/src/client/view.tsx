@@ -1,3 +1,4 @@
+import { DeviceSetup } from './devices.js'
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import {
@@ -503,6 +504,7 @@ export function RemotePanelView({
       <div className="cm-muted">
         {t('device')}: {data.name}
       </div>
+      <DeviceSetup connection={data.connection} request={request} t={t} />
       <p className="cm-notice">{t('prepare')}</p>
       {(failure || error) && (
         <p className="cm-error" role="alert">
@@ -866,6 +868,11 @@ export function HandoffDock({
   }
   return (
     <div className="cm-dock">
+      {state.error && (
+        <span role="status" className="cm-error">
+          {t('CONNECTION_LOST')}
+        </span>
+      )}
       <style>{style}</style>
       <ProjectSetupDialog
         model={model}

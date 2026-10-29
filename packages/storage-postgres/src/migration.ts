@@ -80,6 +80,19 @@ CREATE TABLE cm_model_relays (
 CREATE UNIQUE INDEX cm_model_relay_active ON cm_model_relays(namespace,session_id) WHERE state='prepared';
 INSERT INTO cm_schema(version) VALUES(4);
 `
+const v5 = `
+CREATE TABLE cm_pairings (
+ namespace text NOT NULL,id uuid NOT NULL,code_hash text NOT NULL,name text NOT NULL,ttl_seconds integer NOT NULL,
+ expires_at timestamptz NOT NULL,claim_id uuid,credential_id uuid,node_id uuid,
+ PRIMARY KEY(namespace,id),UNIQUE(namespace,code_hash)
+);
+CREATE TABLE cm_device_credentials (
+ namespace text NOT NULL,id uuid NOT NULL,node_id uuid NOT NULL,name text NOT NULL,token_hash text NOT NULL,
+ revoked boolean NOT NULL DEFAULT false,created_at timestamptz NOT NULL DEFAULT clock_timestamp(),last_seen timestamptz,
+ PRIMARY KEY(namespace,id),UNIQUE(namespace,token_hash),UNIQUE(namespace,node_id)
+);
+INSERT INTO cm_schema(version) VALUES(5);
+`
 export async function migrate(pool: Pool): Promise<void> {
   const client = await pool.connect()
   try {
@@ -92,7 +105,7 @@ export async function migrate(pool: Pool): Promise<void> {
       'SELECT max(version) AS version FROM cm_schema',
     )
     let version = Number(result.rows[0].version)
-    if (version < 1 || version > 4)
+    if (version < 1 || version > 5)
       throw new Error('unsupported ContextMesh database schema')
     if (version === 1) {
       await client.query(v2)
@@ -102,7 +115,11 @@ export async function migrate(pool: Pool): Promise<void> {
       await client.query(v3)
       version = 3
     }
-    if (version === 3) await client.query(v4)
+    if (version === 3) {
+      await client.query(v4)
+      version = 4
+    }
+    if (version === 4) await client.query(v5)
     await client.query('COMMIT')
   } catch (error) {
     await client.query('ROLLBACK')

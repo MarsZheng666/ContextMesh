@@ -1,17 +1,27 @@
+import { setup } from './setup.js'
+import { readConnection } from '../../../packages/client/src/config.js'
 import { randomUUID } from 'node:crypto'
 import { MeshClient } from '../../../packages/client/src/index.js'
 import { MeshError } from '../../../packages/protocol/src/index.js'
 import { runLocal } from './local.js'
-const handled = await runLocal(process.argv.slice(2)).catch((error) => {
+const input = process.argv.slice(2)
+const handled = await (async () =>
+  (await setup(input)) || (await runLocal(input)))().catch((error) => {
   console.error(error instanceof Error ? error.message : String(error))
   process.exitCode = 1
   return true
 })
 if (!handled) {
-  const token = process.env.CONTEXTMESH_TOKEN
+  const saved = process.env.CONTEXTMESH_TOKEN
+    ? undefined
+    : await readConnection()
+  const token = process.env.CONTEXTMESH_TOKEN ?? saved?.token
   if (!token) throw new Error('CONTEXTMESH_TOKEN is required')
   const client = new MeshClient({
-    endpoint: process.env.CONTEXTMESH_ENDPOINT ?? 'http://127.0.0.1:8787',
+    endpoint:
+      process.env.CONTEXTMESH_ENDPOINT ??
+      saved?.endpoint ??
+      'http://127.0.0.1:8787',
     token,
   })
   const [command, id, confirmation] = process.argv.slice(2)

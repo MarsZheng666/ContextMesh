@@ -1,7 +1,7 @@
 import type { PoolClient } from 'pg'
 import { z } from 'zod'
 import { modelRoute } from '../../protocol/src/handoff.js'
-import { BasePostgresStore } from './base.js'
+import { DevicePostgresStore } from './devices.js'
 import { MeshError } from '../../protocol/src/index.js'
 import {
   modelRelayRecord,
@@ -10,7 +10,7 @@ import {
 } from '../../protocol/src/model-relay.js'
 
 /** Durable barriers around device-owned changes to the next model route. */
-export class ModelRelayPostgresStore extends BasePostgresStore {
+export class ModelRelayPostgresStore extends DevicePostgresStore {
   private relayRow(row: Record<string, unknown>) {
     return modelRelayRecord.parse({
       ...modelRelayRequest.parse(this.decode(String(row.request))),

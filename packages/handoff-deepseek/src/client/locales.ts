@@ -1,4 +1,25 @@
 export const en = {
+  connectionTitle: 'Service connection',
+  manageDevices: 'Add or revoke a device',
+  pairHelp:
+    'Create a one-time invitation on this owner device. Only share it with your own trusted device.',
+  newDeviceName: 'New device name',
+  createPairing: 'Create pairing code',
+  pairCode: 'Pairing code',
+  pairExpires: 'Expires at',
+  pairInstructions:
+    'On the new device, run pnpm cli setup and enter a reachable service URL and this code. Retry an interrupted setup with the same code.',
+  listDevices: 'Show paired devices',
+  revokeConfirm: 'Revoke access for this device?',
+  revoked: 'Revoked',
+  revoke: 'Revoke access',
+  ownerPairing: 'Pairing management is available on an owner device.',
+  CONNECTION_LOST:
+    'Connection lost. Reconnecting; your history and draft are kept. Wait for the connection to recover before retrying.',
+  OWNER_REQUIRED: 'Use an owner device to manage pairing.',
+  PAIRING_INVALID:
+    'The pairing code is expired or already used. Request a new code from the owner device.',
+
   app: 'ContextMesh',
   targetModel: 'Continue with model',
   keepModel: 'Keep the current model',
@@ -161,6 +182,25 @@ export const en = {
 } as const
 export type Key = keyof typeof en
 export const zh: Record<Key, string> = {
+  connectionTitle: '服务连接',
+  manageDevices: '添加或撤销设备',
+  pairHelp: '在这台管理设备上创建一次性邀请，只分享给你信任的自有设备。',
+  newDeviceName: '新设备名称',
+  createPairing: '生成配对码',
+  pairCode: '配对码',
+  pairExpires: '失效时间',
+  pairInstructions:
+    '在新设备运行 pnpm cli setup，输入新设备能访问的服务地址和此配对码。设置中断时，使用相同配对码重试。',
+  listDevices: '查看已配对设备',
+  revokeConfirm: '确定撤销这台设备的访问权限？',
+  revoked: '已撤销',
+  revoke: '撤销访问',
+  ownerPairing: '请在管理设备上操作设备配对。',
+  CONNECTION_LOST:
+    '连接已中断，正在重新连接。历史和草稿已保留，请在恢复连接后重试。',
+  OWNER_REQUIRED: '请使用管理设备操作配对。',
+  PAIRING_INVALID: '配对码已失效或已被使用，请向管理设备申请新码。',
+
   app: 'ContextMesh',
   targetModel: '继续使用的模型',
   keepModel: '沿用当前模型',

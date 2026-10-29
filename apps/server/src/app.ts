@@ -1,4 +1,5 @@
-import Fastify from 'fastify'
+import Fastify, { type FastifyRequest } from 'fastify'
+import { registerDeviceRoutes } from './devices.js'
 import { registerModelRelayRoutes } from './model-relay.js'
 import { registerHandoffRoutes } from './handoff.js'
 import { createHash, timingSafeEqual } from 'node:crypto'
@@ -37,17 +38,63 @@ export function buildServer(options: ServerOptions) {
   })
   const ns = options.namespace ?? 'personal'
   const expected = createHash('sha256').update(options.token).digest()
+  const principals = new WeakMap<
+    FastifyRequest,
+    { id: string; nodeId: string; name: string }
+  >()
   app.addHook('onRequest', async (req, reply) => {
-    if (req.url === '/health/live') return
+    if (
+      req.url === '/health/live' ||
+      (req.method === 'POST' && req.url === '/v1/pairings/claim')
+    )
+      return
     const authorization = req.headers.authorization ?? ''
     const supplied = createHash('sha256')
       .update(authorization.startsWith('Bearer ') ? authorization.slice(7) : '')
       .digest()
-    if (!timingSafeEqual(supplied, expected))
-      return reply
-        .code(401)
-        .send({ code: 'UNAUTHORIZED', message: 'valid bearer token required' })
+    if (timingSafeEqual(supplied, expected)) return
+    const credential = await options.store.authenticateDevice(
+      ns,
+      authorization.startsWith('Bearer ') ? authorization.slice(7) : '',
+    )
+    if (credential) {
+      if (
+        req.url.startsWith('/v1/pairings') ||
+        req.url.startsWith('/v1/device-credentials')
+      )
+        return reply.code(403).send({
+          code: 'OWNER_REQUIRED',
+          message: 'use an owner device to manage pairing',
+        })
+      principals.set(req, credential)
+      return
+    }
+    return reply
+      .code(401)
+      .send({ code: 'UNAUTHORIZED', message: 'valid bearer token required' })
   })
+  app.addHook('preHandler', async (req, reply) => {
+    const device = principals.get(req)
+    if (!device) return
+    const node = /^\/v1\/nodes\/([^/?]+)\//.exec(req.url)?.[1]
+    const bodyNode =
+      req.body && typeof req.body === 'object' && 'nodeId' in req.body
+        ? req.body.nodeId
+        : undefined
+    if (
+      (node && decodeURIComponent(node) !== device.nodeId) ||
+      (bodyNode && bodyNode !== device.nodeId)
+    )
+      return reply.code(403).send({
+        code: 'WRONG_DEVICE',
+        message: 'credential belongs to another device',
+      })
+  })
+  app.get('/v1/identity', async (req) => ({
+    role: principals.has(req) ? 'device' : 'owner',
+    nodeId: principals.get(req)?.nodeId ?? null,
+  }))
+  registerDeviceRoutes(app, options.store, ns, options.token)
   app.setErrorHandler((error, req, reply) => {
     if (error instanceof MeshError)
       return reply
@@ -100,8 +147,9 @@ export function buildServer(options: ServerOptions) {
         'project-setup-v1',
         'directory-handoff-v1',
         'model-relay-v1',
+        'device-pairing-v1',
       ],
-      schemaVersion: 4,
+      schemaVersion: 5,
     }
   })
   app.post('/v1/sessions', { schema: schema(createSchema) }, async (req) =>

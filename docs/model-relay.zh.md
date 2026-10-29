@@ -61,4 +61,6 @@ pnpm cli takeover SESSION_ID --confirm --provider PROVIDER --model MODEL
 
 ## 数据库升级
 
-当前服务端使用 schema **4**。升级前备份 PostgreSQL 并停止旧写者。可从 schema 1、2、3 迁移，保留已有 header 和事件，增加模型切换记录及接管的可选目标模型。旧服务端拒绝 schema 4，回滚需要恢复备份。DSH 原生 Session 格式不变。
+当前服务端使用 schema **5**。升级前备份 PostgreSQL 并停止旧写者。可从 schema 1、2、3、4 迁移，保留已有 header 和事件，增加模型切换记录及接管的可选目标模型。旧服务端拒绝 schema 5，回滚需要恢复备份。DSH 原生 Session 格式不变。
+
+同一插件已提供[设备配对](devices.zh.md)。

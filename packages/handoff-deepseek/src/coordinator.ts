@@ -2,6 +2,8 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, AgentControl, AgentHandle } from '@deepseek-ai/dsh-agent'
 import { createScope } from '@deepseek-ai/dsh-scope'
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+import { DeviceClient } from '../../client/src/devices.js'
+import { deviceName } from '../../protocol/src/devices.js'
 import { ModelRelayController } from './model-relay.js'
 import {
   inspectModel,
@@ -65,6 +67,17 @@ const stateSchema = z.object({
 })
 const commandSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('status') }),
+  z.object({
+    action: z.literal('pair-device'),
+    name: deviceName,
+    operationId: z.uuid(),
+  }),
+  z.object({ action: z.literal('paired-devices') }),
+  z.object({
+    action: z.literal('revoke-device'),
+    credentialId: z.uuid(),
+    confirmed: z.literal(true),
+  }),
   z.object({ action: z.literal('models') }),
   modelRoute.extend({
     action: z.literal('select-model'),
@@ -241,13 +254,15 @@ export class HandoffCoordinator {
       !capabilities.features?.includes('handoff-v1') ||
       !capabilities.features.includes('takeover-v1') ||
       !capabilities.features.includes('directory-handoff-v1') ||
-      !capabilities.features.includes('model-relay-v1')
+      !capabilities.features.includes('model-relay-v1') ||
+      !capabilities.features.includes('device-pairing-v1')
     )
       throw new Error(
-        'Upgrade ContextMesh server: handoff-v1, takeover-v1, directory-handoff-v1 and model-relay-v1 are required',
+        'Upgrade ContextMesh server: handoff-v1, takeover-v1, directory-handoff-v1, model-relay-v1 and device-pairing-v1 are required',
       )
     await mkdir(config.stateDir, { recursive: true, mode: 0o700 })
     const path = join(config.stateDir, 'node.json')
+    const identity = await new DeviceClient(ctx.contextmesh.client).identity()
     let state: z.infer<typeof stateSchema>
     try {
       state = stateSchema.parse(JSON.parse(await readFile(path, 'utf8')))
@@ -261,12 +276,16 @@ export class HandoffCoordinator {
         throw error
       state = {
         version: 1,
-        nodeId: randomUUID(),
+        nodeId: identity.nodeId ?? randomUUID(),
         bindings: {},
         modelBudgets: {},
       }
       await writeFile(path, JSON.stringify(state), { flag: 'wx', mode: 0o600 })
     }
+    if (identity.nodeId && identity.nodeId !== state.nodeId)
+      throw new Error(
+        'This state directory belongs to another device; use a separate DSH home',
+      )
     const service = new HandoffCoordinator(ctx, config, state)
     await service.client.register(
       config.nodeName || hostname(),
@@ -1441,6 +1460,15 @@ export class HandoffCoordinator {
   async command(input: unknown): Promise<unknown> {
     const command = commandSchema.parse(input)
     switch (command.action) {
+      case 'pair-device':
+        return new DeviceClient(this.client.mesh).create(
+          command.name,
+          command.operationId,
+        )
+      case 'paired-devices':
+        return new DeviceClient(this.client.mesh).list()
+      case 'revoke-device':
+        return new DeviceClient(this.client.mesh).revoke(command.credentialId)
       case 'models': {
         const models = await this.models()
         await this.client.register(this.config.nodeName, models)
@@ -1511,6 +1539,10 @@ export class HandoffCoordinator {
   }
   async status() {
     return {
+      connection: {
+        endpoint: this.client.mesh.endpoint,
+        ...(await new DeviceClient(this.client.mesh).identity()),
+      },
       nodeId: this.client.nodeId,
       name: this.config.nodeName,
       nodes: await this.client.nodes(),

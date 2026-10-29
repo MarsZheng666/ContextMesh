@@ -1,3 +1,8 @@
+import {
+  writeConnection,
+  readConnection,
+} from '../../packages/client/src/config.js'
+import type { DeviceConnection } from '../../packages/protocol/src/devices.js'
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import {
@@ -71,10 +76,17 @@ export async function environment() {
     failResume = false,
     presetMode?: 'read-only' | 'workspace-write',
     skipSourceModel = false,
+    connection?: DeviceConnection,
   ) => {
     const home = join(root, `home-${name}`),
       stateDir = join(home, 'mesh')
     await mkdir(home, { recursive: true })
+    if (connection) {
+      const configPath = join(home, 'contextmesh', 'connection.json')
+      const existing = await readConnection(configPath)
+      if (existing) expect(existing).toEqual(connection)
+      else await writeConnection(connection, configPath)
+    }
     if (installed) {
       await execute(
         process.execPath,
@@ -152,7 +164,7 @@ ${plugins}- insert:
           TMPDIR: process.env.TMPDIR,
           DSH_HOME: home,
           TEST_SKIP_SOURCE_MODEL: skipSourceModel ? '1' : undefined,
-          CONTEXTMESH_TOKEN: TOKEN,
+          CONTEXTMESH_TOKEN: connection ? undefined : TOKEN,
           CONTEXTMESH_TEST_REAL_MODEL: process.env.CONTEXTMESH_TEST_REAL_MODEL,
           DEEPSEEK_API_KEY:
             process.env.CONTEXTMESH_TEST_REAL_MODEL === '1'

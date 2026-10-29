@@ -10,6 +10,8 @@ ContextMesh gives agent sessions a shared home beyond a single machine. It prese
 
 [Getting started](docs/getting-started.md) · [Plugin API](docs/api/deepseek-adapter.md) · [Handoff](docs/handoff.md) · [Deployment](docs/deployment.md) · [Model relay](docs/model-relay.md)
 
+[Connect devices](docs/devices.md)
+
 ## Developer preview
 
 ContextMesh is in **developer preview**. M1/M2 provide remote Session storage, coordinated cross-machine handoff and model relay for the pinned DeepSeek Harness **0.2.1-rc.3** runtime. APIs may change as the project evolves.
@@ -92,13 +94,13 @@ Export writes the native session log to standard output. The CLI reads connectio
 
 ## Roadmap
 
-| Capability                                | Status     |
-| ----------------------------------------- | ---------- |
-| Remote Session persistence and recovery   | Available  |
-| Controlled handoff with workspace mapping | M1 preview |
-| Cross-model task relay within one Harness | M2 preview |
-| Device pairing and simpler configuration  | Planned    |
-| Additional coding-agent integrations      | Planned    |
+| Capability                                | Status       |
+| ----------------------------------------- | ------------ |
+| Remote Session persistence and recovery   | Available    |
+| Controlled handoff with workspace mapping | M1 preview   |
+| Cross-model task relay within one Harness | M2 preview   |
+| Device pairing and guided configuration   | M2.1 preview |
+| Additional coding-agent integrations      | Planned      |
 
 ## Development
 

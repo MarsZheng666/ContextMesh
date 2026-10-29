@@ -1,6 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import schema from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-client-connection'
+import { readConnection } from '../../client/src/config.js'
 import { hostname } from 'node:os'
 import { join } from 'node:path'
 import { HandoffCoordinator } from './coordinator.js'
@@ -44,7 +45,11 @@ export async function apply(ctx: Context, config: Config) {
     throw new Error('Set DSH_HOME or configure ContextMesh stateDir')
   const service = await HandoffCoordinator.start(ctx, {
     stateDir,
-    nodeName: config.nodeName ?? hostname(),
+    nodeName:
+      config.nodeName ??
+      (process.env.CONTEXTMESH_TOKEN ? undefined : await readConnection())
+        ?.name ??
+      hostname(),
     pollMs: config.pollMs ?? 2000,
     heartbeatMs: config.heartbeatMs ?? 15000,
     waitIdleMs: config.waitIdleMs ?? 30000,

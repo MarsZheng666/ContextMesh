@@ -10,6 +10,8 @@ ContextMesh 让 Agent 的会话不再局限于一台机器。它将对话历史�
 
 [快速开始](docs/getting-started.zh.md) · [插件接口](docs/api/deepseek-adapter.md) · [部署指南](docs/deployment.md) · [模型接力](docs/model-relay.zh.md)
 
+[设备配对](docs/devices.zh.md)
+
 ## 开发者预览
 
 ContextMesh 目前处于**开发者预览**阶段。M1/M2 为本仓库锁定的 DeepSeek Harness **0.2.1-rc.3** 提供远程 Session 存储、协调交接与模型接力，接口可能随开发调整。
@@ -93,13 +95,13 @@ export 将原生会话日志输出到标准输出。CLI 从仓库根目录的 `.
 
 ## 开发路线
 
-| 能力                            | 状态    |
-| ------------------------------- | ------- |
-| 远程 Session 持久化与恢复       | 已支持  |
-| 带工作区映射的受控交接          | M1 预览 |
-| 同一 Harness 内的跨模型任务接力 | M2 预览 |
-| 设备配对与配置流程简化          | 规划中  |
-| 更多 Coding Agent 集成          | 规划中  |
+| 能力                            | 状态      |
+| ------------------------------- | --------- |
+| 远程 Session 持久化与恢复       | 已支持    |
+| 带工作区映射的受控交接          | M1 预览   |
+| 同一 Harness 内的跨模型任务接力 | M2 预览   |
+| 设备配对与向导配置              | M2.1 预览 |
+| 更多 Coding Agent 集成          | 规划中    |
 
 ## 参与开发
 
