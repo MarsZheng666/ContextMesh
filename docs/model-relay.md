@@ -34,7 +34,25 @@ Ordinary folders still need no Git. Git workspaces still require matching clean 
 
 Targets must declare text input and a known context window. ContextMesh checks portable content, matching tool calls/results, valid tool-argument JSON and the target's reasoning controls. Explicit output limits are checked with the target; omitted reasoning controls use its defaults instead of inheriting the previous model's effort.
 
-Capacity checks conservatively count serialized UTF-8 bytes against the model's token window, reserve output capacity and leave additional headroom. This is deliberately an estimate, not a provider tokenizer. It can reject a conversation that a more precise tokenizer would fit. The first and subsequent routed requests are checked again with their assembled messages and tools. Provider-side authentication, availability and context errors can still occur at dispatch. History is never silently truncated or replaced by an automatic summary to make relay succeed.
+Open **Remote sessions → Model compatibility check** to inspect a live conversation without switching or generating a reply. The report shows the serialized UTF-8 byte upper bound, the pinned DSH heuristic with an additional Unicode/framing margin, output reserve and target context window. Neither figure is an exact provider tokenizer count.
+
+The default policy uses the byte upper bound. When only the heuristic fits, the native model selector asks for explicit consent to use the estimate. This consent is bound to the current conversation history, model route and live agent, expires after 60 seconds and is consumed once. Cancellation changes nothing. The selected capacity policy is saved locally and survives restart. A device handoff always requires the conservative policy; consent on one device does not authorize another device. The first and subsequent routed requests are checked again with their assembled messages and tools. Provider-side authentication, availability and context errors can still occur at dispatch. History is never silently truncated or replaced by an automatic summary to make relay succeed.
+
+For routes with incomplete metadata, add a `modelProfiles` entry in the existing ContextMesh plugin configuration:
+
+```yaml
+modelProfiles:
+  - provider: my-provider
+    model: my-model
+    textInput: true
+    contextWindow: 128000
+    tools: true
+    maxOutputTokens: 8192
+```
+
+Use the provider's documented limits. A profile can fill missing metadata or narrow a known context window; it cannot increase the SDK's declared limit or enable a modality the SDK explicitly rejects. `tools: false` rejects tool history and tool-enabled requests. `maxOutputTokens` requires an explicit adapter output limit and caps it. Profiles do not install providers or supply credentials. Restart DSH after changing configuration.
+
+Compatibility tests exercise the installed Responses, Chat Completions and Anthropic adapters against deterministic local protocol fixtures, including completed tool history and foreign replay-state isolation. This checks request translation, not live vendor availability or certification of every model listed by a provider.
 
 DSH retains provider-private replay state in the original log and only passes it to an adapter that owns the historical and target route. Cross-adapter requests use DSH's provider-neutral projection. Relay does not promise to transfer hidden model state.
 
@@ -44,7 +62,9 @@ Run from the repository using a running DSH's private control socket. Add `--sta
 
 ```sh
 pnpm cli models
+pnpm cli model-check SESSION_ID PROVIDER MODEL
 pnpm cli model-select SESSION_ID PROVIDER MODEL
+pnpm cli model-select SESSION_ID PROVIDER MODEL --allow-estimate
 pnpm cli model-select SESSION_ID PROVIDER MODEL --reasoning-effort high --operation-id UUID
 pnpm cli model-relay-status UUID
 pnpm cli handoff SESSION_ID TARGET_NODE_ID --provider PROVIDER --model MODEL

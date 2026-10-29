@@ -52,7 +52,10 @@ class ScriptedModel extends LlmAdapter {
       context:
         m === 'unknown'
           ? undefined
-          : { contextWindow: m === 'tiny' ? 4096 : 2000000 },
+          : {
+              contextWindow:
+                m === 'tiny' ? 4096 : m === 'balanced' ? 32768 : 2000000,
+            },
       inputModalities: m === 'no-text' ? [] : ['text' as const],
     }
   }

@@ -10,7 +10,7 @@ import type {
 } from '../../protocol/src/model-relay.js'
 import { modelRoute } from '../../protocol/src/handoff.js'
 import { MeshError } from '../../protocol/src/index.js'
-import { inspectModel, type ModelBudget } from './model-compatibility.js'
+import { type ModelBudget } from './model-compatibility.js'
 
 interface Pending {
   sessionId: string
@@ -26,7 +26,12 @@ interface Hooks {
   route(agent: Agent): ModelRoute
   resources(agent: Agent): Promise<void>
   wait(work: Promise<void>): Promise<void>
-  guard(id: string, budget: ModelBudget): void
+  guard(id: string, budget: ModelBudget): Promise<void>
+  inspect(
+    agent: Agent,
+    target: ModelRoute,
+    allowEstimate?: boolean,
+  ): Promise<ModelBudget>
 }
 const equal = (a: ModelRoute | null, b: ModelRoute) =>
   JSON.stringify(a) === JSON.stringify(b)
@@ -42,7 +47,11 @@ export class ModelRelayController {
     readonly hooks: Hooks,
   ) {}
   async select(
-    request: ModelRoute & { sessionId: string; operationId?: string },
+    request: ModelRoute & {
+      sessionId: string
+      operationId?: string
+      allowEstimatedCapacity?: boolean
+    },
   ) {
     const target = modelRoute.parse(request)
     const previous = this.pending.get(request.sessionId)
@@ -116,20 +125,14 @@ export class ModelRelayController {
       } catch {
         /* A fresh native conversation may have no recorded route yet. */
       }
-      const llm =
-        this.ctx.get('agentPresets')?.serviceFor(agent, 'llm') ??
-        agent.ctx.get('llm') ??
-        this.ctx.llm
-      const budget = await inspectModel(
-        llm,
-        agent.session,
+      const budget = await this.hooks.inspect(
+        agent,
         target,
-        undefined,
-        agent.options.maxTokens,
+        request.allowEstimatedCapacity,
       )
       await this.ctx.sessions.flush(agent.session)
       if (equal(source, target)) {
-        this.hooks.guard(agent.id, budget)
+        await this.hooks.guard(agent.id, budget)
         this.hooks.release(agent.id)
         return { selected: target }
       }
@@ -207,7 +210,7 @@ export class ModelRelayController {
           'MODEL_RELAY_CHANGED',
           'model selection could not be confirmed',
         )
-      this.hooks.guard(pending.sessionId, pending.budget)
+      await this.hooks.guard(pending.sessionId, pending.budget)
       this.pending.delete(pending.sessionId)
       this.hooks.release(pending.sessionId)
       return { selected: saved.target }

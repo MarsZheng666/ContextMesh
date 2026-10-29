@@ -8,6 +8,7 @@ const modelChoice = z.object({
 import { en, type Key } from './locales.js'
 import type { ListDirectory } from './directory.js'
 export const snapshotSchema = z.object({
+  modelPreflight: z.boolean().optional(),
   connection: z
     .object({
       endpoint: z.string(),
@@ -115,6 +116,31 @@ export class UiModel {
       if (session?.activeNodeId && session.activeNodeId !== data.nodeId) {
         await this.ensureOwned(sessionId, t, undefined, target)
         return true
+      }
+      if (data.modelPreflight && session?.activeNodeId === data.nodeId) {
+        const report = modelCheckSchema.parse(
+          await this.request({ action: 'model-check', sessionId, ...target }),
+        )
+        if (!report.capacity.conservativeFits) {
+          if (!report.capacity.estimatedFits)
+            throw new ControlError(
+              'MODEL_CONTEXT_TOO_SMALL',
+              t('MODEL_CONTEXT_TOO_SMALL'),
+            )
+          if (
+            !this.confirmTakeover(
+              `${t('capacityConfirm')}\n${t('capacityEstimate')}: ${report.capacity.estimatedTokens}; ${t('capacityWindow')}: ${report.capacity.contextWindow}`,
+            )
+          )
+            return true
+          await this.request({
+            action: 'approve-model-capacity',
+            sessionId,
+            ...target,
+            historyCut: report.historyCut,
+            confirmed: true,
+          })
+        }
       }
       if (this.selections.has(sessionId))
         throw new ControlError('MODEL_RELAY_BUSY', t('MODEL_RELAY_BUSY'))
@@ -515,3 +541,30 @@ ${t('takeoverEffect')}${targetModel ? '\n\n' + t('targetModel') + ': ' + targetM
     this.listeners.clear()
   }
 }
+
+export const modelCheckSchema = z.object({
+  route: z.object({
+    provider: z.string(),
+    model: z.string(),
+    reasoningEffort: z.string().optional(),
+  }),
+  historyCut: z.number().int().nonnegative(),
+  capacity: z.object({
+    method: z.string(),
+    exact: z.literal(false),
+    estimatedTokens: z.number().nonnegative(),
+    byteUpperBound: z.number().nonnegative(),
+    outputReserve: z.number().nonnegative(),
+    headroom: z.number().nonnegative(),
+    contextWindow: z.number().positive(),
+    conservativeFits: z.boolean(),
+    estimatedFits: z.boolean(),
+  }),
+  capabilities: z
+    .object({
+      textInput: z.boolean(),
+      tools: z.union([z.boolean(), z.string()]),
+      maxOutputTokens: z.number().nullable(),
+    })
+    .passthrough(),
+})

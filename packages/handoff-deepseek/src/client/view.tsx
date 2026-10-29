@@ -1,3 +1,4 @@
+import { ModelCheckPanel } from './models.js'
 import { DeviceSetup } from './devices.js'
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
@@ -505,6 +506,9 @@ export function RemotePanelView({
         {t('device')}: {data.name}
       </div>
       <DeviceSetup connection={data.connection} request={request} t={t} />
+      {data.modelPreflight && (
+        <ModelCheckPanel data={data} request={request} t={t} />
+      )}
       <p className="cm-notice">{t('prepare')}</p>
       {(failure || error) && (
         <p className="cm-error" role="alert">
@@ -870,7 +874,7 @@ export function HandoffDock({
     <div className="cm-dock">
       {state.error && (
         <span role="status" className="cm-error">
-          {t('CONNECTION_LOST')}
+          {errorText(state.error, t)}
         </span>
       )}
       <style>{style}</style>

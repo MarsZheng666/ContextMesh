@@ -16,6 +16,7 @@ const names = new Set([
   'history',
   'models',
   'model-select',
+  'model-check',
   'model-relay-status',
   'takeover',
 ])
@@ -43,6 +44,8 @@ export async function runLocal(input: string[]): Promise<boolean> {
     chosen = option('--model'),
     reasoningEffort = option('--reasoning-effort'),
     operationId = option('--operation-id')
+  const allowEstimate = args.includes('--allow-estimate')
+  if (allowEstimate) args.splice(args.indexOf('--allow-estimate'), 1)
   const confirm = args.includes('--confirm')
   if (confirm) args.splice(args.indexOf('--confirm'), 1)
   if ((provider && !chosen) || (!provider && chosen))
@@ -57,6 +60,8 @@ export async function runLocal(input: string[]): Promise<boolean> {
       : undefined
   const [name, id, value, modelId] = args
   if (!name || !names.has(name)) return false
+  if (allowEstimate && name !== 'model-select')
+    throw new Error('--allow-estimate applies only to a local model selection')
   let command: unknown
   switch (name) {
     case 'models':
@@ -66,13 +71,15 @@ export async function runLocal(input: string[]): Promise<boolean> {
       if (!id) throw new Error('Usage: model-relay-status <operation-id>')
       command = { action: 'model-relay-status', operationId: id }
       break
+    case 'model-check':
     case 'model-select':
       if (!id || !value || !modelId)
         throw new Error(
           'Usage: model-select <session-id> <provider> <model> [--reasoning-effort value] [--operation-id uuid]',
         )
       command = {
-        action: 'select-model',
+        action: name === 'model-check' ? 'model-check' : 'select-model',
+        ...(allowEstimate ? { allowEstimatedCapacity: true } : {}),
         sessionId: id,
         provider: value,
         model: modelId,

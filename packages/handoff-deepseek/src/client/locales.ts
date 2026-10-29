@@ -1,4 +1,28 @@
 export const en = {
+  modelCheck: 'Model relay preflight',
+  checkModel: 'Check compatibility',
+  checkSession: 'Conversation on this device',
+  checkTarget: 'Target model',
+  capacityEstimate: 'Estimated input tokens',
+  capacityUpper: 'Conservative input bound',
+  capacityWindow: 'Context window',
+  capacityOutput: 'Reserved output',
+  capacityExactNotice:
+    'This is a local estimate, not the provider tokenizer. History is never truncated.',
+  capacityFits: 'Fits conservative checks',
+  capacityReview:
+    'Estimated fit only; explicit confirmation is required when selecting this model.',
+  capacityBlocked:
+    'This model may not fit. Choose a larger model or reduce the task explicitly.',
+  capacityConfirm:
+    'Only the heuristic estimate fits this model. The provider may still refuse the request. Continue using estimates for this selected conversation, without truncating history?',
+  MODEL_CAPACITY_CHANGED:
+    'The conversation changed after capacity review. Check and confirm again; your draft is kept.',
+  MODEL_TOOLS_UNSUPPORTED:
+    'This model does not support this tool history. Choose a tool-capable model or a tool-free preset.',
+  MODEL_OUTPUT_LIMIT:
+    'The output limit is incompatible. Adjust the target adapter output setting before selecting it.',
+
   connectionTitle: 'Service connection',
   manageDevices: 'Add or revoke a device',
   pairHelp:
@@ -182,6 +206,27 @@ export const en = {
 } as const
 export type Key = keyof typeof en
 export const zh: Record<Key, string> = {
+  modelCheck: '模型接力预检',
+  checkModel: '检查兼容性',
+  checkSession: '当前设备上的会话',
+  checkTarget: '目标模型',
+  capacityEstimate: '估算输入 Token',
+  capacityUpper: '保守输入上界',
+  capacityWindow: '上下文窗口',
+  capacityOutput: '预留输出',
+  capacityExactNotice:
+    '这是本地估算，不等同于提供方的 tokenizer；不会自动截断历史。',
+  capacityFits: '通过保守检查',
+  capacityReview: '仅估算可容纳；切换时需要明确确认。',
+  capacityBlocked: '目标可能无法容纳，请选择更大窗口模型或明确缩减任务。',
+  capacityConfirm:
+    '当前只有启发式估算能够容纳，提供方仍可能拒绝请求。是否为这次会话的模型选择使用估算模式？不会截断历史。',
+  MODEL_CAPACITY_CHANGED:
+    '容量确认后会话已变化，请重新检查并确认，草稿已保留。',
+  MODEL_TOOLS_UNSUPPORTED:
+    '目标模型不支持此工具历史，请选择支持工具的模型或无工具预设。',
+  MODEL_OUTPUT_LIMIT: '输出上限不兼容，请先调整目标适配器的输出配置。',
+
   connectionTitle: '服务连接',
   manageDevices: '添加或撤销设备',
   pairHelp: '在这台管理设备上创建一次性邀请，只分享给你信任的自有设备。',

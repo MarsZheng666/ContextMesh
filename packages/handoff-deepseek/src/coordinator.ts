@@ -7,9 +7,15 @@ import { deviceName } from '../../protocol/src/devices.js'
 import { ModelRelayController } from './model-relay.js'
 import {
   inspectModel,
+  analyzeModel,
   assertRequestBudget,
   type ModelBudget,
 } from './model-compatibility.js'
+import {
+  modelProfile,
+  type ModelProfile,
+  capacityMode,
+} from './model-profile.js'
 import { ModelRelayClient } from '../../client/src/model-relay.js'
 import type { ModelRoute } from '../../protocol/src/model-relay.js'
 import { SessionId, Session, type SessionEvent } from '@deepseek-ai/dsh-session'
@@ -61,6 +67,9 @@ const stateSchema = z.object({
         route: modelRoute,
         contextWindow: z.number().positive(),
         outputReserve: z.number().positive(),
+        capacityMode: capacityMode.optional(),
+        maxOutputTokens: z.number().int().positive().optional(),
+        toolsAllowed: z.boolean().optional(),
       }),
     )
     .default({}),
@@ -80,7 +89,18 @@ const commandSchema = z.discriminatedUnion('action', [
   }),
   z.object({ action: z.literal('models') }),
   modelRoute.extend({
+    action: z.literal('model-check'),
+    sessionId: z.string().min(1).max(256),
+  }),
+  modelRoute.extend({
+    action: z.literal('approve-model-capacity'),
+    sessionId: z.string().min(1).max(256),
+    historyCut: z.number().int().nonnegative(),
+    confirmed: z.literal(true),
+  }),
+  modelRoute.extend({
     action: z.literal('select-model'),
+    allowEstimatedCapacity: z.boolean().optional(),
     sessionId: z.string().min(1).max(256),
     operationId: z.uuid().optional(),
   }),
@@ -131,6 +151,7 @@ const commandSchema = z.discriminatedUnion('action', [
   }),
 ])
 export interface RuntimeConfig {
+  modelProfiles?: ModelProfile[]
   stateDir: string
   nodeName: string
   pollMs: number
@@ -199,6 +220,10 @@ async function bounded(
 }
 
 export class HandoffCoordinator {
+  private readonly capacityApprovals = new Map<
+    string,
+    { agent: Agent; route: string; cut: number; expires: number }
+  >()
   readonly relay: ModelRelayController
   readonly client: HandoffClient
   private readonly abort = new AbortController()
@@ -237,6 +262,8 @@ export class HandoffCoordinator {
         resources: (agent) => this.resources(agent),
         wait: (work) => bounded(work, config.waitIdleMs, this.abort.signal),
         guard: (id, budget) => this.guardModel(id, budget),
+        inspect: (agent, target, allow) =>
+          this.inspectSelection(agent, target, allow),
       },
     )
   }
@@ -286,6 +313,16 @@ export class HandoffCoordinator {
       throw new Error(
         'This state directory belongs to another device; use a separate DSH home',
       )
+    config.modelProfiles = z
+      .array(modelProfile)
+      .default([])
+      .parse(config.modelProfiles)
+    if (
+      new Set(
+        config.modelProfiles.map((p) => JSON.stringify([p.provider, p.model])),
+      ).size !== config.modelProfiles.length
+    )
+      throw new Error('Duplicate model profiles are not allowed')
     const service = new HandoffCoordinator(ctx, config, state)
     await service.client.register(
       config.nodeName || hostname(),
@@ -352,9 +389,83 @@ export class HandoffCoordinator {
     service.heartbeatTimer.unref()
     return service
   }
-  private guardModel(id: string, budget: ModelBudget) {
+  private profile(route: ModelRoute) {
+    return this.config.modelProfiles?.find(
+      (p) => p.provider === route.provider && p.model === route.model,
+    )
+  }
+  private modelRuntime(agent: Agent) {
+    return (
+      this.ctx.get('agentPresets')?.serviceFor(agent, 'llm') ??
+      agent.ctx.get('llm') ??
+      this.ctx.llm
+    )
+  }
+  private async inspectSelection(
+    agent: Agent,
+    target: ModelRoute,
+    allow = false,
+  ) {
+    const consent = this.capacityApprovals.get(agent.id)
+    let estimated = allow
+    if (consent) {
+      this.capacityApprovals.delete(agent.id)
+      if (
+        consent.agent !== agent ||
+        consent.cut !== agent.session.snapshotEvents().length ||
+        consent.route !== JSON.stringify(target) ||
+        consent.expires < Date.now()
+      )
+        throw new MeshError(
+          'MODEL_CAPACITY_CHANGED',
+          'conversation changed; inspect capacity and confirm again',
+        )
+      estimated = true
+    }
+    return inspectModel(
+      this.modelRuntime(agent),
+      agent.session,
+      target,
+      this.abort.signal,
+      agent.options.maxTokens,
+      {
+        profile: this.profile(target),
+        capacityMode: estimated ? 'estimated' : 'conservative',
+      },
+    )
+  }
+  async checkModel(sessionId: string, target: ModelRoute) {
+    const agent = this.ctx.agents.get(SessionId(sessionId))
+    if (!agent)
+      throw new MeshError(
+        'NOT_LOCAL_WRITER',
+        'open this conversation on its owning device first',
+      )
+    const result = await analyzeModel(
+      this.modelRuntime(agent),
+      agent.session,
+      target,
+      this.abort.signal,
+      agent.options.maxTokens,
+      { profile: this.profile(target) },
+    )
+    return {
+      route: result.route,
+      historyCut: result.historyCut,
+      capacity: result.capacity,
+      capabilities: result.capabilities,
+    }
+  }
+  private async guardModel(id: string, budget: ModelBudget) {
+    const previous = this.state.modelBudgets[id]
     this.state.modelBudgets[id] = budget
-    void this.save().catch((error) => this.warn(id, error))
+    try {
+      await this.save()
+    } catch (error) {
+      if (previous) this.state.modelBudgets[id] = previous
+      else delete this.state.modelBudgets[id]
+      throw error
+    }
   }
   async models() {
     const llm = this.ctx.llm
@@ -798,6 +909,8 @@ export class HandoffCoordinator {
             snapshot,
             record.manifest.targetModel,
             this.abort.signal,
+            undefined,
+            { profile: this.profile(record.manifest.targetModel) },
           )
         } finally {
           await handle.close()
@@ -1075,9 +1188,10 @@ export class HandoffCoordinator {
           manifest.targetModel,
           this.abort.signal,
           agent.options.maxTokens,
+          { profile: this.profile(manifest.targetModel) },
         )
         native.installModelSelection(agent, manifest.targetModel)
-        this.guardModel(id, budget)
+        await this.guardModel(id, budget)
       }
       this.state.bindings[id] = binding
       await this.save()
@@ -1469,6 +1583,29 @@ export class HandoffCoordinator {
         return new DeviceClient(this.client.mesh).list()
       case 'revoke-device':
         return new DeviceClient(this.client.mesh).revoke(command.credentialId)
+      case 'model-check':
+        return this.checkModel(command.sessionId, modelRoute.parse(command))
+      case 'approve-model-capacity': {
+        const target = modelRoute.parse(command),
+          agent = this.ctx.agents.get(SessionId(command.sessionId))
+        const report = await this.checkModel(command.sessionId, target)
+        if (
+          !agent ||
+          report.historyCut !== command.historyCut ||
+          !report.capacity.estimatedFits
+        )
+          throw new MeshError(
+            'MODEL_CAPACITY_CHANGED',
+            'conversation or capacity changed; check again',
+          )
+        this.capacityApprovals.set(command.sessionId, {
+          agent,
+          route: JSON.stringify(target),
+          cut: command.historyCut,
+          expires: Date.now() + 60000,
+        })
+        return { approved: true }
+      }
       case 'models': {
         const models = await this.models()
         await this.client.register(this.config.nodeName, models)
@@ -1539,6 +1676,7 @@ export class HandoffCoordinator {
   }
   async status() {
     return {
+      modelPreflight: true,
       connection: {
         endpoint: this.client.mesh.endpoint,
         ...(await new DeviceClient(this.client.mesh).identity()),

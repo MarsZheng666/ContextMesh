@@ -34,7 +34,25 @@ ContextMesh 暂停新输入，等待已接收的当前工作结束，完成目�
 
 目标必须声明文本输入支持和上下文窗口。检查包括可移植内容、工具调用与结果配对、工具参数 JSON，以及目标支持的推理强度。显式输出上限按目标检查；省略推理强度时使用目标默认值，不继承原模型的强度。
 
-容量检查保守地用序列化后的 UTF-8 字节数估算输入，并预留输出空间和额外余量，不等同于提供方的 tokenizer，因此可能拒绝实际能够容纳的会话。实际发送时还会用组装后的消息和工具再次检查。凭证、服务可用性和提供方实际计算的容量仍可能在调用时失败。不会为完成接力而自动截断历史或用摘要覆盖原文。
+打开“远程会话 → 模型兼容性检查”，可以只检查当前设备已打开的会话，不切换模型、不生成回复。报告展示序列化 UTF-8 字节上界、锁定版本 DSH 的启发式估算（另加 Unicode 和格式余量）、输出预留与目标窗口；两者都不是提供方 tokenizer 的精确结果。
+
+默认使用保守字节上界。只有启发式估算能够容纳时，原生模型选择器会询问是否按估算继续；确认绑定当前历史、模型路由和 Agent，60 秒过期且只消费一次。取消不改变选择。选定策略保存在本机，重启后仍生效。跨设备交接始终使用保守检查，本机确认不会降低另一台设备的要求。实际发送时还会用组装后的消息和工具再次检查。凭证、服务可用性和提供方实际计算的容量仍可能在调用时失败。不会为完成接力而自动截断历史或用摘要覆盖原文。
+
+路由元数据不完整时，可在现有 ContextMesh 插件配置中增加 `modelProfiles`：
+
+```yaml
+modelProfiles:
+  - provider: my-provider
+    model: my-model
+    textInput: true
+    contextWindow: 128000
+    tools: true
+    maxOutputTokens: 8192
+```
+
+填写提供方公布的限制。配置只能补充缺失元数据或缩小已知窗口，不能放大 SDK 已声明的上限，也不能开启 SDK 明确拒绝的输入类型。`tools: false` 拒绝工具历史和带工具的请求；`maxOutputTokens` 要求适配器显式配置输出上限并对其约束。这里不安装 Provider，也不提供模型凭证。修改配置后重启 DSH。
+
+兼容性测试通过已安装的 Responses、Chat Completions 和 Anthropic 适配器连接本地协议测试端点，验证完整工具历史与其他路由私有状态的隔离。这验证的是请求转换，不代表线上服务可用或所有模型均已认证。
 
 提供方私有重放状态保留在原始日志中；DSH 只有在同一适配器拥有历史与目标路由时才向它传递该状态，跨适配器使用公共消息投影。不承诺迁移模型未公开的内部状态。
 
@@ -44,7 +62,9 @@ ContextMesh 暂停新输入，等待已接收的当前工作结束，完成目�
 
 ```sh
 pnpm cli models
+pnpm cli model-check SESSION_ID PROVIDER MODEL
 pnpm cli model-select SESSION_ID PROVIDER MODEL
+pnpm cli model-select SESSION_ID PROVIDER MODEL --allow-estimate
 pnpm cli model-select SESSION_ID PROVIDER MODEL --reasoning-effort high --operation-id UUID
 pnpm cli model-relay-status UUID
 pnpm cli handoff SESSION_ID TARGET_NODE_ID --provider PROVIDER --model MODEL
