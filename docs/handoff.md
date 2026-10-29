@@ -86,11 +86,11 @@ Recovery clears the reservation and fences the previous writer; resuming remains
 
 ## Upgrade and transport
 
-The current server uses database schema **3**. Back up PostgreSQL and stop old clients before upgrading the server. Startup migrates schema 1 or 2 transactionally, preserving existing sessions and adding durable takeover requests. M0 ordinary storage clients remain usable outside an active handoff; their write-open and ordinary recovery cannot bypass its reservation. Older server binaries cannot run against schema 3. Rolling back requires the backup, not just replacing the binary.
+The current server uses database schema **4**. Back up PostgreSQL and stop old clients before upgrading the server. Startup migrates schema 1, 2 or 3 transactionally, preserving existing sessions and adding durable takeover requests. M0 ordinary storage clients remain usable outside an active handoff; their write-open and ordinary recovery cannot bypass its reservation. Older server binaries cannot run against schema 4. Rolling back requires the backup, not just replacing the binary.
 
 Use HTTPS for network connections, or loopback addresses through an SSH tunnel. Plain HTTP on loopback is not encryption by itself. Devices sharing a namespace token belong to one trust domain; device IDs route work and are not separate authorization credentials. Native DSH Host/Origin and owner authentication protect the browser control endpoint. The local Unix socket is accessible only to its OS user.
 
-M1 coordinates the same Harness and model route. Cross-model task relay, heterogeneous agents, file synchronization and automatic crash takeover remain future work.
+M1 coordinates the same Harness and model route. M2 adds [model relay](model-relay.md), including target model selection during takeover. Heterogeneous agents, file synchronization and automatic crash takeover remain future work.
 
 On explicit resume, a valid working directory inside the local mapped project is retained. A persisted absolute path from another device is restored through the handoff record and local mapping instead. Stricter session file permissions remain in effect.
 
@@ -98,4 +98,4 @@ When a remote conversation has no project, or this device has no matching direct
 
 The folder browser reads directories from the current DSH host: the server page browses server folders, and the local page browses local folders. Navigate folders or breadcrumbs, optionally show hidden folders or jump to a path, and choose **Use this folder** to fill the project directory. Cancelling browsing keeps the setup form unchanged.
 
-Directory handoffs declare `kind: directory` with no commit, while Git handoffs retain commit validation; legacy manifests without a kind remain Git handoffs. Both devices and the server must be updated before using directory handoffs. Database schema 3 is unchanged.
+Directory handoffs declare `kind: directory` with no commit, while Git handoffs retain commit validation; legacy manifests without a kind remain Git handoffs. Both devices and the server must be updated before using directory handoffs. Database schema 4 adds model-relay records.

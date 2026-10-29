@@ -11,6 +11,13 @@ export const nodeRegistration = operation.extend({
     takeoverVersion: z.literal(1).optional(),
     projectSetupVersion: z.literal(1).optional(),
     directoryHandoffVersion: z.literal(1).optional(),
+    modelRelayVersion: z.literal(1).optional(),
+    models: z
+      .array(
+        z.object({ provider: z.string(), model: z.string(), name: z.string() }),
+      )
+      .max(500)
+      .optional(),
     harness: z.literal('0.2.1-rc.3'),
     adapter: z.literal('deepseek'),
   }),
@@ -62,6 +69,7 @@ export const handoffManifest = z.object({
   }),
   workspace: workspaceProof,
   model: modelRoute,
+  targetModel: modelRoute.optional(),
   preset: z.string().min(1).max(200).optional(),
   harness: z.literal('0.2.1-rc.3'),
   adapter: z.literal('deepseek'),
@@ -129,6 +137,7 @@ export const takeoverRequest = operation.extend({
   instanceId: z.uuid(),
   expectedSourceNodeId: z.uuid(),
   confirmed: z.literal(true),
+  targetModel: modelRoute.optional(),
 })
 export const takeoverRecord = z.object({
   id: z.uuid(),
@@ -146,6 +155,7 @@ export const takeoverRecord = z.object({
   errorCode: z.string().nullable(),
   error: z.string().nullable(),
   expiresAt: z.number(),
+  targetModel: modelRoute.optional(),
 })
 export type TakeoverRecord = z.infer<typeof takeoverRecord>
 

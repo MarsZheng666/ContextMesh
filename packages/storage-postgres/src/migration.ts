@@ -69,6 +69,17 @@ CREATE TABLE cm_takeovers (
 CREATE UNIQUE INDEX cm_takeover_pending ON cm_takeovers(namespace,session_id) WHERE state='requested';
 INSERT INTO cm_schema(version) VALUES(3);
 `
+const v4 = `
+ALTER TABLE cm_sessions ADD COLUMN active_model_relay uuid;
+ALTER TABLE cm_takeovers ADD COLUMN target_model text;
+CREATE TABLE cm_model_relays (
+ namespace text NOT NULL,id uuid NOT NULL,session_id text NOT NULL,incarnation uuid NOT NULL,
+ node_id uuid NOT NULL,history_cut bigint NOT NULL,request text NOT NULL,state text NOT NULL DEFAULT 'prepared',
+ PRIMARY KEY(namespace,id),FOREIGN KEY(namespace,session_id) REFERENCES cm_sessions(namespace,id) ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX cm_model_relay_active ON cm_model_relays(namespace,session_id) WHERE state='prepared';
+INSERT INTO cm_schema(version) VALUES(4);
+`
 export async function migrate(pool: Pool): Promise<void> {
   const client = await pool.connect()
   try {
@@ -81,13 +92,17 @@ export async function migrate(pool: Pool): Promise<void> {
       'SELECT max(version) AS version FROM cm_schema',
     )
     let version = Number(result.rows[0].version)
-    if (version < 1 || version > 3)
+    if (version < 1 || version > 4)
       throw new Error('unsupported ContextMesh database schema')
     if (version === 1) {
       await client.query(v2)
       version = 2
     }
-    if (version === 2) await client.query(v3)
+    if (version === 2) {
+      await client.query(v3)
+      version = 3
+    }
+    if (version === 3) await client.query(v4)
     await client.query('COMMIT')
   } catch (error) {
     await client.query('ROLLBACK')

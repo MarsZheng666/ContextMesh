@@ -1,6 +1,6 @@
 # DeepSeek Harness compatibility patches
 
-These patch files modify @deepseek-ai/dsh-agent, dsh-agent-loop, dsh-api-session-controller, dsh-commands, dsh-sandbox-policy and dsh-client-ui-conversation version 0.2.1-rc.3 from [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). Original code is distributed under the following license.
+These patch files modify @deepseek-ai/dsh-agent, dsh-agent-loop, dsh-api-session-controller, dsh-commands, dsh-sandbox-policy, dsh-client-ui-conversation and dsh-client-ui-model-selection version 0.2.1-rc.3 from [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). Original code is distributed under the following license.
 
 ```text
 MIT License

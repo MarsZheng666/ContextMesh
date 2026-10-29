@@ -11,6 +11,7 @@ import { setSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
 import type {} from '../../packages/handoff-deepseek/src/index.js'
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
+import { modelRoute } from '../../packages/protocol/src/handoff.js'
 
 export const inject = [
   'agents',
@@ -28,13 +29,32 @@ const realModel = process.env.CONTEXTMESH_TEST_REAL_MODEL === '1'
 const provider = realModel ? 'deepseek-official' : 'contextmesh-e2e',
   model = realModel ? 'deepseek-flash' : 'scripted'
 class ScriptedModel extends LlmAdapter {
+  constructor(readonly route = provider) {
+    super()
+  }
   requests: GenerateOptions[] = []
   hold = false
+  release?: () => void
   override async listModels() {
-    return [{ provider, id: model, name: model }]
+    return [
+      {
+        provider: this.route,
+        id: this.route === provider ? model : 'relay',
+        name: this.route === provider ? model : 'relay',
+      },
+    ]
   }
   override async resolveModel(p: string, m: string) {
-    return { provider: p, id: m, name: m }
+    return {
+      provider: p,
+      id: m,
+      name: m,
+      context:
+        m === 'unknown'
+          ? undefined
+          : { contextWindow: m === 'tiny' ? 4096 : 2000000 },
+      inputModalities: m === 'no-text' ? [] : ['text' as const],
+    }
   }
   override async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     if (!options.purpose) this.requests.push(options)
@@ -45,10 +65,12 @@ class ScriptedModel extends LlmAdapter {
       try {
         await new Promise<void>((resolve) => {
           const done = () => resolve()
+          this.release = done
           signal.addEventListener('abort', done, { once: true })
           if (signal.aborted) done()
         })
-        throw new Error('scripted work cancelled for takeover')
+        if (signal.aborted)
+          throw new Error('scripted work cancelled for takeover')
       } finally {
         this.hold = false
       }
@@ -87,7 +109,11 @@ class ScriptedModel extends LlmAdapter {
     yield { type: 'text-delta', index: 0, text }
     yield { type: 'block-end', index: 0, block: { type: 'text', text } }
     yield { type: 'usage', usage: { inputTokens: 10, outputTokens: 10 } }
-    yield { type: 'finish', reason: { kind: 'stop' } }
+    yield {
+      type: 'finish',
+      reason: { kind: 'stop' },
+      replayState: { response: { fixturePrivateState: this.route } },
+    }
   }
 }
 const input = z.object({
@@ -102,10 +128,13 @@ const input = z.object({
     'start-running',
     'history-follow',
     'native-resume',
+    'select-model',
+    'finish-running',
   ]),
   sessionId: z.string().optional(),
   text: z.string().optional(),
   command: z.unknown().optional(),
+  selection: modelRoute.optional(),
   finalTitle: z.string().optional(),
   cwd: z.string().optional(),
   mode: z
@@ -143,7 +172,12 @@ export async function apply(ctx: Context) {
     }
   })
   const adapter = new ScriptedModel()
-  if (!realModel) ctx.llm.registerAdapter([provider], adapter)
+  const second = new ScriptedModel('contextmesh-second')
+  if (!realModel) {
+    if (process.env.TEST_SKIP_SOURCE_MODEL !== '1')
+      ctx.llm.registerAdapter([provider], adapter)
+    ctx.llm.registerAdapter(['contextmesh-second'], second)
+  }
   const receive = (raw: unknown) => {
     void (async () => {
       let id: number | undefined
@@ -163,6 +197,15 @@ export async function apply(ctx: Context) {
             sessionId,
             provider,
             model,
+          })
+        } else if (request.action === 'finish-running') {
+          adapter.release?.()
+          value = { released: true }
+        } else if (request.action === 'select-model') {
+          if (!request.selection) throw new Error('selection required')
+          value = await ctx.sessionController.selectModel({
+            sessionId,
+            ...request.selection,
           })
         } else if (request.action === 'start-running') {
           adapter.hold = true
@@ -251,8 +294,19 @@ export async function apply(ctx: Context) {
               : null
           value = {
             browserGraph,
+            defaultModel: ctx.get('agentDefaultModel')?.currentSelection(),
+            modelRequests: [...adapter.requests, ...second.requests].map(
+              (r) => ({
+                provider: r.provider,
+                model: r.model,
+                messages: r.messages,
+                tools: r.tools,
+              }),
+            ),
             sidebarSessions: [...sidebarSessions.values()],
             live: Boolean(agent),
+            controlled: ctx.agents.isControlled(sessionId),
+            holding: Boolean(adapter.hold && adapter.release),
             running: agent?.status === 'running',
             frozen: ctx.contextmeshHandoff
               ? await ctx.contextmeshHandoff.command({ action: 'status' })

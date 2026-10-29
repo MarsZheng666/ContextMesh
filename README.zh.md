@@ -8,13 +8,13 @@ ContextMesh 让 Agent 的会话不再局限于一台机器。它将对话历史�
 
 首个集成对象是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)。长期目标是构建模型无关的上下文服务，支持跨机器交接、跨模型任务接力，以及不同 Coding Agent 之间的协作。
 
-[快速开始](docs/getting-started.zh.md) · [插件接口](docs/api/deepseek-adapter.md) · [部署指南](docs/deployment.md)
+[快速开始](docs/getting-started.zh.md) · [插件接口](docs/api/deepseek-adapter.md) · [部署指南](docs/deployment.md) · [模型接力](docs/model-relay.zh.md)
 
 ## 开发者预览
 
-ContextMesh 目前处于**开发者预览**阶段。M1 为本仓库锁定的 DeepSeek Harness **0.2.1-rc.3** 提供远程 Session 存储和协调交接，接口可能随开发调整。
+ContextMesh 目前处于**开发者预览**阶段。M1/M2 为本仓库锁定的 DeepSeek Harness **0.2.1-rc.3** 提供远程 Session 存储、协调交接与模型接力，接口可能随开发调整。
 
-支持将会话交接到另一台设备上的目录，共享标题并显示当前设备。普通目录无需 Git；代码工作区仍校验两端相同、干净的 Git 提交。M1 需要本仓库随附的显式 DSH 兼容补丁，文件同步与跨模型接力属于后续阶段。
+支持将会话交接到另一台设备上的目录，共享标题并显示当前设备。普通目录无需 Git；代码工作区仍校验两端相同、干净的 Git 提交。M1 需要本仓库随附的显式 DSH 兼容补丁，可通过原生选择器换模型，或在跨设备接管时选择目标模型，见[模型接力指南](docs/model-relay.zh.md)。文件同步属于后续阶段。
 
 ## 核心能力
 
@@ -29,7 +29,7 @@ DeepSeek Harness A ─┐
 DeepSeek Harness B ─┘
 ```
 
-M1 已加入同一 Harness 的跨机器交接、共享标题、远程会话面板和 CLI。使用本仓库锁定的运行时及显式兼容补丁，普通目录可直接接管；代码工作区需在两端准备相同、干净的 Git commit。见 [跨机器交接指南](docs/handoff.zh.md)。文件同步与跨模型接力属于后续阶段。
+M1 已加入同一 Harness 的跨机器交接、共享标题、远程会话面板和 CLI。使用本仓库锁定的运行时及显式兼容补丁，普通目录可直接接管；代码工作区需在两端准备相同、干净的 Git commit。见 [跨机器交接指南](docs/handoff.zh.md)。可通过原生选择器换模型，或在跨设备接管时选择目标模型，见[模型接力指南](docs/model-relay.zh.md)。文件同步属于后续阶段。
 
 ## 快速开始
 
@@ -93,12 +93,13 @@ export 将原生会话日志输出到标准输出。CLI 从仓库根目录的 `.
 
 ## 开发路线
 
-| 能力                            | 状态   |
-| ------------------------------- | ------ |
-| 远程 Session 持久化与恢复       | 已支持 |
+| 能力                            | 状态    |
+| ------------------------------- | ------- |
+| 远程 Session 持久化与恢复       | 已支持  |
 | 带工作区映射的受控交接          | M1 预览 |
-| 同一 Harness 内的跨模型任务接力 | 规划中 |
-| 更多 Coding Agent 集成          | 规划中 |
+| 同一 Harness 内的跨模型任务接力 | M2 预览 |
+| 设备配对与配置流程简化          | 规划中  |
+| 更多 Coding Agent 集成          | 规划中  |
 
 ## 参与开发
 

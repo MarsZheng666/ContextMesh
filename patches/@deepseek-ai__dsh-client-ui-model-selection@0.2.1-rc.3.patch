@@ -1,0 +1,46 @@
+diff --git a/lib/client.js b/lib/client.js
+--- a/lib/client.js
++++ b/lib/client.js
+@@ -833,7 +833,9 @@
+ 			* @param isBlank - whether this Session has no first message yet.
+ 			* @param track - desktop-only callback after a successful user selection.
+ 			*/
+-			constructor(sessions, sessionId, available, catalog, projected, isBlank, track) {
++			constructor(sessions, sessionId, available, catalog, projected, isBlank, track, beforeSelect, afterSelect) {
++                this.beforeSelect = beforeSelect;
++                this.afterSelect = afterSelect;
+ 				this.sessions = sessions;
+ 				this.sessionId = sessionId;
+ 				this.available = available;
+@@ -869,6 +871,7 @@
+ 			async select(selection) {
+ 				this.assertAvailable();
+ 				const previous = this.store.getSnapshot().current;
++                if (await this.beforeSelect?.(previous, selection) === true) return { ok: true, value: undefined };
+ 				const previousEffort = previous?.reasoningEffort ?? (previous === null ? void 0 : this.catalog.reasoningFor(previous)?.defaultEffort);
+ 				const nextEffort = selection.reasoningEffort ?? this.catalog.reasoningFor(selection)?.defaultEffort;
+ 				const generation = ++this.generation;
+@@ -877,12 +880,12 @@
+ 					s.pending = selection;
+ 					s.error = null;
+ 				});
+-				const result = await this.sessions.selectModel({
++				const result = await (async () => { try { return await this.sessions.selectModel({
+ 					sessionId: this.sessionId,
+ 					provider: selection.provider,
+ 					model: selection.model,
+ 					...selection.reasoningEffort === void 0 ? {} : { reasoningEffort: selection.reasoningEffort }
+-				});
++				}); } finally { this.afterSelect?.(); } })();
+ 				if (this.disposed || generation !== this.generation) return result.ok ? {
+ 					ok: true,
+ 					value: void 0
+@@ -1031,7 +1034,7 @@
+ 				if (binding === void 0) throw new Error(`ui-model-selection: session "${String(sessionId)}" resolved no binding`);
+ 				const existing = live.directories.get(binding);
+ 				if (existing !== void 0) return existing;
+-				const directory = new ModelDirectory(this.ctx.remote.session, sessionId, () => sessions.subagentAddress(sessionId) === void 0, this.catalog, binding.session.projections.faceOf("modelSelection"), () => binding.session.getSnapshot().blank, (name, attributes) => this.ctx.get("productAnalytics")?.track(name, attributes));
++				const directory = new ModelDirectory(this.ctx.remote.session, sessionId, () => sessions.subagentAddress(sessionId) === void 0, this.catalog, binding.session.projections.faceOf("modelSelection"), () => binding.session.getSnapshot().blank, (name, attributes) => this.ctx.get("productAnalytics")?.track(name, attributes), (previous, selection) => this.ctx.bail("model-selection/before-select", sessionId, previous, selection), () => this.ctx.emit("model-selection/after-select", sessionId));
+ 				live.directories.set(binding, directory);
+ 				actx.effect(() => () => {
+ 					directory.dispose();

@@ -2,11 +2,15 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, AgentControl, AgentHandle } from '@deepseek-ai/dsh-agent'
 import { createScope } from '@deepseek-ai/dsh-scope'
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+import { ModelRelayController } from './model-relay.js'
 import {
-  SessionId,
-  type Session,
-  type SessionEvent,
-} from '@deepseek-ai/dsh-session'
+  inspectModel,
+  assertRequestBudget,
+  type ModelBudget,
+} from './model-compatibility.js'
+import { ModelRelayClient } from '../../client/src/model-relay.js'
+import type { ModelRoute } from '../../protocol/src/model-relay.js'
+import { SessionId, Session, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { setSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
 import type {} from '@deepseek-ai/dsh-jobs'
 import type {} from '@deepseek-ai/dsh-terminal'
@@ -48,20 +52,39 @@ const stateSchema = z.object({
   version: z.literal(1),
   nodeId: z.uuid(),
   bindings: z.record(z.string(), bindingSchema),
+  modelBudgets: z
+    .record(
+      z.string(),
+      z.object({
+        route: modelRoute,
+        contextWindow: z.number().positive(),
+        outputReserve: z.number().positive(),
+      }),
+    )
+    .default({}),
 })
 const commandSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('status') }),
+  z.object({ action: z.literal('models') }),
+  modelRoute.extend({
+    action: z.literal('select-model'),
+    sessionId: z.string().min(1).max(256),
+    operationId: z.uuid().optional(),
+  }),
+  z.object({ action: z.literal('model-relay-status'), operationId: z.uuid() }),
   z.object({ action: z.literal('refresh') }),
   z.object({
     action: z.literal('handoff'),
     sessionId: z.string().min(1).max(256),
     targetNodeId: z.uuid(),
     projectId: z.uuid().optional(),
+    targetModel: modelRoute.optional(),
   }),
   z.object({
     action: z.literal('takeover'),
     sessionId: z.string().min(1).max(256),
     confirmed: z.literal(true),
+    targetModel: modelRoute.optional(),
     operationId: z.uuid().optional(),
   }),
   z.object({ action: z.literal('takeover-status'), takeoverId: z.uuid() }),
@@ -163,6 +186,7 @@ async function bounded(
 }
 
 export class HandoffCoordinator {
+  readonly relay: ModelRelayController
   readonly client: HandoffClient
   private readonly abort = new AbortController()
   private readonly controls = new Map<string, AgentControl>()
@@ -182,6 +206,7 @@ export class HandoffCoordinator {
   private heartbeating: Promise<void> | undefined
   private pollTimer: ReturnType<typeof setInterval> | undefined
   private heartbeatTimer: ReturnType<typeof setInterval> | undefined
+  private catalogRefreshed = 0
   private closing = false
   private constructor(
     readonly ctx: Context,
@@ -189,6 +214,18 @@ export class HandoffCoordinator {
     private readonly state: z.infer<typeof stateSchema>,
   ) {
     this.client = new HandoffClient(ctx.contextmesh.client, state.nodeId)
+    this.relay = new ModelRelayController(
+      ctx,
+      new ModelRelayClient(ctx.contextmesh.client, state.nodeId),
+      {
+        freeze: (id) => this.freeze(id),
+        release: (id) => this.release(id),
+        route: (agent) => this.route(agent),
+        resources: (agent) => this.resources(agent),
+        wait: (work) => bounded(work, config.waitIdleMs, this.abort.signal),
+        guard: (id, budget) => this.guardModel(id, budget),
+      },
+    )
   }
   static async start(ctx: Context, config: RuntimeConfig) {
     if (
@@ -203,10 +240,11 @@ export class HandoffCoordinator {
     if (
       !capabilities.features?.includes('handoff-v1') ||
       !capabilities.features.includes('takeover-v1') ||
-      !capabilities.features.includes('directory-handoff-v1')
+      !capabilities.features.includes('directory-handoff-v1') ||
+      !capabilities.features.includes('model-relay-v1')
     )
       throw new Error(
-        'Upgrade ContextMesh server: handoff-v1, takeover-v1 and directory-handoff-v1 are required',
+        'Upgrade ContextMesh server: handoff-v1, takeover-v1, directory-handoff-v1 and model-relay-v1 are required',
       )
     await mkdir(config.stateDir, { recursive: true, mode: 0o700 })
     const path = join(config.stateDir, 'node.json')
@@ -221,11 +259,34 @@ export class HandoffCoordinator {
         error.code === 'ENOENT'
       ))
         throw error
-      state = { version: 1, nodeId: randomUUID(), bindings: {} }
+      state = {
+        version: 1,
+        nodeId: randomUUID(),
+        bindings: {},
+        modelBudgets: {},
+      }
       await writeFile(path, JSON.stringify(state), { flag: 'wx', mode: 0o600 })
     }
     const service = new HandoffCoordinator(ctx, config, state)
-    await service.client.register(config.nodeName || hostname())
+    await service.client.register(
+      config.nodeName || hostname(),
+      await service.models(),
+    )
+    await service.relay
+      .reconcile()
+      .catch((error) => service.warn('model-relay', error))
+    ctx.on('llm/stream', async function* (options, next) {
+      const budget =
+        options.sessionId && service.state.modelBudgets[options.sessionId]
+      if (
+        !options.purpose &&
+        budget &&
+        options.provider === budget.route.provider &&
+        options.model === budget.route.model
+      )
+        assertRequestBudget(options, budget)
+      yield* next()
+    })
     ctx.on('agent/created', async ({ agent }) => {
       await service.bindExisting(agent)
       service.dirty.add(agent.id)
@@ -272,6 +333,27 @@ export class HandoffCoordinator {
     service.heartbeatTimer.unref()
     return service
   }
+  private guardModel(id: string, budget: ModelBudget) {
+    this.state.modelBudgets[id] = budget
+    void this.save().catch((error) => this.warn(id, error))
+  }
+  async models() {
+    const llm = this.ctx.llm
+    const groups = await Promise.all(
+      llm.listProviders().map(async (provider) => {
+        try {
+          return (await llm.listModels(provider.id)).map((model) => ({
+            provider: provider.id,
+            model: model.id,
+            name: model.name,
+          }))
+        } catch {
+          return []
+        }
+      }),
+    )
+    return groups.flat().slice(0, 500)
+  }
   private warn(id: string, error: unknown) {
     this.errors.set(id, message(error))
     this.ctx.logger.warn(`contextmesh handoff ${id}: ${message(error)}`)
@@ -301,8 +383,13 @@ export class HandoffCoordinator {
   }
   private async heartbeat() {
     if (this.closing || this.heartbeating) return
-    this.heartbeating = this.client
-      .heartbeat()
+    this.heartbeating = (async () => {
+      await this.client.heartbeat()
+      if (Date.now() - this.catalogRefreshed > 30000) {
+        await this.client.register(this.config.nodeName, await this.models())
+        this.catalogRefreshed = Date.now()
+      }
+    })()
       .then(
         () => {
           this.errors.delete('heartbeat')
@@ -437,7 +524,9 @@ export class HandoffCoordinator {
     targetNodeId: string,
     projectId?: string,
     takeover?: TakeoverRecord,
+    targetModel?: ModelRoute,
   ) {
+    targetModel ??= takeover?.targetModel
     if (this.closing) throw new Error('ContextMesh is stopping')
     const native = this.ctx.get('sessionController')
     if (native && native.lifecycleControlVersion !== 1)
@@ -491,6 +580,7 @@ export class HandoffCoordinator {
         adapter: 'deepseek',
         workspace: workspace.proof,
         model: this.route(agent),
+        ...(targetModel ? { targetModel } : {}),
         sandbox: {
           mode: resolved.mode,
           relativeRoot: relativeInside(workspace.root, resolved.workspaceRoot),
@@ -573,6 +663,9 @@ export class HandoffCoordinator {
     if (this.closing) return
     if (this.polling) return this.polling
     this.polling = (async () => {
+      await this.relay
+        .reconcile()
+        .catch((error) => this.warn('model-relay', error))
       for (const id of this.pendingRequests.keys()) {
         if (!this.jobs.has(id))
           await this.exclusive(id, () => this.reconcileRequest(id)).catch(
@@ -656,7 +749,41 @@ export class HandoffCoordinator {
         presets?.serviceFor({ ctx: context }, 'llm') ??
         context.get('llm') ??
         this.ctx.llm
-      await llm.prepareCall(this.options(record.manifest))
+      await llm.prepareCall(
+        this.options({
+          ...record.manifest,
+          model: record.manifest.targetModel ?? record.manifest.model,
+        }),
+      )
+      if (record.manifest.targetModel) {
+        if (this.ctx.get('sessionController')?.modelRelayVersion !== 1)
+          throw new MeshError(
+            'MODEL_RELAY_UNSUPPORTED',
+            'update the model relay bridge',
+          )
+        const handle = await this.ctx.contextmesh.open(
+          SessionId(record.sessionId),
+          'read',
+        )
+        try {
+          const log = await handle.read()
+          const snapshot = Session.fromRestore(
+            handle.id,
+            log.events,
+            handle.header,
+            handle.inheritedEventCount,
+            log.eventState,
+          )
+          await inspectModel(
+            llm,
+            snapshot,
+            record.manifest.targetModel,
+            this.abort.signal,
+          )
+        } finally {
+          await handle.close()
+        }
+      }
     } finally {
       await probe?.dispose()
     }
@@ -811,6 +938,8 @@ export class HandoffCoordinator {
               record.manifest,
               mapping,
               current.incarnation,
+              false,
+              true,
             ),
           ),
         )
@@ -878,6 +1007,7 @@ export class HandoffCoordinator {
     mapping: ProjectMapping,
     incarnation: string,
     preserveLocalCwd = false,
+    installTargetModel = false,
   ) {
     const policyRoot = await mappedDirectory(
       mapping,
@@ -910,6 +1040,26 @@ export class HandoffCoordinator {
         : cwd.cwd
       if (currentCwd !== restoredCwd)
         await this.ctx.workingDirectory.set(agent, restoredCwd)
+      if (installTargetModel && manifest.targetModel) {
+        if (!native || native.modelRelayVersion !== 1)
+          throw new MeshError(
+            'MODEL_RELAY_UNSUPPORTED',
+            'native model selection bridge is required',
+          )
+        const llm =
+          this.ctx.get('agentPresets')?.serviceFor(agent, 'llm') ??
+          agentCtx.get('llm') ??
+          this.ctx.llm
+        const budget = await inspectModel(
+          llm,
+          agent.session,
+          manifest.targetModel,
+          this.abort.signal,
+          agent.options.maxTokens,
+        )
+        native.installModelSelection(agent, manifest.targetModel)
+        this.guardModel(id, budget)
+      }
       this.state.bindings[id] = binding
       await this.save()
     }
@@ -1235,7 +1385,11 @@ export class HandoffCoordinator {
     }
     return assigned
   }
-  async takeover(sessionId: string, operationId: string = randomUUID()) {
+  async takeover(
+    sessionId: string,
+    operationId: string = randomUUID(),
+    targetModel?: ModelRoute,
+  ) {
     const session = (await this.client.sessions()).find(
       (s) => s.id === sessionId,
     )
@@ -1255,7 +1409,12 @@ export class HandoffCoordinator {
         'choose a project for this session first',
       )
     await mappedDirectory(await this.mapping(session.projectId), '')
-    return this.client.takeover(sessionId, session.activeNodeId, operationId)
+    return this.client.takeover(
+      sessionId,
+      session.activeNodeId,
+      operationId,
+      targetModel,
+    )
   }
   async takeoverStatus(id: string) {
     const intent = await this.client.getTakeover(id)
@@ -1282,6 +1441,18 @@ export class HandoffCoordinator {
   async command(input: unknown): Promise<unknown> {
     const command = commandSchema.parse(input)
     switch (command.action) {
+      case 'models': {
+        const models = await this.models()
+        await this.client.register(this.config.nodeName, models)
+        this.catalogRefreshed = Date.now()
+        return models
+      }
+      case 'select-model':
+        return this.exclusive(command.sessionId, () =>
+          this.relay.select(command),
+        )
+      case 'model-relay-status':
+        return this.relay.client.get(command.operationId)
       case 'status':
         return this.status()
       case 'refresh':
@@ -1293,10 +1464,16 @@ export class HandoffCoordinator {
             command.sessionId,
             command.targetNodeId,
             command.projectId,
+            undefined,
+            command.targetModel,
           ),
         )
       case 'takeover':
-        return this.takeover(command.sessionId, command.operationId)
+        return this.takeover(
+          command.sessionId,
+          command.operationId,
+          command.targetModel,
+        )
       case 'takeover-status':
         return this.takeoverStatus(command.takeoverId)
       case 'configure-project':
@@ -1337,6 +1514,9 @@ export class HandoffCoordinator {
       nodeId: this.client.nodeId,
       name: this.config.nodeName,
       nodes: await this.client.nodes(),
+      models: await this.models(),
+      modelRelays: await this.relay.client.pending(),
+      modelSwitching: [...this.relay.pending.keys()],
       projects: await this.client.projects(),
       mappings: await this.client.mappings(),
       sessions: await this.client.sessions(),

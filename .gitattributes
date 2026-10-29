@@ -1,0 +1,3 @@
+
+# Unified patches retain upstream context indentation verbatim.
+patches/*.patch -whitespace

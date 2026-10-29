@@ -19,3 +19,4 @@ patchedDependencies:
   '@deepseek-ai/dsh-client-ui-conversation@0.2.1-rc.3': patches/@deepseek-ai__dsh-client-ui-conversation@0.2.1-rc.3.patch
   '@deepseek-ai/dsh-commands@0.2.1-rc.3': patches/@deepseek-ai__dsh-commands@0.2.1-rc.3.patch
   '@deepseek-ai/dsh-sandbox-policy@0.2.1-rc.3': patches/@deepseek-ai__dsh-sandbox-policy@0.2.1-rc.3.patch
+  '@deepseek-ai/dsh-client-ui-model-selection@0.2.1-rc.3': patches/@deepseek-ai__dsh-client-ui-model-selection@0.2.1-rc.3.patch
