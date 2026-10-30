@@ -90,7 +90,7 @@ The current server uses database schema **6**. Back up PostgreSQL and stop old c
 
 Use HTTPS for network connections, or loopback addresses through an SSH tunnel. Plain HTTP on loopback is not encryption by itself. Devices sharing a namespace token belong to one trust domain; device IDs route work and are not separate authorization credentials. Native DSH Host/Origin and owner authentication protect the browser control endpoint. The local Unix socket is accessible only to its OS user.
 
-M1 coordinates the same Harness and model route. M2 adds [model relay](model-relay.md), including target model selection during takeover. Confirmed [workspace and file attachment transfer](files.md) is available. Heterogeneous agents and automatic crash takeover remain future work.
+M1 coordinates the same Harness and model route. M2 adds [model relay](model-relay.md), through the native model selector; device handoff always keeps the current selection. Confirmed [workspace and file attachment transfer](files.md) is available. Heterogeneous agents and automatic crash takeover remain future work.
 
 On explicit resume, a valid working directory inside the local mapped project is retained. A persisted absolute path from another device is restored through the handoff record and local mapping instead. Stricter session file permissions remain in effect.
 

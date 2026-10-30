@@ -1,4 +1,6 @@
 export const en = {
+  HANDOFF_MODEL_FIXED:
+    'Handoff keeps the conversation current model. Use the native model selector separately to change it.',
   filesConfirmTitle: 'Review file operation',
   filesCancel: 'Cancel',
   filesConfirm: 'Confirm',
@@ -103,8 +105,6 @@ export const en = {
     'The pairing code is expired or already used. Request a new code from the owner device.',
 
   app: 'ContextMesh',
-  targetModel: 'Continue with model',
-  keepModel: 'Keep the current model',
   switchingModel: 'Saving model selection…',
   providerConfirm:
     'Future messages will send the required conversation history to this provider. Continue?',
@@ -264,6 +264,8 @@ export const en = {
 } as const
 export type Key = keyof typeof en
 export const zh: Record<Key, string> = {
+  HANDOFF_MODEL_FIXED:
+    '交接沿用会话当前模型；如需换模型，请单独使用原生模型选择器。',
   filesConfirmTitle: '检查文件操作',
   filesCancel: '取消',
   filesConfirm: '确认',
@@ -350,8 +352,6 @@ export const zh: Record<Key, string> = {
   PAIRING_INVALID: '配对码已失效或已被使用，请向管理设备申请新码。',
 
   app: 'ContextMesh',
-  targetModel: '继续使用的模型',
-  keepModel: '沿用当前模型',
   switchingModel: '正在保存模型选择…',
   providerConfirm: '后续消息会将所需会话历史发送给此提供方，是否继续？',
   providerNotice: '下一次请求会将所需会话历史发送给选定的模型提供方。',

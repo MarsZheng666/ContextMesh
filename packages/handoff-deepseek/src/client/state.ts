@@ -91,7 +91,6 @@ export interface ViewState {
 }
 export class UiModel {
   private takeovers = new Map<string, Promise<boolean>>()
-  private takeoverTargets = new Map<string, string>()
   private selections = new Map<
     string,
     { promise: Promise<void>; finish: () => void }
@@ -109,14 +108,13 @@ export class UiModel {
         !this.confirmTakeover(`${t('providerConfirm')} ${target.provider}`)
       )
         return true
-      const data = snapshotSchema.parse(
-        await this.request({ action: 'status' }),
-      )
+      let data = snapshotSchema.parse(await this.request({ action: 'status' }))
       this.set({ ...this.state, data, error: undefined })
-      const session = data.sessions.find((s) => s.id === sessionId)
+      let session = data.sessions.find((s) => s.id === sessionId)
       if (session?.activeNodeId && session.activeNodeId !== data.nodeId) {
-        await this.ensureOwned(sessionId, t, undefined, target)
-        return true
+        if (!(await this.ensureOwned(sessionId, t))) return true
+        data = snapshotSchema.parse(this.state.data)
+        session = data.sessions.find((s) => s.id === sessionId)
       }
       if (data.modelPreflight && session?.activeNodeId === data.nodeId) {
         const report = modelCheckSchema.parse(
@@ -224,6 +222,17 @@ export class UiModel {
       return this.showProjectSetup(data, session, signal)
     })
   }
+  async readyToSend(
+    sessionId: string,
+    t: (key: Key) => string,
+    signal?: AbortSignal,
+  ) {
+    await this.waitForModelSelect(sessionId, signal)
+    if (!(await this.ensureOwned(sessionId, t, signal))) return false
+    // A remote native model selection acquires ownership before opening its gate.
+    await this.waitForModelSelect(sessionId, signal)
+    return true
+  }
   private showProjectSetup(
     data: Snapshot,
     session: Snapshot['sessions'][number],
@@ -318,24 +327,14 @@ export class UiModel {
     sessionId: string,
     t: (key: Key) => string,
     signal?: AbortSignal,
-    targetModel?: ModelRoute,
   ): Promise<boolean> {
     const existing = this.takeovers.get(sessionId)
-    if (existing) {
-      if (
-        targetModel &&
-        this.takeoverTargets.get(sessionId) !== JSON.stringify(targetModel)
-      )
-        throw new ControlError('MODEL_RELAY_BUSY', en.MODEL_RELAY_BUSY)
-      return existing
-    }
-    const operation = this.acquireHere(sessionId, t, signal, targetModel)
+    if (existing) return existing
+    const operation = this.acquireHere(sessionId, t, signal)
     this.takeovers.set(sessionId, operation)
-    this.takeoverTargets.set(sessionId, JSON.stringify(targetModel))
     const clear = () => {
       if (this.takeovers.get(sessionId) === operation)
         this.takeovers.delete(sessionId)
-      this.takeoverTargets.delete(sessionId)
       this.set({
         ...this.state,
         takingOver: this.state.takingOver?.filter((id) => id !== sessionId),
@@ -348,7 +347,6 @@ export class UiModel {
     sessionId: string,
     t: (key: Key) => string,
     signal?: AbortSignal,
-    targetModel?: ModelRoute,
   ): Promise<boolean> {
     const friendly = (code: string) =>
       new ControlError(code, t(code in en ? (code as Key) : 'TAKEOVER_FAILED'))
@@ -366,14 +364,14 @@ export class UiModel {
       !data.mappings.some((m) => m.projectId === session.projectId)
     ) {
       if (!(await this.showProjectSetup(data, session, signal))) return false
-      return this.acquireHere(sessionId, t, signal, targetModel)
+      return this.acquireHere(sessionId, t, signal)
     }
     signal?.throwIfAborted()
     if (
       !this
         .confirmTakeover(`${t('takeoverConfirm')} ${session.activeNodeName ?? t('remote')}
 
-${t('takeoverEffect')}${targetModel ? '\n\n' + t('targetModel') + ': ' + targetModel.provider + '/' + targetModel.model + '\n' + t('providerNotice') : ''}`)
+${t('takeoverEffect')}`)
     )
       return false
     this.set({
@@ -385,7 +383,6 @@ ${t('takeoverEffect')}${targetModel ? '\n\n' + t('targetModel') + ': ' + targetM
         action: 'takeover',
         sessionId,
         confirmed: true,
-        ...(targetModel ? { targetModel } : {}),
         operationId: crypto.randomUUID(),
       }),
     )
@@ -412,8 +409,11 @@ ${t('takeoverEffect')}${targetModel ? '\n\n' + t('targetModel') + ': ' + targetM
         ['failed', 'cancelled', 'recovery_required'].includes(
           status.handoffState ?? '',
         )
-      )
+      ) {
+        if (status.handoffError)
+          throw new Error(t('TAKEOVER_FAILED') + '\n' + status.handoffError)
         throw friendly('TAKEOVER_FAILED')
+      }
       if (status.handoffState === 'completed') {
         const fresh = snapshotSchema.parse(
           await this.request({ action: 'status' }),

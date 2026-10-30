@@ -316,6 +316,11 @@ export class PostgresStore extends TransferPostgresStore {
             'MODEL_RELAY_BUSY',
             'settle the pending model switch first',
           )
+        if (r.manifest.targetModel)
+          throw new MeshError(
+            'HANDOFF_MODEL_FIXED',
+            'handoff keeps the conversation current model; choose another model separately',
+          )
         if (s.active_handoff)
           throw new MeshError(
             'HANDOFF_IN_PROGRESS',
@@ -1047,6 +1052,11 @@ export class PostgresStore extends TransferPostgresStore {
           throw new MeshError(
             'MODEL_RELAY_BUSY',
             'settle the pending model switch first',
+          )
+        if (request.targetModel)
+          throw new MeshError(
+            'HANDOFF_MODEL_FIXED',
+            'takeover keeps the conversation current model; choose another model after takeover',
           )
         if (session.active_handoff)
           throw new MeshError(

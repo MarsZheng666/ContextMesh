@@ -16,7 +16,7 @@ ContextMesh gives agent sessions a shared home beyond a single machine. It prese
 
 ContextMesh is in **developer preview**. ContextMesh provides remote Session storage, coordinated cross-machine handoff, model relay and confirmed file transfer for the pinned DeepSeek Harness **0.2.1-rc.3** runtime. APIs may change as the project evolves.
 
-Hand off a conversation to a folder on another device, with shared titles, a remote session panel and a single writer. Plain folders need no Git; code workspaces require the same base Git commit. Use the [file transfer guide](docs/files.md) to preview and confirm uncommitted changes and file attachments before handoff. ContextMesh requires the explicit DSH compatibility patches shipped in this repository. Continue with another configured model through the native selector or choose a model during device takeover. See [model relay](docs/model-relay.md).
+Hand off a conversation to a folder on another device, with shared titles, a remote session panel and a single writer. Plain folders need no Git; code workspaces require the same base Git commit. Use the [file transfer guide](docs/files.md) to preview and confirm uncommitted changes and file attachments before handoff. ContextMesh requires the explicit DSH compatibility patches shipped in this repository. Handoff keeps the conversation’s current model. Use the native selector separately to continue with another configured model. See [model relay](docs/model-relay.md).
 
 ## What it does
 

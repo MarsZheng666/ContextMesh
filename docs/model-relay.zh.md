@@ -8,7 +8,7 @@ ContextMesh 支持在同一个 DeepSeek Harness 会话中切换到其他已配�
 
 继续使用唯一的 `dsh-contextmesh-handoff` 插件，以及本仓库锁定的 DSH 运行时和兼容补丁。服务端和参与设备需要一起更新。服务端声明 `model-relay-v1`，缺少模型选择桥接的旧设备不能进行模型接力。
 
-模型凭证在实际执行任务的设备单独配置，不进入接力记录，也不随交接传送。明确选择其他模型时，目标设备无需配置来源 Provider。
+模型凭证在实际执行任务的设备单独配置，不进入接力记录，也不随交接传送。接收设备需要配置会话当前的 Provider 和模型路由；会话此前已经切换离开的旧 Provider 无需继续安装。
 
 当前支持文本和已完成的工具调用、工具结果。图片、附件、spill 资源、子 Agent、持久终端、后台任务、计划任务和待处理输入暂不支持接力，应先结束或移除。各适配器负责转换 DSH 的公共消息格式和自身私有重放状态，不能将模型列表中的所有组合理解为都已通过 ContextMesh 认证。
 
@@ -20,15 +20,13 @@ ContextMesh 暂停新输入，等待已接收的当前工作结束，完成目�
 
 仍然只有一个插件，无需安装新的模型接力插件。当前任务超过等待时限时，继续使用原模型；等任务结束后再切换。
 
-## 同时换设备和模型
+## 交接沿用当前模型
 
-在输入区选择目标设备，并按需选择“继续使用的模型”；默认“沿用当前模型”保持普通交接行为。设备公布的模型列表便于选择，最终检查使用目标设备实际配置的预设和凭证。
+在输入区选择接收设备，点击“交接”。ContextMesh 携带会话当前的 Provider、模型和推理强度，不再单独提供交接模型选择。“在此接管”遵循同一规则。
 
-查看远程会话时，也可在输入区选择当前设备已配置的模型，再点击“在此接管”。从原生模型选择器为远程会话换模型，会进入同一个接管确认流程。缺少项目或目录映射时，先进入现有配置弹窗；取消保留草稿。
+接收设备需预先配置当前模型。如果无法使用，会在停止来源写者前拒绝交接，不自动换成其他模型。如需换模型，请在拥有会话的设备上单独使用 DSH 原生模型选择器。查看远程会话时通过原生选择器换模型，会先确认并按已有模型完成接管，然后再执行你请求的本机模型切换；取消接管保留模型和草稿。
 
-两端预检期间来源仍保留原模型，目标在受控恢复期间安装新模型，并在开放输入前保存。目标预检失败时，来源仍可使用；来源已经关闭后发生的失败遵循交接恢复流程，不会因为换模型悄悄重新启动来源。
-
-普通目录仍不要求 Git，代码工作区需相同基准提交，保持干净或先完成[确认式文件传输](files.zh.md)。
+普通目录无需 Git；代码工作区需相同基准提交，保持干净或先完成[确认式文件传输](files.zh.md)。
 
 ## 兼容性和容量
 
@@ -67,8 +65,8 @@ pnpm cli model-select SESSION_ID PROVIDER MODEL
 pnpm cli model-select SESSION_ID PROVIDER MODEL --allow-estimate
 pnpm cli model-select SESSION_ID PROVIDER MODEL --reasoning-effort high --operation-id UUID
 pnpm cli model-relay-status UUID
-pnpm cli handoff SESSION_ID TARGET_NODE_ID --provider PROVIDER --model MODEL
-pnpm cli takeover SESSION_ID --confirm --provider PROVIDER --model MODEL
+pnpm cli handoff SESSION_ID TARGET_NODE_ID
+pnpm cli takeover SESSION_ID --confirm
 ```
 
 结果不确定时，使用相同操作 ID 和相同模型选择重试或查询；用同一个 ID 请求其他模型会被拒绝。CLI 换模型代表明确要求后续将所需历史发送给指定提供方。

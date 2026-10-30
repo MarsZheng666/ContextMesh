@@ -733,9 +733,12 @@ export class HandoffCoordinator {
     targetNodeId: string,
     projectId?: string,
     takeover?: TakeoverRecord,
-    targetModel?: ModelRoute,
   ) {
-    targetModel ??= takeover?.targetModel
+    if (takeover?.targetModel)
+      throw new MeshError(
+        'HANDOFF_MODEL_FIXED',
+        'handoff keeps the current conversation model; change it separately with the native model selector',
+      )
     if (this.closing) throw new Error('ContextMesh is stopping')
     const native = this.ctx.get('sessionController')
     if (native && native.lifecycleControlVersion !== 1)
@@ -816,7 +819,6 @@ export class HandoffCoordinator {
         adapter: 'deepseek',
         workspace: workspace.proof,
         model: this.route(agent),
-        ...(targetModel ? { targetModel } : {}),
         sandbox: {
           mode: resolved.mode,
           relativeRoot: relativeInside(workspace.root, resolved.workspaceRoot),
@@ -994,12 +996,17 @@ export class HandoffCoordinator {
         presets?.serviceFor({ ctx: context }, 'llm') ??
         context.get('llm') ??
         this.ctx.llm
-      await llm.prepareCall(
-        this.options({
-          ...record.manifest,
-          model: record.manifest.targetModel ?? record.manifest.model,
-        }),
-      )
+      const currentModel = record.manifest.targetModel ?? record.manifest.model
+      try {
+        await llm.prepareCall(
+          this.options({ ...record.manifest, model: currentModel }),
+        )
+      } catch (error) {
+        throw new MeshError(
+          'HANDOFF_MODEL_UNAVAILABLE',
+          `Receiving device cannot use the current model ${currentModel.provider}/${currentModel.model}. Configure that same model and its credentials before handoff. ${message(error)}`,
+        )
+      }
       if (record.manifest.targetModel) {
         if (this.ctx.get('sessionController')?.modelRelayVersion !== 1)
           throw new MeshError(
@@ -1655,6 +1662,11 @@ export class HandoffCoordinator {
     operationId: string = randomUUID(),
     targetModel?: ModelRoute,
   ) {
+    if (targetModel)
+      throw new MeshError(
+        'HANDOFF_MODEL_FIXED',
+        'take over using the current model, then change models separately',
+      )
     const session = (await this.client.sessions()).find(
       (s) => s.id === sessionId,
     )
@@ -1776,13 +1788,17 @@ export class HandoffCoordinator {
         await this.tick()
         return this.status()
       case 'handoff':
+        if (command.targetModel)
+          throw new MeshError(
+            'HANDOFF_MODEL_FIXED',
+            'handoff keeps the current conversation model',
+          )
         return this.exclusive(command.sessionId, () =>
           this.begin(
             command.sessionId,
             command.targetNodeId,
             command.projectId,
             undefined,
-            command.targetModel,
           ),
         )
       case 'takeover':

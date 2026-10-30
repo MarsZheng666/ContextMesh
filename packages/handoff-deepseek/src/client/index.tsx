@@ -40,8 +40,7 @@ export function apply(ctx: Context) {
   )
   ctx.on('model-selection/after-select', (id) => model.finishModelSelect(id))
   ctx.on('conversation/before-send', async (id, signal) => {
-    await model.waitForModelSelect(id, signal)
-    return (await model.ensureOwned(id, ctx.locale.bind('contextmesh'), signal))
+    return (await model.readyToSend(id, ctx.locale.bind('contextmesh'), signal))
       ? undefined
       : true
   })
