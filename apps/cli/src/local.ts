@@ -4,6 +4,12 @@ import { z } from 'zod'
 import { callLocal } from '../../../packages/handoff-deepseek/src/local-control.js'
 
 const names = new Set([
+  'workspace-plan',
+  'workspace-export',
+  'workspace-list',
+  'workspace-preview',
+  'workspace-apply',
+  'workspace-rollback',
   'devices',
   'projects',
   'project-add',
@@ -43,7 +49,8 @@ export async function runLocal(input: string[]): Promise<boolean> {
   const provider = option('--provider'),
     chosen = option('--model'),
     reasoningEffort = option('--reasoning-effort'),
-    operationId = option('--operation-id')
+    operationId = option('--operation-id'),
+    previewId = option('--preview-id')
   const allowEstimate = args.includes('--allow-estimate')
   if (allowEstimate) args.splice(args.indexOf('--allow-estimate'), 1)
   const confirm = args.includes('--confirm')
@@ -62,8 +69,40 @@ export async function runLocal(input: string[]): Promise<boolean> {
   if (!name || !names.has(name)) return false
   if (allowEstimate && name !== 'model-select')
     throw new Error('--allow-estimate applies only to a local model selection')
+  if (previewId && name !== 'workspace-apply')
+    throw new Error('--preview-id applies only to workspace-apply')
   let command: unknown
   switch (name) {
+    case 'workspace-plan':
+      if (!id || !value)
+        throw new Error('Usage: workspace-plan SESSION_ID TARGET_NODE_ID')
+      command = { action: name, sessionId: id, targetNodeId: value }
+      break
+    case 'workspace-list':
+      command = { action: name }
+      break
+    case 'workspace-preview':
+      if (!id) throw new Error('Usage: workspace-preview TRANSFER_ID')
+      command = { action: name, transferId: id }
+      break
+    case 'workspace-export':
+    case 'workspace-apply':
+    case 'workspace-rollback':
+      if (!id || !confirm)
+        throw new Error(
+          'Usage: ' + name + ' ID --confirm (review the file preview first)',
+        )
+      if (name === 'workspace-apply' && !previewId)
+        throw new Error(
+          'workspace-apply requires --preview-id from a fresh workspace-preview',
+        )
+      command = {
+        action: name,
+        ...(previewId ? { previewId } : {}),
+        ...(name === 'workspace-export' ? { planId: id } : { transferId: id }),
+        confirmed: true,
+      }
+      break
     case 'models':
       command = { action: 'models' }
       break

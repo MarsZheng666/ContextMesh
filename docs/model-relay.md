@@ -28,7 +28,7 @@ On a remote conversation, the dock also offers models configured on the current 
 
 The source model stays unchanged while both devices check the transfer. The target installs its selected model during controlled restoration and persists it before input opens. Target preflight failure leaves the source writer available. A failure after the source has closed follows the explicit handoff recovery flow; changing a model never silently reopens the source.
 
-Ordinary folders still need no Git. Git workspaces still require matching clean commits. Only context transfers: files stay on their respective devices.
+Ordinary folders still need no Git. Git workspaces require matching base commits and either clean contents or an explicitly approved [workspace file transfer](files.md).
 
 ## Compatibility and capacity
 
@@ -81,6 +81,6 @@ Keep the device running and restore its connection. On restart, a persisted sele
 
 ## Database upgrade
 
-The server uses schema **5**. Back up PostgreSQL and stop older writers before upgrade. Migration from schemas 1, 2, 3 or 4 preserves existing headers and events, adds model-relay records and optional target-model takeover data. The prior server rejects schema 5; rollback requires the backup. The native DSH Session format remains unchanged.
+The server uses schema **6**. Back up PostgreSQL and stop older writers before upgrade. Migration from schemas 1–5 preserves existing headers and events, adds model-relay records and optional target-model takeover data. The prior server rejects schema 6; rollback requires the backup. The native DSH Session format remains unchanged.
 
 [Device pairing](devices.md) is available with the same plugin.

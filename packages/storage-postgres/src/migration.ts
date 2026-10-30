@@ -93,6 +93,16 @@ CREATE TABLE cm_device_credentials (
 );
 INSERT INTO cm_schema(version) VALUES(5);
 `
+const v6 = `
+CREATE TABLE cm_workspace_transfers (
+ namespace text NOT NULL,id uuid NOT NULL,session_id text NOT NULL,incarnation uuid NOT NULL,
+ source_node uuid NOT NULL,target_node uuid NOT NULL,project_id uuid NOT NULL,digest text NOT NULL,bundle text NOT NULL,
+ ready boolean NOT NULL DEFAULT false,created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ expires_at timestamptz NOT NULL DEFAULT (clock_timestamp()+interval '24 hours'),
+ PRIMARY KEY(namespace,id),FOREIGN KEY(namespace,session_id) REFERENCES cm_sessions(namespace,id) ON DELETE CASCADE
+);
+INSERT INTO cm_schema(version) VALUES(6);
+`
 export async function migrate(pool: Pool): Promise<void> {
   const client = await pool.connect()
   try {
@@ -105,7 +115,7 @@ export async function migrate(pool: Pool): Promise<void> {
       'SELECT max(version) AS version FROM cm_schema',
     )
     let version = Number(result.rows[0].version)
-    if (version < 1 || version > 5)
+    if (version < 1 || version > 6)
       throw new Error('unsupported ContextMesh database schema')
     if (version === 1) {
       await client.query(v2)
@@ -119,7 +129,11 @@ export async function migrate(pool: Pool): Promise<void> {
       await client.query(v4)
       version = 4
     }
-    if (version === 4) await client.query(v5)
+    if (version === 4) {
+      await client.query(v5)
+      version = 5
+    }
+    if (version === 5) await client.query(v6)
     await client.query('COMMIT')
   } catch (error) {
     await client.query('ROLLBACK')

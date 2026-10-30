@@ -85,11 +85,11 @@ For a remote service, also set `CONTEXTMESH_ENDPOINT` in `.env` to its HTTPS URL
 ## Resume on another machine
 
 1. Configure both Harness installations to use the same service and token.
-2. Prepare the target machine's workspace separately.
+2. Prepare the target machine's project mapping and matching Git base commit. Use [confirmed file transfer](files.md) for supported uncommitted changes and file attachments.
 3. Stop the source Harness runtime, or explicitly dispose its Agent, and wait for persistence shutdown to release ownership.
 4. Use the target Harness's normal Session resume entry point with the same Session ID.
 
-Closing a browser tab alone does not release the writer held by a running Harness server. Only one writer may own a Session. Read-only inspection remains available while another client holds write ownership. Automatic workspace mapping and handoff coordination are not part of the current release.
+Closing a browser tab alone does not release the writer held by a running Harness server. Only one writer may own a Session. Read-only inspection remains available while another client holds write ownership. Use [coordinated handoff](handoff.md) to transfer ownership; directory mapping remains explicit.
 
 Workspace groups and title caches belong to each Harness installation. A cold remote Session may initially display its directory name until the local Harness has built its title projection. The native event history remains in ContextMesh.
 

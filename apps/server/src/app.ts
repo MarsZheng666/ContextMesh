@@ -1,4 +1,5 @@
 import Fastify, { type FastifyRequest } from 'fastify'
+import { registerTransferRoutes } from './transfers.js'
 import { registerDeviceRoutes } from './devices.js'
 import { registerModelRelayRoutes } from './model-relay.js'
 import { registerHandoffRoutes } from './handoff.js'
@@ -134,6 +135,7 @@ export function buildServer(options: ServerOptions) {
   })
   registerHandoffRoutes(app, options.store, ns)
   registerModelRelayRoutes(app, options.store, ns)
+  registerTransferRoutes(app, options.store, ns)
   app.get('/health/live', async () => ({ ok: true }))
   app.get('/health/ready', async () => {
     await options.store.pool.query('SELECT 1')
@@ -148,8 +150,9 @@ export function buildServer(options: ServerOptions) {
         'directory-handoff-v1',
         'model-relay-v1',
         'device-pairing-v1',
+        'workspace-transfer-v1',
       ],
-      schemaVersion: 5,
+      schemaVersion: 6,
     }
   })
   app.post('/v1/sessions', { schema: schema(createSchema) }, async (req) =>

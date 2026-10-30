@@ -70,4 +70,4 @@ The ContextMesh API does not serve the DSH Web UI. To access a remote DSH Web in
 - On shutdown, clients should flush and close their sessions before stopping the API.
 - Restarting PostgreSQL does not release a Session's logical write ownership. Follow [the recovery procedure](getting-started.md#recover-after-an-interrupted-writer) after confirming a failed writer has stopped.
 
-Current deployments use one authoritative database and one configured namespace per API instance. Multi-region replication, automatic failover, workspace-file transfer, and automatic writer takeover are outside the current feature set.
+Current deployments use one authoritative database and one configured namespace per API instance. Confirmed [workspace file transfer](files.md) is available within that trust domain. Multi-region replication, automatic failover and automatic writer takeover remain outside the current feature set.

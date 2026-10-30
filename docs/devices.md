@@ -2,7 +2,7 @@
 
 [中文](devices.zh.md) · [Deployment](deployment.md)
 
-Install the single `dsh-contextmesh-handoff` plugin with the pinned runtime on each device. Start or upgrade the ContextMesh server first. The server uses schema **5**; back up PostgreSQL and stop older writers before migrating. Session headers and event logs are retained.
+Install the single `dsh-contextmesh-handoff` plugin with the pinned runtime on each device. Start or upgrade the ContextMesh server first. The server uses schema **6**; back up PostgreSQL and stop older writers before migrating. Session headers and event logs are retained.
 
 ## Pair a new device
 

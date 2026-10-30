@@ -1,3 +1,4 @@
+import { FilesPanel } from './files.js'
 import { ModelCheckPanel } from './models.js'
 import { DeviceSetup } from './devices.js'
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
@@ -506,6 +507,9 @@ export function RemotePanelView({
         {t('device')}: {data.name}
       </div>
       <DeviceSetup connection={data.connection} request={request} t={t} />
+      {data.workspaceTransfer && (
+        <FilesPanel data={data} request={request} t={t} />
+      )}
       {data.modelPreflight && (
         <ModelCheckPanel data={data} request={request} t={t} />
       )}

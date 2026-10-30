@@ -8,6 +8,7 @@ const modelChoice = z.object({
 import { en, type Key } from './locales.js'
 import type { ListDirectory } from './directory.js'
 export const snapshotSchema = z.object({
+  workspaceTransfer: z.boolean().optional(),
   modelPreflight: z.boolean().optional(),
   connection: z
     .object({
