@@ -8,7 +8,7 @@
     - id: contextmesh-session-persistence
       name: dsh-contextmesh
       config:
-        endpoint: !!js process.env.CONTEXTMESH_ENDPOINT || 'http://127.0.0.1:8787'
+        endpoint: !!js process.env.CONTEXTMESH_ENDPOINT || undefined
         tokenEnv: CONTEXTMESH_TOKEN
 - insert:
     - id: contextmesh-handoff

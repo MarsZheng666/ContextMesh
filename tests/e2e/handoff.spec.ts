@@ -18,7 +18,10 @@ import { expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import { fixture, TOKEN } from '../fixture.js'
 import { buildServer } from '../../apps/server/src/app.js'
-import { callLocal } from '../../packages/handoff-deepseek/src/local-control.js'
+import {
+  callLocal,
+  controlSocketPath,
+} from '../../packages/handoff-deepseek/src/local-control.js'
 const execute = promisify(execFile)
 const reply = z.object({
   id: z.number().optional(),
@@ -165,9 +168,9 @@ it(
       expect(api.status).toBe(200)
       expect(api.body.ok).toBe(true)
       expect((await fetch(`${api.origin}/api/contextmesh`)).status).toBe(401)
-      expect((await stat(join(a.stateDir, 'control.sock'))).mode & 0o777).toBe(
-        0o600,
-      )
+      expect(
+        (await stat(await controlSocketPath(a.stateDir))).mode & 0o777,
+      ).toBe(0o600)
       const cli = await execute(
         process.execPath,
         [resolve('dist/cli.js'), 'devices', '--state-dir', a.stateDir],

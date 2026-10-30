@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import type { PoolClient } from 'pg'
-import { ModelRelayPostgresStore } from './model-relay.js'
+import { TransferPostgresStore } from './transfers.js'
 import { MeshError } from '../../protocol/src/index.js'
 import {
   modelRoute,
@@ -49,7 +49,7 @@ const active = [
   'recovery_required',
 ]
 
-export class PostgresStore extends ModelRelayPostgresStore {
+export class PostgresStore extends TransferPostgresStore {
   private record(r: HandoffRow): HandoffRecord {
     return {
       id: r.id,
@@ -316,6 +316,11 @@ export class PostgresStore extends ModelRelayPostgresStore {
             'MODEL_RELAY_BUSY',
             'settle the pending model switch first',
           )
+        if (r.manifest.targetModel)
+          throw new MeshError(
+            'HANDOFF_MODEL_FIXED',
+            'handoff keeps the conversation current model; choose another model separately',
+          )
         if (s.active_handoff)
           throw new MeshError(
             'HANDOFF_IN_PROGRESS',
@@ -368,6 +373,43 @@ export class PostgresStore extends ModelRelayPostgresStore {
             'MODEL_RELAY_UNSUPPORTED',
             'update both devices before changing models during handoff',
           )
+        if (r.manifest.workspace.contentHash && !r.manifest.transferId)
+          throw new MeshError(
+            'TRANSFER_NOT_READY',
+            'a workspace digest requires a confirmed transfer',
+          )
+        if (r.manifest.transferId) {
+          if (
+            [sourceNode, targetNode].some(
+              (n) => JSON.parse(n.capabilities).workspaceTransferVersion !== 1,
+            )
+          )
+            throw new MeshError(
+              'WORKSPACE_TRANSFER_UNSUPPORTED',
+              'update both devices before transferring files',
+            )
+          const transfer = await this.loadTransfer(
+              db,
+              ns,
+              r.manifest.transferId,
+            ),
+            b = transfer.bundle
+          if (
+            !transfer.ready ||
+            b.sessionId !== id ||
+            b.incarnation !== s.incarnation ||
+            b.projectId !== r.manifest.workspace.projectId ||
+            b.sourceNodeId !== r.sourceNodeId ||
+            b.targetNodeId !== r.targetNodeId ||
+            b.baseCommit !== r.manifest.workspace.commit ||
+            (b.baseCommit !== null &&
+              b.treeHash !== r.manifest.workspace.contentHash)
+          )
+            throw new MeshError(
+              'TRANSFER_NOT_READY',
+              'handoff does not match the applied workspace transfer',
+            )
+        }
         const h = (
           await db.query(
             'SELECT * FROM cm_handles WHERE namespace=$1 AND id=$2',
@@ -482,6 +524,7 @@ export class PostgresStore extends ModelRelayPostgresStore {
         ).rows[0]
         if (
           r.proof.projectId !== expected.projectId ||
+          r.proof.contentHash !== expected.contentHash ||
           r.proof.commit !== expected.commit ||
           (r.proof.kind ?? 'git') !== (expected.kind ?? 'git') ||
           r.proof.relativeCwd !== expected.relativeCwd ||
@@ -1009,6 +1052,11 @@ export class PostgresStore extends ModelRelayPostgresStore {
           throw new MeshError(
             'MODEL_RELAY_BUSY',
             'settle the pending model switch first',
+          )
+        if (request.targetModel)
+          throw new MeshError(
+            'HANDOFF_MODEL_FIXED',
+            'takeover keeps the conversation current model; choose another model after takeover',
           )
         if (session.active_handoff)
           throw new MeshError(

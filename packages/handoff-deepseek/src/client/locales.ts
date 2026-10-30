@@ -1,7 +1,110 @@
 export const en = {
+  HANDOFF_MODEL_FIXED:
+    'Handoff keeps the conversation current model. Use the native model selector separately to change it.',
+  filesConfirmTitle: 'Review file operation',
+  filesCancel: 'Cancel',
+  filesConfirm: 'Confirm',
+  filesTitle: 'Workspace files and attachments',
+  filesNotice:
+    'Inspect on the source, upload only after confirmation, then preview and apply on the target before handoff. Git staging is not copied. Review the file list for private data.',
+  filesSize: 'Transfer size',
+  filesBase: 'Git base',
+  filesNoGit: 'Ordinary conversation; no workspace copy',
+  fileAdd: 'add',
+  fileDelete: 'delete',
+  fileChange: 'change',
+  fileAttachment: 'Attachment',
+  filesEmpty: 'No file changes or attachments.',
+  filesInspect: 'Inspect files to transfer',
+  filesSourcePreview: 'Source preview',
+  filesExport: 'Upload these files',
+  filesExportConfirm:
+    'Upload the displayed files and attachments to your ContextMesh service for this target device? Review the list for private data first.',
+  filesTransfers: 'Available transfers',
+  filesReady: 'Target files ready',
+  filesWaiting: 'Waiting for target approval',
+  filesPreview: 'Preview on this device',
+  filesTargetPreview: 'Target preview',
+  filesApply: 'Apply confirmed files here',
+  filesApplyConfirm:
+    'Apply these files to the displayed local directory? Existing base files will be replaced or deleted as listed. A recovery journal is retained.',
+  filesExported:
+    'Uploaded. On the target device, refresh transfers, preview, and confirm applying.',
+  filesApplied:
+    'Files are ready. Hand off the conversation from its current owning device.',
+  filesRecovery:
+    'An import was interrupted. Review and roll back before retrying. Later edits are preserved.',
+  filesRollback: 'Roll back imported files',
+  filesRollbackConfirm:
+    'Restore the recorded original workspace files? Rollback stops if any affected file has later edits.',
+  filesRolledBack:
+    'Original workspace files restored. Immutable attachment cache objects are retained.',
+  TRANSFER_CHANGED:
+    'The conversation or files changed. Inspect and confirm a new transfer.',
+  TRANSFER_EXPIRED:
+    'This preview or transfer expired. Create a new one on the source.',
+  TRANSFER_NOT_READY:
+    'Preview and apply this transfer on the target before handing off.',
+  TRANSFER_CONFLICT:
+    'The target conflicts with the original file contents. Preserve local changes and retry.',
+  TRANSFER_TARGET_BUSY:
+    'Close conversations using this target directory before applying or rolling back.',
+  TRANSFER_RECOVERY_REQUIRED:
+    'Import needs recovery. Preserve later edits and use the rollback action.',
+  TRANSFER_UNSAFE_PATH:
+    'A path is unsafe or may contain credentials. Remove it from this transfer workspace.',
+  TRANSFER_TOO_LARGE: 'Transfer exceeds the size or file-count limit.',
+  TRANSFER_UNSUPPORTED_FILE:
+    'Only bounded regular files can transfer; symlinks and hardlinks are unsupported.',
+  TRANSFER_CORRUPT:
+    'File integrity verification failed. Export again from the source.',
+
+  modelCheck: 'Model relay preflight',
+  checkModel: 'Check compatibility',
+  checkSession: 'Conversation on this device',
+  checkTarget: 'Target model',
+  capacityEstimate: 'Estimated input tokens',
+  capacityUpper: 'Conservative input bound',
+  capacityWindow: 'Context window',
+  capacityOutput: 'Reserved output',
+  capacityExactNotice:
+    'This is a local estimate, not the provider tokenizer. History is never truncated.',
+  capacityFits: 'Fits conservative checks',
+  capacityReview:
+    'Estimated fit only; explicit confirmation is required when selecting this model.',
+  capacityBlocked:
+    'This model may not fit. Choose a larger model or reduce the task explicitly.',
+  capacityConfirm:
+    'Only the heuristic estimate fits this model. The provider may still refuse the request. Continue using estimates for this selected conversation, without truncating history?',
+  MODEL_CAPACITY_CHANGED:
+    'The conversation changed after capacity review. Check and confirm again; your draft is kept.',
+  MODEL_TOOLS_UNSUPPORTED:
+    'This model does not support this tool history. Choose a tool-capable model or a tool-free preset.',
+  MODEL_OUTPUT_LIMIT:
+    'The output limit is incompatible. Adjust the target adapter output setting before selecting it.',
+
+  connectionTitle: 'Service connection',
+  manageDevices: 'Add or revoke a device',
+  pairHelp:
+    'Create a one-time invitation on this owner device. Only share it with your own trusted device.',
+  newDeviceName: 'New device name',
+  createPairing: 'Create pairing code',
+  pairCode: 'Pairing code',
+  pairExpires: 'Expires at',
+  pairInstructions:
+    'On the new device, run pnpm cli setup and enter a reachable service URL and this code. Retry an interrupted setup with the same code.',
+  listDevices: 'Show paired devices',
+  revokeConfirm: 'Revoke access for this device?',
+  revoked: 'Revoked',
+  revoke: 'Revoke access',
+  ownerPairing: 'Pairing management is available on an owner device.',
+  CONNECTION_LOST:
+    'Connection lost. Reconnecting; your history and draft are kept. Wait for the connection to recover before retrying.',
+  OWNER_REQUIRED: 'Use an owner device to manage pairing.',
+  PAIRING_INVALID:
+    'The pairing code is expired or already used. Request a new code from the owner device.',
+
   app: 'ContextMesh',
-  targetModel: 'Continue with model',
-  keepModel: 'Keep the current model',
   switchingModel: 'Saving model selection…',
   providerConfirm:
     'Future messages will send the required conversation history to this provider. Continue?',
@@ -52,7 +155,7 @@ export const en = {
   continueSetup: 'Save and continue',
   cancelSetup: 'Cancel',
   directoryHelp:
-    'Choose a working folder on this device. Plain folders need no Git; Git workspaces must have the same clean commit on both devices.',
+    'Choose a working folder on this device. Plain folders need no Git; Git workspaces need the same base commit and clean or explicitly transferred contents.',
   sourceDirectoryHelp:
     'Conversation history is transferred; folder contents are not copied. Tools continue in the selected folder. Existing project directories are never replaced automatically.',
   localDirectoryHelp:
@@ -103,7 +206,7 @@ export const en = {
   map: 'Save directory',
   refresh: 'Refresh',
   prepare:
-    'Plain folders need no Git. For Git workspaces, prepare the same clean commit on both devices before handoff.',
+    'Plain folders need no Git. Git workspaces need the same base commit; transfer and confirm uncommitted files below before handoff.',
   loading: 'Loading sessions…',
   empty: 'No shared sessions yet. Map a project and open a conversation in it.',
   handoff: 'Hand off',
@@ -147,7 +250,7 @@ export const en = {
   SESSION_DIRECTORY_UNMAPPED:
     'The session directory is outside the owning device’s configured project. Resume it there or check its project directory. Your draft is kept.',
   WORKSPACE_MISMATCH:
-    'Check the project mapping and folder on both devices. Git workspaces also need the same clean commit.',
+    'Check the project mapping and folder on both devices. Git workspaces need the same base commit and clean or explicitly transferred contents.',
   PENDING_INPUT: 'Finish or explicitly remove pending messages before handoff.',
   UNSUPPORTED_RESOURCE:
     'Finish jobs, close terminals and remove unsupported attachments or schedules.',
@@ -161,9 +264,94 @@ export const en = {
 } as const
 export type Key = keyof typeof en
 export const zh: Record<Key, string> = {
+  HANDOFF_MODEL_FIXED:
+    '交接沿用会话当前模型；如需换模型，请单独使用原生模型选择器。',
+  filesConfirmTitle: '检查文件操作',
+  filesCancel: '取消',
+  filesConfirm: '确认',
+  filesTitle: '工作区文件与附件',
+  filesNotice:
+    '来源先检查清单、确认上传；目标预览并确认应用后，再交接会话。不复制 Git 暂存状态，请检查清单中是否含有私密资料。',
+  filesSize: '传输大小',
+  filesBase: 'Git 基准',
+  filesNoGit: '普通会话，不复制工作区',
+  fileAdd: '新增',
+  fileDelete: '删除',
+  fileChange: '修改',
+  fileAttachment: '附件',
+  filesEmpty: '没有文件改动或附件。',
+  filesInspect: '检查待传文件',
+  filesSourcePreview: '来源清单',
+  filesExport: '上传这些文件',
+  filesExportConfirm:
+    '将清单中的文件和附件上传到你的 ContextMesh 服务，供此目标设备使用？请先检查是否含有私密资料。',
+  filesTransfers: '可用传输',
+  filesReady: '目标文件已就绪',
+  filesWaiting: '等待目标确认',
+  filesPreview: '在此设备预览',
+  filesTargetPreview: '目标清单',
+  filesApply: '确认并在此应用',
+  filesApplyConfirm:
+    '将这些文件应用到显示的本地目录？按清单替换或删除原文件，并保留恢复日志。',
+  filesExported: '已上传。请在目标设备刷新传输、预览并确认应用。',
+  filesApplied: '文件已就绪，可从当前拥有会话的设备发起交接。',
+  filesRecovery: '上次导入中断，请检查并回滚后重试。后续编辑不会被覆盖。',
+  filesRollback: '回滚导入的文件',
+  filesRollbackConfirm:
+    '恢复日志中的原始工作区文件？受影响文件有后续编辑时会停止回滚。',
+  filesRolledBack: '原始文件已恢复。不可变附件缓存对象保留。',
+  TRANSFER_CHANGED: '会话或文件已变化，请重新检查并确认传输。',
+  TRANSFER_EXPIRED: '预览或传输已过期，请在来源重新生成。',
+  TRANSFER_NOT_READY: '请在目标预览并应用传输文件后再交接。',
+  TRANSFER_CONFLICT: '目标与记录的原始文件冲突，请保留本地改动后再试。',
+  TRANSFER_TARGET_BUSY: '应用或回滚前，请关闭正在使用目标目录的会话。',
+  TRANSFER_RECOVERY_REQUIRED: '导入需要恢复，请保留后续编辑并使用回滚操作。',
+  TRANSFER_UNSAFE_PATH: '路径不安全或可能包含凭证，请将其移出本次传输工作区。',
+  TRANSFER_TOO_LARGE: '超过文件大小或数量上限。',
+  TRANSFER_UNSUPPORTED_FILE: '只支持限额内的普通文件，不支持符号链接和硬链接。',
+  TRANSFER_CORRUPT: '文件完整性校验失败，请从来源重新导出。',
+
+  modelCheck: '模型接力预检',
+  checkModel: '检查兼容性',
+  checkSession: '当前设备上的会话',
+  checkTarget: '目标模型',
+  capacityEstimate: '估算输入 Token',
+  capacityUpper: '保守输入上界',
+  capacityWindow: '上下文窗口',
+  capacityOutput: '预留输出',
+  capacityExactNotice:
+    '这是本地估算，不等同于提供方的 tokenizer；不会自动截断历史。',
+  capacityFits: '通过保守检查',
+  capacityReview: '仅估算可容纳；切换时需要明确确认。',
+  capacityBlocked: '目标可能无法容纳，请选择更大窗口模型或明确缩减任务。',
+  capacityConfirm:
+    '当前只有启发式估算能够容纳，提供方仍可能拒绝请求。是否为这次会话的模型选择使用估算模式？不会截断历史。',
+  MODEL_CAPACITY_CHANGED:
+    '容量确认后会话已变化，请重新检查并确认，草稿已保留。',
+  MODEL_TOOLS_UNSUPPORTED:
+    '目标模型不支持此工具历史，请选择支持工具的模型或无工具预设。',
+  MODEL_OUTPUT_LIMIT: '输出上限不兼容，请先调整目标适配器的输出配置。',
+
+  connectionTitle: '服务连接',
+  manageDevices: '添加或撤销设备',
+  pairHelp: '在这台管理设备上创建一次性邀请，只分享给你信任的自有设备。',
+  newDeviceName: '新设备名称',
+  createPairing: '生成配对码',
+  pairCode: '配对码',
+  pairExpires: '失效时间',
+  pairInstructions:
+    '在新设备运行 pnpm cli setup，输入新设备能访问的服务地址和此配对码。设置中断时，使用相同配对码重试。',
+  listDevices: '查看已配对设备',
+  revokeConfirm: '确定撤销这台设备的访问权限？',
+  revoked: '已撤销',
+  revoke: '撤销访问',
+  ownerPairing: '请在管理设备上操作设备配对。',
+  CONNECTION_LOST:
+    '连接已中断，正在重新连接。历史和草稿已保留，请在恢复连接后重试。',
+  OWNER_REQUIRED: '请使用管理设备操作配对。',
+  PAIRING_INVALID: '配对码已失效或已被使用，请向管理设备申请新码。',
+
   app: 'ContextMesh',
-  targetModel: '继续使用的模型',
-  keepModel: '沿用当前模型',
   switchingModel: '正在保存模型选择…',
   providerConfirm: '后续消息会将所需会话历史发送给此提供方，是否继续？',
   providerNotice: '下一次请求会将所需会话历史发送给选定的模型提供方。',
@@ -207,7 +395,7 @@ export const zh: Record<Key, string> = {
   continueSetup: '保存并继续',
   cancelSetup: '取消',
   directoryHelp:
-    '选择当前设备上继续会话的工作目录。普通目录无需 Git；Git 工作区仍需两端提交一致且没有未提交修改。',
+    '选择当前设备上继续会话的工作目录。普通目录无需 Git；Git 工作区需相同基准提交，保持干净或先确认传输文件。',
   sourceDirectoryHelp:
     '只接续会话历史，不复制目录中的文件。工具会在所选目录中继续运行；已有项目目录不会被自动替换。',
   localDirectoryHelp: '目录可留空，使用这条会话当前的工作目录。',
@@ -249,7 +437,7 @@ export const zh: Record<Key, string> = {
   map: '保存目录',
   refresh: '刷新',
   prepare:
-    '普通目录无需 Git。Git 工作区交接前，请将两端准备到同一提交，并提交工作区内的修改。',
+    '普通目录无需 Git。Git 工作区需相同基准提交；可先提交修改，或在文件传输面板中检查并确认未提交文件。',
   loading: '正在加载会话…',
   empty: '暂无共享会话。先映射项目目录，再在该项目中打开会话。',
   handoff: '交接',
@@ -287,7 +475,8 @@ export const zh: Record<Key, string> = {
   roleAssistant: '助手',
   roleTool: '工具',
   historyRange: '事件范围',
-  WORKSPACE_DIRTY: '请先提交修改，并让目标设备取得同一个 Git 提交。',
+  WORKSPACE_DIRTY:
+    '请先提交修改，或在“工作区文件与附件”中预览并确认传输到目标。',
   SESSION_DIRECTORY_UNMAPPED:
     '会话的工作目录不在原设备已配置的项目中。请在原设备恢复会话，或核对该设备的项目目录。草稿已保留。',
   WORKSPACE_MISMATCH:

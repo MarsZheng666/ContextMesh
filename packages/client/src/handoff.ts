@@ -73,6 +73,7 @@ export class HandoffClient {
         projectSetupVersion: 1,
         directoryHandoffVersion: 1,
         modelRelayVersion: 1,
+        workspaceTransferVersion: 1,
         models,
         harness: '0.2.1-rc.3',
         adapter: 'deepseek',

@@ -8,7 +8,7 @@ ContextMesh can continue the same DeepSeek Harness conversation with another con
 
 Use the single `dsh-contextmesh-handoff` plugin with this repository's pinned DSH runtime and compatibility patches. Update the ContextMesh server and participating devices together. The server advertises `model-relay-v1`; a device without the model-selection bridge cannot perform model relay.
 
-Configure model credentials independently on the device that will execute the conversation. They never enter relay records or travel with a handoff. A target that explicitly selects another model does not need the source provider installed or authenticated.
+Configure model credentials independently on the device that will execute the conversation. They never enter relay records or travel with a handoff. The receiving device must configure the conversation’s current provider/model route. Providers used earlier in the history do not need to remain installed once the conversation has switched away from them.
 
 This preview supports text conversations with completed tool calls and results. Image, file and spill resources, addressed child agents, persistent terminals, background jobs, schedules and pending input are not portable. End or remove those resources before relay. Adapters remain responsible for translating the common DSH message vocabulary and their own private replay state; not every provider/model combination is certified by ContextMesh.
 
@@ -20,21 +20,37 @@ ContextMesh freezes new input, waits for admitted work to finish, checks the tar
 
 The existing native selector remains the entry point. No additional plugin needs installation. A live task that cannot finish within the configured wait period leaves the existing model in place; let the task finish and retry.
 
-## Change the device and model together
+## Hand off with the current model
 
-In the input dock, choose the target device and optionally **Continue with model**. **Keep the current model** preserves normal handoff behavior. The target's advertised catalog is a convenience; final validation runs on that target with its actual preset and credentials.
+In the input dock, choose the receiving device and click **Hand off**. ContextMesh carries the conversation’s current provider, model and reasoning selection. The dock offers no separate model choice. **Take over here** follows the same rule.
 
-On a remote conversation, the dock also offers models configured on the current device. Select one and click **Take over here**. Choosing a model through the native selector on a remote conversation enters the same confirmed takeover flow. Missing project/folder mapping opens the existing setup dialog first. Cancellation preserves drafts.
+Configure that current model on the receiving device first. If it is unavailable, handoff fails before the source writer is stopped; ContextMesh never substitutes another model. To change models, use DSH’s native selector as a separate action on the owning device. A native model selection made while viewing a remote conversation first completes a confirmed takeover with its existing model, then runs the separately requested local model change. Cancelling takeover leaves the model and draft unchanged.
 
-The source model stays unchanged while both devices check the transfer. The target installs its selected model during controlled restoration and persists it before input opens. Target preflight failure leaves the source writer available. A failure after the source has closed follows the explicit handoff recovery flow; changing a model never silently reopens the source.
-
-Ordinary folders still need no Git. Git workspaces still require matching clean commits. Only context transfers: files stay on their respective devices.
+Ordinary folders need no Git. Git workspaces require matching base commits and either clean contents or an explicitly approved [workspace file transfer](files.md).
 
 ## Compatibility and capacity
 
 Targets must declare text input and a known context window. ContextMesh checks portable content, matching tool calls/results, valid tool-argument JSON and the target's reasoning controls. Explicit output limits are checked with the target; omitted reasoning controls use its defaults instead of inheriting the previous model's effort.
 
-Capacity checks conservatively count serialized UTF-8 bytes against the model's token window, reserve output capacity and leave additional headroom. This is deliberately an estimate, not a provider tokenizer. It can reject a conversation that a more precise tokenizer would fit. The first and subsequent routed requests are checked again with their assembled messages and tools. Provider-side authentication, availability and context errors can still occur at dispatch. History is never silently truncated or replaced by an automatic summary to make relay succeed.
+Open **Remote sessions → Model compatibility check** to inspect a live conversation without switching or generating a reply. The report shows the serialized UTF-8 byte upper bound, the pinned DSH heuristic with an additional Unicode/framing margin, output reserve and target context window. Neither figure is an exact provider tokenizer count.
+
+The default policy uses the byte upper bound. When only the heuristic fits, the native model selector asks for explicit consent to use the estimate. This consent is bound to the current conversation history, model route and live agent, expires after 60 seconds and is consumed once. Cancellation changes nothing. The selected capacity policy is saved locally and survives restart. A device handoff always requires the conservative policy; consent on one device does not authorize another device. The first and subsequent routed requests are checked again with their assembled messages and tools. Provider-side authentication, availability and context errors can still occur at dispatch. History is never silently truncated or replaced by an automatic summary to make relay succeed.
+
+For routes with incomplete metadata, add a `modelProfiles` entry in the existing ContextMesh plugin configuration:
+
+```yaml
+modelProfiles:
+  - provider: my-provider
+    model: my-model
+    textInput: true
+    contextWindow: 128000
+    tools: true
+    maxOutputTokens: 8192
+```
+
+Use the provider's documented limits. A profile can fill missing metadata or narrow a known context window; it cannot increase the SDK's declared limit or enable a modality the SDK explicitly rejects. `tools: false` rejects tool history and tool-enabled requests. `maxOutputTokens` requires an explicit adapter output limit and caps it. Profiles do not install providers or supply credentials. Restart DSH after changing configuration.
+
+Compatibility tests exercise the installed Responses, Chat Completions and Anthropic adapters against deterministic local protocol fixtures, including completed tool history and foreign replay-state isolation. This checks request translation, not live vendor availability or certification of every model listed by a provider.
 
 DSH retains provider-private replay state in the original log and only passes it to an adapter that owns the historical and target route. Cross-adapter requests use DSH's provider-neutral projection. Relay does not promise to transfer hidden model state.
 
@@ -44,11 +60,13 @@ Run from the repository using a running DSH's private control socket. Add `--sta
 
 ```sh
 pnpm cli models
+pnpm cli model-check SESSION_ID PROVIDER MODEL
 pnpm cli model-select SESSION_ID PROVIDER MODEL
+pnpm cli model-select SESSION_ID PROVIDER MODEL --allow-estimate
 pnpm cli model-select SESSION_ID PROVIDER MODEL --reasoning-effort high --operation-id UUID
 pnpm cli model-relay-status UUID
-pnpm cli handoff SESSION_ID TARGET_NODE_ID --provider PROVIDER --model MODEL
-pnpm cli takeover SESSION_ID --confirm --provider PROVIDER --model MODEL
+pnpm cli handoff SESSION_ID TARGET_NODE_ID
+pnpm cli takeover SESSION_ID --confirm
 ```
 
 Reuse the same operation ID with the same selection to inspect or retry an uncertain switch. Reusing it for another selection is rejected. CLI model selection is an explicit request to send subsequent conversation history to the named provider.
@@ -61,4 +79,6 @@ Keep the device running and restore its connection. On restart, a persisted sele
 
 ## Database upgrade
 
-The server uses schema **4**. Back up PostgreSQL and stop older writers before upgrade. Migration from schemas 1, 2 or 3 preserves existing headers and events, adds model-relay records and optional target-model takeover data. The prior server rejects schema 4; rollback requires the backup. The native DSH Session format remains unchanged.
+The server uses schema **6**. Back up PostgreSQL and stop older writers before upgrade. Migration from schemas 1–5 preserves existing headers and events, adds model-relay records and optional target-model takeover data. The prior server rejects schema 6; rollback requires the backup. The native DSH Session format remains unchanged.
+
+[Device pairing](devices.md) is available with the same plugin.

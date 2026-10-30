@@ -1,14 +1,44 @@
 import { createServer, createConnection, type Socket } from 'node:net'
-import { chmod, unlink } from 'node:fs/promises'
+import { chmod, unlink, mkdir, lstat, realpath } from 'node:fs/promises'
 import { join } from 'node:path'
+import { createHash } from 'node:crypto'
+
+/** AF_UNIX paths are limited to roughly 100 bytes on supported hosts. */
+export async function controlSocketPath(stateDir: string) {
+  const root = await realpath(stateDir),
+    direct = join(root, 'control.sock')
+  if (Buffer.byteLength(direct) < 100) return direct
+  const directory = join(
+    process.platform === 'darwin' ? '/private/tmp' : '/tmp',
+    `contextmesh-sockets-${process.getuid!()}`,
+  )
+  await mkdir(directory, { mode: 0o700 }).catch((error) => {
+    if (error.code !== 'EEXIST') throw error
+  })
+  const info = await lstat(directory)
+  if (
+    !info.isDirectory() ||
+    info.isSymbolicLink() ||
+    info.uid !== process.getuid!() ||
+    (info.mode & 0o077) !== 0
+  )
+    throw new Error(
+      'ContextMesh control directory must be private and owned by the current user',
+    )
+  return join(
+    directory,
+    createHash('sha256').update(root).digest('hex').slice(0, 24) + '.sock',
+  )
+}
 
 export async function callLocal(
   stateDir: string,
   command: unknown,
   timeoutMs = 45000,
 ): Promise<unknown> {
+  const path = await controlSocketPath(stateDir)
   return new Promise((accept, reject) => {
-    const socket = createConnection(join(stateDir, 'control.sock'))
+    const socket = createConnection(path)
     let body = ''
     socket.setTimeout(timeoutMs, () =>
       socket.destroy(new Error('ContextMesh local control timed out')),
@@ -35,7 +65,7 @@ export async function listenLocal(
   handle: (command: unknown) => Promise<unknown>,
 ) {
   const sockets = new Set<Socket>(),
-    path = join(stateDir, 'control.sock')
+    path = await controlSocketPath(stateDir)
   const server = createServer({ allowHalfOpen: true }, (socket) => {
     sockets.add(socket)
     socket.once('close', () => sockets.delete(socket))

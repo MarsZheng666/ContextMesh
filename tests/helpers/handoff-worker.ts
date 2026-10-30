@@ -1,3 +1,5 @@
+import { fileReferences } from '../../packages/handoff-deepseek/src/file-attachments.js'
+import { AttachmentId } from '@deepseek-ai/dsh-attachment'
 import type { Context } from '@deepseek-ai/cordis'
 import { LlmAdapter, ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
@@ -52,7 +54,10 @@ class ScriptedModel extends LlmAdapter {
       context:
         m === 'unknown'
           ? undefined
-          : { contextWindow: m === 'tiny' ? 4096 : 2000000 },
+          : {
+              contextWindow:
+                m === 'tiny' ? 4096 : m === 'balanced' ? 32768 : 2000000,
+            },
       inputModalities: m === 'no-text' ? [] : ['text' as const],
     }
   }
@@ -119,6 +124,7 @@ class ScriptedModel extends LlmAdapter {
 const input = z.object({
   id: z.number().int(),
   action: z.enum([
+    'file-read',
     'create',
     'prompt',
     'state',
@@ -133,6 +139,8 @@ const input = z.object({
   ]),
   sessionId: z.string().optional(),
   text: z.string().optional(),
+  fileData: z.string().optional(),
+  fileName: z.string().optional(),
   command: z.unknown().optional(),
   selection: modelRoute.optional(),
   finalTitle: z.string().optional(),
@@ -219,13 +227,43 @@ export async function apply(ctx: Context) {
             new AbortController().signal,
           )
           value = { started: true }
+        } else if (request.action === 'file-read') {
+          const agent = ctx.agents.get(sessionId)
+          if (!agent) throw new Error('Agent is not live')
+          const refs = fileReferences(agent.session.snapshotEvents())
+          value = await Promise.all(
+            refs.map(async (ref) => {
+              const chunks: Buffer[] = []
+              for await (const chunk of ctx.get('attachments')!.readFileStream({
+                ...ref,
+                attachmentId: AttachmentId(ref.attachmentId),
+              }))
+                chunks.push(Buffer.from(chunk))
+              return { ref, data: Buffer.concat(chunks).toString('base64') }
+            }),
+          )
         } else if (request.action === 'prompt') {
+          const file =
+            request.fileData === undefined
+              ? undefined
+              : await ctx
+                  .get('fileUploads')!
+                  .upload(
+                    ctx.agents.get(sessionId)!,
+                    { name: request.fileName, data: request.fileData },
+                    new AbortController().signal,
+                  )
           await ctx.sessionController.prompt(
             {
               sessionId,
               requestId: brandString<SessionRequestId>(randomUUID()),
               mode: 'queue',
-              content: [{ type: 'text', text: request.text ?? 'Continue.' }],
+              content: [
+                { type: 'text', text: request.text ?? 'Continue.' },
+                ...(file
+                  ? [{ type: 'file' as const, receiptId: file.receiptId }]
+                  : []),
+              ],
             },
             new AbortController().signal,
           )

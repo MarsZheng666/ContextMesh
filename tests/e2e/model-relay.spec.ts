@@ -177,7 +177,7 @@ it('waits for current work while freezing new input, then switches before the ne
   }
 }, 30000)
 
-it('takes over with a target model even when the source provider is not configured on the target', async () => {
+it('hands off the conversation current selection without requiring its obsolete original provider on the target', async () => {
   const f = await environment()
   try {
     const a = await f.launch('A', f.source, true),
@@ -198,6 +198,7 @@ it('takes over with a target model even when the source provider is not configur
       sessionId,
       text: 'Remember CONTINUITY-PHRASE-4817.',
     })
+    await a.rpc('select-model', { sessionId, selection: target })
     const original = await read(f, sessionId)
     await expect
       .poll(
@@ -216,7 +217,6 @@ it('takes over with a target model even when the source provider is not configur
           action: 'takeover',
           sessionId,
           confirmed: true,
-          targetModel: target,
         },
       }),
     )
@@ -264,10 +264,104 @@ it('takes over with a target model even when the source provider is not configur
       ),
     ).toBe(true)
     expect((await f.client.stat(sessionId))?.header).toEqual(original.header)
+    expect(final.events.filter((e) => e.type === 'model/selection')).toEqual(
+      original.events.filter((e) => e.type === 'model/selection'),
+    )
   } finally {
     await f.close()
   }
 }, 40000)
+
+it('keeps the source available when the receiving device has no current model configured', async () => {
+  const f = await environment()
+  try {
+    const a = await f.launch('A', f.source),
+      b = await f.launch('B', f.target, false, false, undefined, true),
+      projectId = randomUUID(),
+      sessionId = randomUUID()
+    await a.rpc('m1', {
+      command: { action: 'project', projectId, name: 'same model' },
+    })
+    await a.rpc('m1', {
+      command: { action: 'mapping', projectId, root: f.source },
+    })
+    await b.rpc('m1', {
+      command: { action: 'mapping', projectId, root: f.target },
+    })
+    await a.rpc('create', { sessionId })
+    await a.rpc('prompt', {
+      sessionId,
+      text: 'Remember CONTINUITY-PHRASE-4817.',
+    })
+    await expect(
+      a.rpc('m1', {
+        command: {
+          action: 'handoff',
+          sessionId,
+          targetNodeId: b.nodeId,
+          targetModel: target,
+        },
+      }),
+    ).rejects.toThrow('current')
+    await expect(
+      b.rpc('m1', {
+        command: {
+          action: 'takeover',
+          sessionId,
+          confirmed: true,
+          targetModel: target,
+        },
+      }),
+    ).rejects.toThrow('current')
+    const operation = z.object({ id: z.string() }).parse(
+      await a.rpc('m1', {
+        command: { action: 'handoff', sessionId, targetNodeId: b.nodeId },
+      }),
+    )
+    await expect
+      .poll(
+        async () =>
+          z
+            .object({ state: z.string() })
+            .parse(await f.client.request('/v1/handoffs/' + operation.id))
+            .state,
+        { timeout: 10000 },
+      )
+      .toBe('failed')
+    await expect
+      .poll(
+        async () =>
+          workerState.parse(await a.rpc('state', { sessionId })).controlled,
+        { timeout: 10000 },
+      )
+      .toBe(false)
+    expect(
+      z.object({ live: z.boolean() }).parse(await a.rpc('state', { sessionId }))
+        .live,
+    ).toBe(true)
+    expect(
+      z.object({ live: z.boolean() }).parse(await b.rpc('state', { sessionId }))
+        .live,
+    ).toBe(false)
+    const before = await read(f, sessionId)
+    expect(
+      before.events.filter((e) => e.type === 'model/selection'),
+    ).not.toContainEqual(
+      expect.objectContaining({ data: expect.objectContaining(target) }),
+    )
+    await a.rpc('prompt', {
+      sessionId,
+      text: 'Continue with the original current model.',
+    })
+    expect(
+      workerState
+        .parse(await a.rpc('state', { sessionId }))
+        .modelRequests.at(-1),
+    ).toMatchObject({ provider: 'contextmesh-e2e', model: 'scripted' })
+  } finally {
+    await f.close()
+  }
+}, 30000)
 
 it('reconciles lost prepare and completion responses without appending the selection twice', async () => {
   const f = await environment()

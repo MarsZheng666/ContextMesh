@@ -4,6 +4,12 @@ import { z } from 'zod'
 import { callLocal } from '../../../packages/handoff-deepseek/src/local-control.js'
 
 const names = new Set([
+  'workspace-plan',
+  'workspace-export',
+  'workspace-list',
+  'workspace-preview',
+  'workspace-apply',
+  'workspace-rollback',
   'devices',
   'projects',
   'project-add',
@@ -16,6 +22,7 @@ const names = new Set([
   'history',
   'models',
   'model-select',
+  'model-check',
   'model-relay-status',
   'takeover',
 ])
@@ -42,23 +49,59 @@ export async function runLocal(input: string[]): Promise<boolean> {
   const provider = option('--provider'),
     chosen = option('--model'),
     reasoningEffort = option('--reasoning-effort'),
-    operationId = option('--operation-id')
+    operationId = option('--operation-id'),
+    previewId = option('--preview-id')
+  const allowEstimate = args.includes('--allow-estimate')
+  if (allowEstimate) args.splice(args.indexOf('--allow-estimate'), 1)
   const confirm = args.includes('--confirm')
   if (confirm) args.splice(args.indexOf('--confirm'), 1)
   if ((provider && !chosen) || (!provider && chosen))
     throw new Error('--provider and --model must be supplied together')
-  const targetModel =
-    provider && chosen
-      ? {
-          provider,
-          model: chosen,
-          ...(reasoningEffort ? { reasoningEffort } : {}),
-        }
-      : undefined
   const [name, id, value, modelId] = args
   if (!name || !names.has(name)) return false
+  if (allowEstimate && name !== 'model-select')
+    throw new Error('--allow-estimate applies only to a local model selection')
+  if (previewId && name !== 'workspace-apply')
+    throw new Error('--preview-id applies only to workspace-apply')
+  if (
+    (name === 'handoff' || name === 'takeover') &&
+    (provider || chosen || reasoningEffort)
+  )
+    throw new Error(
+      'Handoff keeps the current conversation model. Use model-select separately to change it.',
+    )
   let command: unknown
   switch (name) {
+    case 'workspace-plan':
+      if (!id || !value)
+        throw new Error('Usage: workspace-plan SESSION_ID TARGET_NODE_ID')
+      command = { action: name, sessionId: id, targetNodeId: value }
+      break
+    case 'workspace-list':
+      command = { action: name }
+      break
+    case 'workspace-preview':
+      if (!id) throw new Error('Usage: workspace-preview TRANSFER_ID')
+      command = { action: name, transferId: id }
+      break
+    case 'workspace-export':
+    case 'workspace-apply':
+    case 'workspace-rollback':
+      if (!id || !confirm)
+        throw new Error(
+          'Usage: ' + name + ' ID --confirm (review the file preview first)',
+        )
+      if (name === 'workspace-apply' && !previewId)
+        throw new Error(
+          'workspace-apply requires --preview-id from a fresh workspace-preview',
+        )
+      command = {
+        action: name,
+        ...(previewId ? { previewId } : {}),
+        ...(name === 'workspace-export' ? { planId: id } : { transferId: id }),
+        confirmed: true,
+      }
+      break
     case 'models':
       command = { action: 'models' }
       break
@@ -66,13 +109,15 @@ export async function runLocal(input: string[]): Promise<boolean> {
       if (!id) throw new Error('Usage: model-relay-status <operation-id>')
       command = { action: 'model-relay-status', operationId: id }
       break
+    case 'model-check':
     case 'model-select':
       if (!id || !value || !modelId)
         throw new Error(
           'Usage: model-select <session-id> <provider> <model> [--reasoning-effort value] [--operation-id uuid]',
         )
       command = {
-        action: 'select-model',
+        action: name === 'model-check' ? 'model-check' : 'select-model',
+        ...(allowEstimate ? { allowEstimatedCapacity: true } : {}),
         sessionId: id,
         provider: value,
         model: modelId,
@@ -82,14 +127,11 @@ export async function runLocal(input: string[]): Promise<boolean> {
       break
     case 'takeover':
       if (!id || !confirm)
-        throw new Error(
-          'Usage: takeover <session-id> --confirm [--provider provider --model model]',
-        )
+        throw new Error('Usage: takeover <session-id> --confirm')
       command = {
         action: 'takeover',
         sessionId: id,
         confirmed: true,
-        ...(targetModel ? { targetModel } : {}),
         ...(operationId ? { operationId } : {}),
       }
       break
@@ -115,7 +157,6 @@ export async function runLocal(input: string[]): Promise<boolean> {
         action: 'handoff',
         sessionId: id,
         targetNodeId: value,
-        ...(targetModel ? { targetModel } : {}),
       }
       break
     case 'handoff-cancel':

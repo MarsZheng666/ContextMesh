@@ -1,3 +1,6 @@
+import { FilesPanel } from './files.js'
+import { ModelCheckPanel } from './models.js'
+import { DeviceSetup } from './devices.js'
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import {
@@ -503,6 +506,13 @@ export function RemotePanelView({
       <div className="cm-muted">
         {t('device')}: {data.name}
       </div>
+      <DeviceSetup connection={data.connection} request={request} t={t} />
+      {data.workspaceTransfer && (
+        <FilesPanel data={data} request={request} t={t} />
+      )}
+      {data.modelPreflight && (
+        <ModelCheckPanel data={data} request={request} t={t} />
+      )}
       <p className="cm-notice">{t('prepare')}</p>
       {(failure || error) && (
         <p className="cm-error" role="alert">
@@ -814,7 +824,6 @@ export function HandoffDock({
     model.getSnapshot,
   )
   const [target, setTarget] = useState(''),
-    [targetModel, setTargetModel] = useState(''),
     [busy, setBusy] = useState(false),
     [error, setError] = useState('')
   const data = state.data,
@@ -824,17 +833,6 @@ export function HandoffDock({
   const destination = target || options[0]?.id || ''
   const takingOver = state.takingOver?.includes(sessionId) ?? false
   const local = session.activeNodeId === data.nodeId
-  const choices = local
-    ? (data.nodes.find((n) => n.id === destination)?.models ?? [])
-    : (data.models ?? [])
-  const chosenModel = choices.find(
-    (choice) =>
-      JSON.stringify({ provider: choice.provider, model: choice.model }) ===
-      targetModel,
-  )
-  const route = chosenModel
-    ? { provider: chosenModel.provider, model: chosenModel.model }
-    : undefined
   const switching =
     state.modelSelecting?.includes(sessionId) ||
     data.modelSwitching?.includes(sessionId)
@@ -848,13 +846,10 @@ export function HandoffDock({
         !(await model.chooseProject(sessionId, t))
       )
         return
-      if (targetModel && !route)
-        throw new ControlError('MODEL_RELAY_CHANGED', t('MODEL_RELAY_CHANGED'))
       await model.request({
         action: 'handoff',
         sessionId,
         targetNodeId: destination,
-        ...(route ? { targetModel: route } : {}),
       })
       await model.refresh()
     } catch (error) {
@@ -866,6 +861,11 @@ export function HandoffDock({
   }
   return (
     <div className="cm-dock">
+      {state.error && (
+        <span role="status" className="cm-error">
+          {errorText(state.error, t)}
+        </span>
+      )}
       <style>{style}</style>
       <ProjectSetupDialog
         model={model}
@@ -899,44 +899,14 @@ export function HandoffDock({
       </span>
       {takingOver && <span role="status">{t('takingOver')}</span>}
       {switching && <span role="status">{t('switchingModel')}</span>}
-      {!session.handoffId && session.activeNodeId && (
-        <label>
-          {t('targetModel')}
-          <select
-            aria-label={t('targetModel')}
-            value={targetModel}
-            disabled={busy || takingOver || switching}
-            onChange={(event) => setTargetModel(event.target.value)}
-          >
-            <option value="">{t('keepModel')}</option>
-            {choices.map((choice) => (
-              <option
-                key={choice.provider + '/' + choice.model}
-                value={JSON.stringify({
-                  provider: choice.provider,
-                  model: choice.model,
-                })}
-              >
-                {choice.provider} / {choice.name ?? choice.model}
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
-      {route && <small>{t('providerNotice')}</small>}
       {!local && session.activeNodeId && !session.handoffId && (
         <button
           disabled={busy || takingOver}
           onClick={() => {
             setBusy(true)
             setError('')
-            if (targetModel && !route) {
-              setError(t('MODEL_RELAY_CHANGED'))
-              setBusy(false)
-              return
-            }
             void model
-              .ensureOwned(sessionId, t, undefined, route)
+              .ensureOwned(sessionId, t)
               .catch((error) => setError(errorText(error, t)))
               .finally(() => setBusy(false))
           }}
@@ -951,7 +921,6 @@ export function HandoffDock({
             value={destination}
             onChange={(event) => {
               setTarget(event.target.value)
-              setTargetModel('')
             }}
           >
             <option value="">{t('choose')}</option>

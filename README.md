@@ -10,11 +10,13 @@ ContextMesh gives agent sessions a shared home beyond a single machine. It prese
 
 [Getting started](docs/getting-started.md) · [Plugin API](docs/api/deepseek-adapter.md) · [Handoff](docs/handoff.md) · [Deployment](docs/deployment.md) · [Model relay](docs/model-relay.md)
 
+[Connect devices](docs/devices.md)
+
 ## Developer preview
 
-ContextMesh is in **developer preview**. M1/M2 provide remote Session storage, coordinated cross-machine handoff and model relay for the pinned DeepSeek Harness **0.2.1-rc.3** runtime. APIs may change as the project evolves.
+ContextMesh is in **developer preview**. ContextMesh provides remote Session storage, coordinated cross-machine handoff, model relay and confirmed file transfer for the pinned DeepSeek Harness **0.2.1-rc.3** runtime. APIs may change as the project evolves.
 
-Hand off a conversation to a folder on another device, with shared titles, a remote session panel and a single writer. Plain folders need no Git; code workspaces still require the same clean Git commit on both devices. M1 requires the explicit DSH compatibility patches shipped in this repository. Continue with another configured model through the native selector or choose a model during device takeover. See [model relay](docs/model-relay.md). File synchronization remains planned.
+Hand off a conversation to a folder on another device, with shared titles, a remote session panel and a single writer. Plain folders need no Git; code workspaces require the same base Git commit. Use the [file transfer guide](docs/files.md) to preview and confirm uncommitted changes and file attachments before handoff. ContextMesh requires the explicit DSH compatibility patches shipped in this repository. Handoff keeps the conversation’s current model. Use the native selector separately to continue with another configured model. See [model relay](docs/model-relay.md).
 
 ## What it does
 
@@ -92,13 +94,15 @@ Export writes the native session log to standard output. The CLI reads connectio
 
 ## Roadmap
 
-| Capability                                | Status     |
-| ----------------------------------------- | ---------- |
-| Remote Session persistence and recovery   | Available  |
-| Controlled handoff with workspace mapping | M1 preview |
-| Cross-model task relay within one Harness | M2 preview |
-| Device pairing and simpler configuration  | Planned    |
-| Additional coding-agent integrations      | Planned    |
+| Capability                                       | Status       |
+| ------------------------------------------------ | ------------ |
+| Remote Session persistence and recovery          | Available    |
+| Controlled handoff with workspace mapping        | M1 preview   |
+| Cross-model task relay within one Harness        | M2 preview   |
+| Device pairing and guided configuration          | M2.1 preview |
+| Model compatibility and capacity preflight       | M2.2 preview |
+| Confirmed workspace and file attachment transfer | M3 preview   |
+| Additional coding-agent integrations             | Planned      |
 
 ## Development
 

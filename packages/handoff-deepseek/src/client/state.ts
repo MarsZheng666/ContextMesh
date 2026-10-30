@@ -8,6 +8,15 @@ const modelChoice = z.object({
 import { en, type Key } from './locales.js'
 import type { ListDirectory } from './directory.js'
 export const snapshotSchema = z.object({
+  workspaceTransfer: z.boolean().optional(),
+  modelPreflight: z.boolean().optional(),
+  connection: z
+    .object({
+      endpoint: z.string(),
+      role: z.enum(['owner', 'device']),
+      nodeId: z.string().nullable(),
+    })
+    .optional(),
   nodeId: z.string(),
   name: z.string(),
   models: z.array(modelChoice).optional(),
@@ -82,7 +91,6 @@ export interface ViewState {
 }
 export class UiModel {
   private takeovers = new Map<string, Promise<boolean>>()
-  private takeoverTargets = new Map<string, string>()
   private selections = new Map<
     string,
     { promise: Promise<void>; finish: () => void }
@@ -100,14 +108,38 @@ export class UiModel {
         !this.confirmTakeover(`${t('providerConfirm')} ${target.provider}`)
       )
         return true
-      const data = snapshotSchema.parse(
-        await this.request({ action: 'status' }),
-      )
+      let data = snapshotSchema.parse(await this.request({ action: 'status' }))
       this.set({ ...this.state, data, error: undefined })
-      const session = data.sessions.find((s) => s.id === sessionId)
+      let session = data.sessions.find((s) => s.id === sessionId)
       if (session?.activeNodeId && session.activeNodeId !== data.nodeId) {
-        await this.ensureOwned(sessionId, t, undefined, target)
-        return true
+        if (!(await this.ensureOwned(sessionId, t))) return true
+        data = snapshotSchema.parse(this.state.data)
+        session = data.sessions.find((s) => s.id === sessionId)
+      }
+      if (data.modelPreflight && session?.activeNodeId === data.nodeId) {
+        const report = modelCheckSchema.parse(
+          await this.request({ action: 'model-check', sessionId, ...target }),
+        )
+        if (!report.capacity.conservativeFits) {
+          if (!report.capacity.estimatedFits)
+            throw new ControlError(
+              'MODEL_CONTEXT_TOO_SMALL',
+              t('MODEL_CONTEXT_TOO_SMALL'),
+            )
+          if (
+            !this.confirmTakeover(
+              `${t('capacityConfirm')}\n${t('capacityEstimate')}: ${report.capacity.estimatedTokens}; ${t('capacityWindow')}: ${report.capacity.contextWindow}`,
+            )
+          )
+            return true
+          await this.request({
+            action: 'approve-model-capacity',
+            sessionId,
+            ...target,
+            historyCut: report.historyCut,
+            confirmed: true,
+          })
+        }
       }
       if (this.selections.has(sessionId))
         throw new ControlError('MODEL_RELAY_BUSY', t('MODEL_RELAY_BUSY'))
@@ -189,6 +221,17 @@ export class UiModel {
         )
       return this.showProjectSetup(data, session, signal)
     })
+  }
+  async readyToSend(
+    sessionId: string,
+    t: (key: Key) => string,
+    signal?: AbortSignal,
+  ) {
+    await this.waitForModelSelect(sessionId, signal)
+    if (!(await this.ensureOwned(sessionId, t, signal))) return false
+    // A remote native model selection acquires ownership before opening its gate.
+    await this.waitForModelSelect(sessionId, signal)
+    return true
   }
   private showProjectSetup(
     data: Snapshot,
@@ -284,24 +327,14 @@ export class UiModel {
     sessionId: string,
     t: (key: Key) => string,
     signal?: AbortSignal,
-    targetModel?: ModelRoute,
   ): Promise<boolean> {
     const existing = this.takeovers.get(sessionId)
-    if (existing) {
-      if (
-        targetModel &&
-        this.takeoverTargets.get(sessionId) !== JSON.stringify(targetModel)
-      )
-        throw new ControlError('MODEL_RELAY_BUSY', en.MODEL_RELAY_BUSY)
-      return existing
-    }
-    const operation = this.acquireHere(sessionId, t, signal, targetModel)
+    if (existing) return existing
+    const operation = this.acquireHere(sessionId, t, signal)
     this.takeovers.set(sessionId, operation)
-    this.takeoverTargets.set(sessionId, JSON.stringify(targetModel))
     const clear = () => {
       if (this.takeovers.get(sessionId) === operation)
         this.takeovers.delete(sessionId)
-      this.takeoverTargets.delete(sessionId)
       this.set({
         ...this.state,
         takingOver: this.state.takingOver?.filter((id) => id !== sessionId),
@@ -314,7 +347,6 @@ export class UiModel {
     sessionId: string,
     t: (key: Key) => string,
     signal?: AbortSignal,
-    targetModel?: ModelRoute,
   ): Promise<boolean> {
     const friendly = (code: string) =>
       new ControlError(code, t(code in en ? (code as Key) : 'TAKEOVER_FAILED'))
@@ -332,14 +364,14 @@ export class UiModel {
       !data.mappings.some((m) => m.projectId === session.projectId)
     ) {
       if (!(await this.showProjectSetup(data, session, signal))) return false
-      return this.acquireHere(sessionId, t, signal, targetModel)
+      return this.acquireHere(sessionId, t, signal)
     }
     signal?.throwIfAborted()
     if (
       !this
         .confirmTakeover(`${t('takeoverConfirm')} ${session.activeNodeName ?? t('remote')}
 
-${t('takeoverEffect')}${targetModel ? '\n\n' + t('targetModel') + ': ' + targetModel.provider + '/' + targetModel.model + '\n' + t('providerNotice') : ''}`)
+${t('takeoverEffect')}`)
     )
       return false
     this.set({
@@ -351,7 +383,6 @@ ${t('takeoverEffect')}${targetModel ? '\n\n' + t('targetModel') + ': ' + targetM
         action: 'takeover',
         sessionId,
         confirmed: true,
-        ...(targetModel ? { targetModel } : {}),
         operationId: crypto.randomUUID(),
       }),
     )
@@ -378,8 +409,11 @@ ${t('takeoverEffect')}${targetModel ? '\n\n' + t('targetModel') + ': ' + targetM
         ['failed', 'cancelled', 'recovery_required'].includes(
           status.handoffState ?? '',
         )
-      )
+      ) {
+        if (status.handoffError)
+          throw new Error(t('TAKEOVER_FAILED') + '\n' + status.handoffError)
         throw friendly('TAKEOVER_FAILED')
+      }
       if (status.handoffState === 'completed') {
         const fresh = snapshotSchema.parse(
           await this.request({ action: 'status' }),
@@ -416,6 +450,7 @@ ${t('takeoverEffect')}${targetModel ? '\n\n' + t('targetModel') + ': ' + targetM
   private state: ViewState = {}
   private listeners = new Set<() => void>()
   private abort = new AbortController()
+  private failures = 0
   private refreshing: Promise<void> | undefined
   private timer: ReturnType<typeof setInterval> | undefined
   getSnapshot = () => this.state
@@ -435,7 +470,10 @@ ${t('takeoverEffect')}${targetModel ? '\n\n' + t('targetModel') + ': ' + targetM
       credentials: 'same-origin',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(command),
-      signal: this.abort.signal,
+      signal: AbortSignal.any([this.abort.signal, AbortSignal.timeout(15000)]),
+    }).catch((error) => {
+      if (this.abort.signal.aborted) throw error
+      throw new ControlError('CONNECTION_LOST', en.CONNECTION_LOST)
     })
     const envelope = z
       .object({
@@ -451,8 +489,12 @@ ${t('takeoverEffect')}${targetModel ? '\n\n' + t('targetModel') + ': ' + targetM
       .parse(await response.json())
     if (!response.ok || !envelope.ok)
       throw new ControlError(
-        envelope.error?.code ?? 'FAILED',
-        envelope.error?.message ?? response.statusText,
+        envelope.error?.code === 'UNAVAILABLE'
+          ? 'CONNECTION_LOST'
+          : (envelope.error?.code ?? 'FAILED'),
+        envelope.error?.code === 'UNAVAILABLE'
+          ? en.CONNECTION_LOST
+          : (envelope.error?.message ?? response.statusText),
       )
     return envelope.value
   }
@@ -460,6 +502,7 @@ ${t('takeoverEffect')}${targetModel ? '\n\n' + t('targetModel') + ': ' + targetM
     if (this.refreshing) return this.refreshing
     this.refreshing = this.request({ action: 'status' })
       .then((value) => {
+        this.failures = 0
         this.set({
           ...this.state,
           data: snapshotSchema.parse(value),
@@ -467,6 +510,7 @@ ${t('takeoverEffect')}${targetModel ? '\n\n' + t('targetModel') + ': ' + targetM
         })
       })
       .catch((error) => {
+        this.failures = Math.min(4, this.failures + 1)
         if (!this.abort.signal.aborted)
           this.set({
             ...this.state,
@@ -479,13 +523,18 @@ ${t('takeoverEffect')}${targetModel ? '\n\n' + t('targetModel') + ': ' + targetM
     return this.refreshing
   }
   start() {
-    void this.refresh()
-    this.timer = setInterval(() => {
-      void this.refresh()
-    }, 2500)
+    const poll = async () => {
+      await this.refresh()
+      if (!this.abort.signal.aborted)
+        this.timer = setTimeout(
+          () => void poll(),
+          Math.min(30000, 2500 * 2 ** this.failures),
+        )
+    }
+    void poll()
   }
   close() {
-    clearInterval(this.timer)
+    clearTimeout(this.timer)
     for (const selection of this.selections.values()) selection.finish()
     this.selections.clear()
     this.cancelProjectSetup()
@@ -493,3 +542,30 @@ ${t('takeoverEffect')}${targetModel ? '\n\n' + t('targetModel') + ': ' + targetM
     this.listeners.clear()
   }
 }
+
+export const modelCheckSchema = z.object({
+  route: z.object({
+    provider: z.string(),
+    model: z.string(),
+    reasoningEffort: z.string().optional(),
+  }),
+  historyCut: z.number().int().nonnegative(),
+  capacity: z.object({
+    method: z.string(),
+    exact: z.literal(false),
+    estimatedTokens: z.number().nonnegative(),
+    byteUpperBound: z.number().nonnegative(),
+    outputReserve: z.number().nonnegative(),
+    headroom: z.number().nonnegative(),
+    contextWindow: z.number().positive(),
+    conservativeFits: z.boolean(),
+    estimatedFits: z.boolean(),
+  }),
+  capabilities: z
+    .object({
+      textInput: z.boolean(),
+      tools: z.union([z.boolean(), z.string()]),
+      maxOutputTokens: z.number().nullable(),
+    })
+    .passthrough(),
+})

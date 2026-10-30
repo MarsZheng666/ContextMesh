@@ -1,6 +1,8 @@
 import { renderToStaticMarkup } from 'react-dom/server'
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
+import { UiModel } from '../../packages/handoff-deepseek/src/client/state.js'
 import {
+  HandoffDock,
   RemotePanelView,
   SessionDeviceView,
 } from '../../packages/handoff-deepseek/src/client/view.js'
@@ -118,4 +120,36 @@ for (const [language, locale] of [
         <SessionDeviceView data={snapshot} sessionId="session" t={t} />,
       ),
     ).toBe('')
+  })
+
+for (const owner of ['A', 'B'])
+  it(`keeps only device handoff controls in the dock for owner ${owner}`, async () => {
+    const data = structuredClone(snapshot)
+    data.sessions[0]!.activeNodeId = owner
+    data.models = [{ provider: 'local', model: 'local-model' }]
+    data.nodes[1]!.models = [{ provider: 'remote', model: 'remote-model' }]
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ ok: true, value: data })),
+    )
+    const model = new UiModel(() => true)
+    try {
+      await model.refresh()
+      const html = renderToStaticMarkup(
+        <HandoffDock
+          model={model}
+          sessionId="session"
+          t={(key) =>
+            new Map<string, string>(Object.entries(en)).get(key) ?? key
+          }
+        />,
+      )
+      expect(html).not.toContain('Continue with model')
+      expect(html).not.toContain('local-model')
+      expect(html).not.toContain('remote-model')
+      expect(html).toContain(owner === 'A' ? en.handoff : en.takeover)
+    } finally {
+      model.close()
+      vi.unstubAllGlobals()
+    }
   })

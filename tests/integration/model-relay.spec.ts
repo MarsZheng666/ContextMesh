@@ -119,7 +119,7 @@ it('does not infer model rollback from an expired lease and fences other writers
   })
 })
 
-it('blocks handoff while a model selection is unresolved and binds takeover to its requested target model', async () => {
+it('blocks handoff during an unresolved model switch and rejects alternate-model transfer requests', async () => {
   const f = await prepared(),
     projectId = randomUUID()
   await f.node.project('fixture', projectId)
@@ -164,31 +164,32 @@ it('blocks handoff while a model selection is unresolved and binds takeover to i
     code: 'MODEL_RELAY_BUSY',
   })
   await f.relay.finish(record.id, true)
-  const intent = await other.takeover(
-    f.id,
-    f.node.nodeId,
-    randomUUID(),
-    f.request.target,
-  )
+  await expect(
+    other.takeover(f.id, f.node.nodeId, randomUUID(), f.request.target),
+  ).rejects.toMatchObject({ code: 'HANDOFF_MODEL_FIXED' })
+  const intent = await other.takeover(f.id, f.node.nodeId)
+  expect(intent.targetModel).toBeUndefined()
   await expect(
     f.node.request(
       f.id,
       other.nodeId,
       f.handle.handleId,
       f.handle.epoch,
-      { ...manifest, targetModel: { provider: 'c', model: 'other' } },
+      manifest,
       intent.handoffOperationId,
       intent.id,
     ),
-  ).rejects.toMatchObject({ code: 'TAKEOVER_CHANGED' })
+  ).rejects.toMatchObject({ code: 'HANDOFF_MODEL_FIXED' })
+  const { targetModel, ...currentModelManifest } = manifest
   const handoff = await f.node.request(
     f.id,
     other.nodeId,
     f.handle.handleId,
     f.handle.epoch,
-    manifest,
+    currentModelManifest,
     intent.handoffOperationId,
     intent.id,
   )
-  expect(handoff.manifest.targetModel).toEqual(f.request.target)
+  expect(handoff.manifest.model).toEqual(f.request.source)
+  expect(handoff.manifest.targetModel).toBeUndefined()
 })

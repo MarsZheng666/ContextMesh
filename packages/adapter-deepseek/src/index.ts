@@ -42,6 +42,7 @@ import {
   type SessionId,
   type SessionEvent,
 } from '@deepseek-ai/dsh-session'
+import { readConnection } from '../../client/src/config.js'
 import { MeshClient } from '../../client/src/index.js'
 import {
   headerSchema,
@@ -55,7 +56,7 @@ import {
 export const name = 'contextmesh-session-persistence'
 export const inject = ['sessions']
 export interface Config {
-  endpoint: string
+  endpoint?: string
   token?: string
   tokenEnv?: string
   batchDelayMs?: number
@@ -64,7 +65,7 @@ export interface Config {
   allowInsecureHttp?: boolean
 }
 export const Config: schema<Config> = schema.object({
-  endpoint: schema.string().default('http://127.0.0.1:8787'),
+  endpoint: schema.string(),
   token: schema.string(),
   tokenEnv: schema.string().default('CONTEXTMESH_TOKEN'),
   batchDelayMs: schema.natural().min(1).default(200),
@@ -569,11 +570,21 @@ class RemoteSessionHandle implements SessionHandle {
 
 /** Keep live routing through provider-dependent consumer shutdown, then close all handles. */
 export async function apply(ctx: Context, config: Config): Promise<void> {
-  const token =
+  const environmentToken =
     config.token ?? process.env[config.tokenEnv ?? 'CONTEXTMESH_TOKEN']
+  const saved = environmentToken ? undefined : await readConnection()
+  const token = environmentToken ?? saved?.token
   if (!token)
     throw new Error('ContextMesh token environment variable is missing')
-  const client = new MeshClient({ ...config, token })
+  const client = new MeshClient({
+    ...config,
+    endpoint:
+      config.endpoint ??
+      process.env.CONTEXTMESH_ENDPOINT ??
+      saved?.endpoint ??
+      'http://127.0.0.1:8787',
+    token,
+  })
   const capabilities = await client.capabilities()
   if ((config.renewalMs ?? 15000) * 3 > capabilities.leaseMs)
     throw new Error('renewalMs must be at most one third of server leaseMs')

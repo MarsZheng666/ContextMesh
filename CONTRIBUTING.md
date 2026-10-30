@@ -11,6 +11,8 @@ ContextMesh is a public project. Design installation, upgrades, configuration, d
 - Make the default setup straightforward, minimize required configuration, and explain actions and errors in terms users understand. Users should not need to learn the internal architecture or milestone names to complete a task.
 - Review changes for their effect on both first-time installation and upgrades by existing users. Keep English and Chinese user documentation aligned with the actual experience.
 
+- Handoff and takeover preserve the conversation’s current provider, model and reasoning selection. Keep device transfer separate from model selection; use the native model selector for model changes. If the receiving device lacks the current model, explain the missing configuration instead of silently selecting a substitute.
+
 ## Development setup
 
 Use Node.js 24.9+ and the pinned pnpm version from `package.json`.

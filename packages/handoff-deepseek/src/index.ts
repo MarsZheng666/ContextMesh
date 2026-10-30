@@ -1,6 +1,8 @@
 import type { Context } from '@deepseek-ai/cordis'
 import schema from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-client-connection'
+import { readConnection } from '../../client/src/config.js'
+import type { ModelProfile } from './model-profile.js'
 import { hostname } from 'node:os'
 import { join } from 'node:path'
 import { HandoffCoordinator } from './coordinator.js'
@@ -17,6 +19,7 @@ export const inject = [
   'sandboxPolicy',
 ]
 export interface Config {
+  modelProfiles?: ModelProfile[]
   stateDir?: string
   nodeName?: string
   pollMs?: number
@@ -24,6 +27,18 @@ export interface Config {
   waitIdleMs?: number
 }
 export const Config: schema<Config> = schema.object({
+  modelProfiles: schema
+    .array(
+      schema.object({
+        provider: schema.string().required(),
+        model: schema.string().required(),
+        contextWindow: schema.natural().min(1),
+        textInput: schema.boolean(),
+        tools: schema.boolean(),
+        maxOutputTokens: schema.natural().min(1),
+      }),
+    )
+    .default([]),
   stateDir: schema.string(),
   nodeName: schema.string(),
   pollMs: schema.natural().min(50).default(2000),
@@ -44,10 +59,15 @@ export async function apply(ctx: Context, config: Config) {
     throw new Error('Set DSH_HOME or configure ContextMesh stateDir')
   const service = await HandoffCoordinator.start(ctx, {
     stateDir,
-    nodeName: config.nodeName ?? hostname(),
+    nodeName:
+      config.nodeName ??
+      (process.env.CONTEXTMESH_TOKEN ? undefined : await readConnection())
+        ?.name ??
+      hostname(),
     pollMs: config.pollMs ?? 2000,
     heartbeatMs: config.heartbeatMs ?? 15000,
     waitIdleMs: config.waitIdleMs ?? 30000,
+    modelProfiles: config.modelProfiles,
   })
   let local: Awaited<ReturnType<typeof listenLocal>> | undefined
   ctx.effect(

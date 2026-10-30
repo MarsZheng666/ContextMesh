@@ -1,13 +1,24 @@
+import { WorkspaceTransfers } from './workspace-transfer.js'
+import { fileReferences } from './file-attachments.js'
+import type { TransferRecord } from '../../protocol/src/transfers.js'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, AgentControl, AgentHandle } from '@deepseek-ai/dsh-agent'
 import { createScope } from '@deepseek-ai/dsh-scope'
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+import { DeviceClient } from '../../client/src/devices.js'
+import { deviceName } from '../../protocol/src/devices.js'
 import { ModelRelayController } from './model-relay.js'
 import {
   inspectModel,
+  analyzeModel,
   assertRequestBudget,
   type ModelBudget,
 } from './model-compatibility.js'
+import {
+  modelProfile,
+  type ModelProfile,
+  capacityMode,
+} from './model-profile.js'
 import { ModelRelayClient } from '../../client/src/model-relay.js'
 import type { ModelRoute } from '../../protocol/src/model-relay.js'
 import { SessionId, Session, type SessionEvent } from '@deepseek-ai/dsh-session'
@@ -52,6 +63,7 @@ const stateSchema = z.object({
   version: z.literal(1),
   nodeId: z.uuid(),
   bindings: z.record(z.string(), bindingSchema),
+  workspaceTransfers: z.record(z.string(), z.uuid()).default({}),
   modelBudgets: z
     .record(
       z.string(),
@@ -59,15 +71,63 @@ const stateSchema = z.object({
         route: modelRoute,
         contextWindow: z.number().positive(),
         outputReserve: z.number().positive(),
+        capacityMode: capacityMode.optional(),
+        maxOutputTokens: z.number().int().positive().optional(),
+        toolsAllowed: z.boolean().optional(),
       }),
     )
     .default({}),
 })
 const commandSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('status') }),
+  z.object({
+    action: z.literal('workspace-plan'),
+    sessionId: z.string(),
+    targetNodeId: z.uuid(),
+  }),
+  z.object({
+    action: z.literal('workspace-export'),
+    planId: z.uuid(),
+    confirmed: z.literal(true),
+  }),
+  z.object({ action: z.literal('workspace-list') }),
+  z.object({ action: z.literal('workspace-preview'), transferId: z.uuid() }),
+  z.object({
+    action: z.literal('workspace-apply'),
+    previewId: z.uuid(),
+    transferId: z.uuid(),
+    confirmed: z.literal(true),
+  }),
+  z.object({
+    action: z.literal('workspace-rollback'),
+    transferId: z.uuid(),
+    confirmed: z.literal(true),
+  }),
+  z.object({
+    action: z.literal('pair-device'),
+    name: deviceName,
+    operationId: z.uuid(),
+  }),
+  z.object({ action: z.literal('paired-devices') }),
+  z.object({
+    action: z.literal('revoke-device'),
+    credentialId: z.uuid(),
+    confirmed: z.literal(true),
+  }),
   z.object({ action: z.literal('models') }),
   modelRoute.extend({
+    action: z.literal('model-check'),
+    sessionId: z.string().min(1).max(256),
+  }),
+  modelRoute.extend({
+    action: z.literal('approve-model-capacity'),
+    sessionId: z.string().min(1).max(256),
+    historyCut: z.number().int().nonnegative(),
+    confirmed: z.literal(true),
+  }),
+  modelRoute.extend({
     action: z.literal('select-model'),
+    allowEstimatedCapacity: z.boolean().optional(),
     sessionId: z.string().min(1).max(256),
     operationId: z.uuid().optional(),
   }),
@@ -118,6 +178,7 @@ const commandSchema = z.discriminatedUnion('action', [
   }),
 ])
 export interface RuntimeConfig {
+  modelProfiles?: ModelProfile[]
   stateDir: string
   nodeName: string
   pollMs: number
@@ -186,6 +247,11 @@ async function bounded(
 }
 
 export class HandoffCoordinator {
+  private readonly capacityApprovals = new Map<
+    string,
+    { agent: Agent; route: string; cut: number; expires: number }
+  >()
+  readonly files: WorkspaceTransfers
   readonly relay: ModelRelayController
   readonly client: HandoffClient
   private readonly abort = new AbortController()
@@ -214,6 +280,31 @@ export class HandoffCoordinator {
     private readonly state: z.infer<typeof stateSchema>,
   ) {
     this.client = new HandoffClient(ctx.contextmesh.client, state.nodeId)
+    this.files = new WorkspaceTransfers(ctx, this.client, config.stateDir, {
+      source: async (id) => {
+        const agent = ctx.agents.get(SessionId(id))
+        if (!agent)
+          throw new MeshError(
+            'NOT_LOCAL_WRITER',
+            'open this conversation on its owning device',
+          )
+        ctx.contextmesh.writerClaim(SessionId(id))
+        await this.resources(agent, true)
+        const { mapping } = await this.localMapping(
+          agent,
+          state.bindings[id]?.projectId,
+        )
+        await this.publish(agent, mapping.projectId)
+        const snapshot = await this.client.mesh.stat(id)
+        if (!snapshot)
+          throw new MeshError('NOT_FOUND', 'conversation not found', 404)
+        return { agent, mapping, incarnation: snapshot.incarnation }
+      },
+      approved: async (id, transferId) => {
+        state.workspaceTransfers[id] = transferId
+        await this.save()
+      },
+    })
     this.relay = new ModelRelayController(
       ctx,
       new ModelRelayClient(ctx.contextmesh.client, state.nodeId),
@@ -224,6 +315,8 @@ export class HandoffCoordinator {
         resources: (agent) => this.resources(agent),
         wait: (work) => bounded(work, config.waitIdleMs, this.abort.signal),
         guard: (id, budget) => this.guardModel(id, budget),
+        inspect: (agent, target, allow) =>
+          this.inspectSelection(agent, target, allow),
       },
     )
   }
@@ -241,13 +334,16 @@ export class HandoffCoordinator {
       !capabilities.features?.includes('handoff-v1') ||
       !capabilities.features.includes('takeover-v1') ||
       !capabilities.features.includes('directory-handoff-v1') ||
-      !capabilities.features.includes('model-relay-v1')
+      !capabilities.features.includes('model-relay-v1') ||
+      !capabilities.features.includes('device-pairing-v1') ||
+      !capabilities.features.includes('workspace-transfer-v1')
     )
       throw new Error(
-        'Upgrade ContextMesh server: handoff-v1, takeover-v1, directory-handoff-v1 and model-relay-v1 are required',
+        'Upgrade ContextMesh server: handoff-v1, takeover-v1, directory-handoff-v1, model-relay-v1 and device-pairing-v1 are required',
       )
     await mkdir(config.stateDir, { recursive: true, mode: 0o700 })
     const path = join(config.stateDir, 'node.json')
+    const identity = await new DeviceClient(ctx.contextmesh.client).identity()
     let state: z.infer<typeof stateSchema>
     try {
       state = stateSchema.parse(JSON.parse(await readFile(path, 'utf8')))
@@ -261,12 +357,27 @@ export class HandoffCoordinator {
         throw error
       state = {
         version: 1,
-        nodeId: randomUUID(),
+        nodeId: identity.nodeId ?? randomUUID(),
         bindings: {},
+        workspaceTransfers: {},
         modelBudgets: {},
       }
       await writeFile(path, JSON.stringify(state), { flag: 'wx', mode: 0o600 })
     }
+    if (identity.nodeId && identity.nodeId !== state.nodeId)
+      throw new Error(
+        'This state directory belongs to another device; use a separate DSH home',
+      )
+    config.modelProfiles = z
+      .array(modelProfile)
+      .default([])
+      .parse(config.modelProfiles)
+    if (
+      new Set(
+        config.modelProfiles.map((p) => JSON.stringify([p.provider, p.model])),
+      ).size !== config.modelProfiles.length
+    )
+      throw new Error('Duplicate model profiles are not allowed')
     const service = new HandoffCoordinator(ctx, config, state)
     await service.client.register(
       config.nodeName || hostname(),
@@ -333,9 +444,106 @@ export class HandoffCoordinator {
     service.heartbeatTimer.unref()
     return service
   }
-  private guardModel(id: string, budget: ModelBudget) {
+  private profile(route: ModelRoute) {
+    return this.config.modelProfiles?.find(
+      (p) => p.provider === route.provider && p.model === route.model,
+    )
+  }
+  private modelRuntime(agent: Agent) {
+    return (
+      this.ctx.get('agentPresets')?.serviceFor(agent, 'llm') ??
+      agent.ctx.get('llm') ??
+      this.ctx.llm
+    )
+  }
+  private async inspectSelection(
+    agent: Agent,
+    target: ModelRoute,
+    allow = false,
+  ) {
+    const consent = this.capacityApprovals.get(agent.id)
+    let estimated = allow
+    if (consent) {
+      this.capacityApprovals.delete(agent.id)
+      if (
+        consent.agent !== agent ||
+        consent.cut !== agent.session.snapshotEvents().length ||
+        consent.route !== JSON.stringify(target) ||
+        consent.expires < Date.now()
+      )
+        throw new MeshError(
+          'MODEL_CAPACITY_CHANGED',
+          'conversation changed; inspect capacity and confirm again',
+        )
+      estimated = true
+    }
+    return inspectModel(
+      this.modelRuntime(agent),
+      agent.session,
+      target,
+      this.abort.signal,
+      agent.options.maxTokens,
+      {
+        profile: this.profile(target),
+        capacityMode: estimated ? 'estimated' : 'conservative',
+      },
+    )
+  }
+  private async workspaceSource<T>(id: string, work: () => Promise<T>) {
+    if (this.controls.has(id))
+      throw new MeshError(
+        'HANDOFF_IN_PROGRESS',
+        'conversation is already controlled',
+      )
+    const control = this.freeze(id)
+    try {
+      await bounded(
+        control.quiesce(),
+        this.config.waitIdleMs,
+        this.abort.signal,
+      )
+      control.ownedHandle()
+      const agent = this.ctx.agents.get(SessionId(id))
+      if (!agent)
+        throw new MeshError('NOT_LOCAL_WRITER', 'open this conversation first')
+      await bounded(agent.whenIdle(), this.config.waitIdleMs, this.abort.signal)
+      return await work()
+    } finally {
+      this.release(id)
+    }
+  }
+  async checkModel(sessionId: string, target: ModelRoute) {
+    const agent = this.ctx.agents.get(SessionId(sessionId))
+    if (!agent)
+      throw new MeshError(
+        'NOT_LOCAL_WRITER',
+        'open this conversation on its owning device first',
+      )
+    const result = await analyzeModel(
+      this.modelRuntime(agent),
+      agent.session,
+      target,
+      this.abort.signal,
+      agent.options.maxTokens,
+      { profile: this.profile(target) },
+    )
+    return {
+      route: result.route,
+      historyCut: result.historyCut,
+      capacity: result.capacity,
+      capabilities: result.capabilities,
+    }
+  }
+  private async guardModel(id: string, budget: ModelBudget) {
+    const previous = this.state.modelBudgets[id]
     this.state.modelBudgets[id] = budget
-    void this.save().catch((error) => this.warn(id, error))
+    try {
+      await this.save()
+    } catch (error) {
+      if (previous) this.state.modelBudgets[id] = previous
+      else delete this.state.modelBudgets[id]
+      throw error
+    }
   }
   async models() {
     const llm = this.ctx.llm
@@ -443,7 +651,7 @@ export class HandoffCoordinator {
       this.ctx.sandboxPolicy
     )
   }
-  private async resources(agent: Agent) {
+  private async resources(agent: Agent, allowFiles = false) {
     if (
       agent.session.header.origin === 'subagent' ||
       !this.ctx.agents.roots().includes(agent)
@@ -492,10 +700,11 @@ export class HandoffCoordinator {
         'UNSUPPORTED_RESOURCE',
         'remove active schedules before handoff',
       )
-    if (!portable(agent.session.snapshotEvents()))
+    if (allowFiles) fileReferences(agent.session.snapshotEvents())
+    else if (!portable(agent.session.snapshotEvents()))
       throw new MeshError(
         'UNSUPPORTED_RESOURCE',
-        'M1 cannot transfer attachments or spill resources',
+        'export and apply file attachments before handoff; images and spill are unsupported',
       )
   }
   private options(manifest: HandoffManifest) {
@@ -524,9 +733,12 @@ export class HandoffCoordinator {
     targetNodeId: string,
     projectId?: string,
     takeover?: TakeoverRecord,
-    targetModel?: ModelRoute,
   ) {
-    targetModel ??= takeover?.targetModel
+    if (takeover?.targetModel)
+      throw new MeshError(
+        'HANDOFF_MODEL_FIXED',
+        'handoff keeps the current conversation model; change it separately with the native model selector',
+      )
     if (this.closing) throw new Error('ContextMesh is stopping')
     const native = this.ctx.get('sessionController')
     if (native && native.lifecycleControlVersion !== 1)
@@ -561,26 +773,52 @@ export class HandoffCoordinator {
           'pending input must be handled before handoff',
         )
       await bounded(agent.whenIdle(), this.config.waitIdleMs, this.abort.signal)
-      await this.resources(agent)
       const { mapping, relativeCwd } = await this.localMapping(
         agent,
         projectId ?? this.state.bindings[sessionId]?.projectId,
       )
+      let transfer: TransferRecord | undefined
+      const transferId = this.state.workspaceTransfers[sessionId]
+      if (transferId) {
+        try {
+          const candidate = await this.files.client.get(transferId)
+          if (
+            candidate.bundle.sourceNodeId === this.client.nodeId &&
+            candidate.bundle.targetNodeId === targetNodeId
+          )
+            transfer = await this.files.approved(
+              transferId,
+              sessionId,
+              mapping.projectId,
+              targetNodeId,
+            )
+        } catch (error) {
+          if (!(
+            isMeshError(error) &&
+            ['NOT_FOUND', 'TRANSFER_EXPIRED'].includes(error.code)
+          ))
+            throw error
+        }
+      }
+      await this.resources(agent, !!transfer)
+      if (transfer) await this.files.verifySource(transfer, agent)
       const workspace = await inspectWorkspace(
         mapping,
         relativeCwd,
         this.abort.signal,
+        undefined,
+        transfer?.bundle.baseCommit ? transfer.bundle.treeHash : undefined,
       )
       const policy = this.policy(agent.ctx)
       const resolved = policy.resolve({ session: agent.session })
       const preset = this.ctx.get('agentPresets')?.composedPreset(agent.ctx)
       manifest = handoffManifest.parse({
         version: 1,
+        ...(transfer ? { transferId: transfer.id } : {}),
         harness: '0.2.1-rc.3',
         adapter: 'deepseek',
         workspace: workspace.proof,
         model: this.route(agent),
-        ...(targetModel ? { targetModel } : {}),
         sandbox: {
           mode: resolved.mode,
           relativeRoot: relativeInside(workspace.root, resolved.workspaceRoot),
@@ -715,11 +953,20 @@ export class HandoffCoordinator {
   }
   private async preflight(record: HandoffRecord) {
     const mapping = await this.mapping(record.manifest.workspace.projectId)
+    const fileTransfer = record.manifest.transferId
+      ? await this.files.approved(
+          record.manifest.transferId,
+          record.sessionId,
+          mapping.projectId,
+          record.targetNodeId,
+        )
+      : undefined
     const workspace = await inspectWorkspace(
       mapping,
       record.manifest.workspace.relativeCwd,
       this.abort.signal,
       record.manifest.workspace.kind ?? 'git',
+      record.manifest.workspace.contentHash,
     )
     if (workspace.proof.commit !== record.manifest.workspace.commit)
       throw new MeshError(
@@ -749,12 +996,17 @@ export class HandoffCoordinator {
         presets?.serviceFor({ ctx: context }, 'llm') ??
         context.get('llm') ??
         this.ctx.llm
-      await llm.prepareCall(
-        this.options({
-          ...record.manifest,
-          model: record.manifest.targetModel ?? record.manifest.model,
-        }),
-      )
+      const currentModel = record.manifest.targetModel ?? record.manifest.model
+      try {
+        await llm.prepareCall(
+          this.options({ ...record.manifest, model: currentModel }),
+        )
+      } catch (error) {
+        throw new MeshError(
+          'HANDOFF_MODEL_UNAVAILABLE',
+          `Receiving device cannot use the current model ${currentModel.provider}/${currentModel.model}. Configure that same model and its credentials before handoff. ${message(error)}`,
+        )
+      }
       if (record.manifest.targetModel) {
         if (this.ctx.get('sessionController')?.modelRelayVersion !== 1)
           throw new MeshError(
@@ -779,6 +1031,8 @@ export class HandoffCoordinator {
             snapshot,
             record.manifest.targetModel,
             this.abort.signal,
+            undefined,
+            { profile: this.profile(record.manifest.targetModel) },
           )
         } finally {
           await handle.close()
@@ -792,10 +1046,12 @@ export class HandoffCoordinator {
       'read',
     )
     try {
-      if (!portable((await reader.read()).events))
+      const events = (await reader.read()).events
+      if (fileTransfer) await this.files.verifyTarget(fileTransfer, events)
+      else if (!portable(events))
         throw new MeshError(
           'UNSUPPORTED_RESOURCE',
-          'M1 cannot transfer attachments or spill resources',
+          'export and apply file attachments before handoff; images and spill are unsupported',
         )
     } finally {
       await reader.close()
@@ -843,14 +1099,26 @@ export class HandoffCoordinator {
             this.config.waitIdleMs,
             this.abort.signal,
           )
-          await this.resources(agent)
+          const fileTransfer = record.manifest.transferId
+            ? await this.files.approved(
+                record.manifest.transferId,
+                record.sessionId,
+                record.manifest.workspace.projectId,
+                record.targetNodeId,
+              )
+            : undefined
+          await this.resources(agent, !!fileTransfer)
+          if (fileTransfer) await this.files.verifySource(fileTransfer, agent)
           const checked = await inspectWorkspace(
             await this.mapping(record.manifest.workspace.projectId),
             record.manifest.workspace.relativeCwd,
             this.abort.signal,
             record.manifest.workspace.kind ?? 'git',
+            record.manifest.workspace.contentHash,
           )
           if (
+            checked.proof.contentHash !==
+              record.manifest.workspace.contentHash ||
             checked.proof.commit !== record.manifest.workspace.commit ||
             checked.proof.mappingRevision !==
               record.manifest.workspace.mappingRevision
@@ -868,8 +1136,11 @@ export class HandoffCoordinator {
             record.manifest.workspace.relativeCwd,
             this.abort.signal,
             record.manifest.workspace.kind ?? 'git',
+            record.manifest.workspace.contentHash,
           )
           if (
+            finalWorkspace.proof.contentHash !==
+              record.manifest.workspace.contentHash ||
             finalWorkspace.proof.commit !== record.manifest.workspace.commit ||
             finalWorkspace.proof.mappingRevision !==
               record.manifest.workspace.mappingRevision ||
@@ -1056,9 +1327,10 @@ export class HandoffCoordinator {
           manifest.targetModel,
           this.abort.signal,
           agent.options.maxTokens,
+          { profile: this.profile(manifest.targetModel) },
         )
         native.installModelSelection(agent, manifest.targetModel)
-        this.guardModel(id, budget)
+        await this.guardModel(id, budget)
       }
       this.state.bindings[id] = binding
       await this.save()
@@ -1390,6 +1662,11 @@ export class HandoffCoordinator {
     operationId: string = randomUUID(),
     targetModel?: ModelRoute,
   ) {
+    if (targetModel)
+      throw new MeshError(
+        'HANDOFF_MODEL_FIXED',
+        'take over using the current model, then change models separately',
+      )
     const session = (await this.client.sessions()).find(
       (s) => s.id === sessionId,
     )
@@ -1441,6 +1718,38 @@ export class HandoffCoordinator {
   async command(input: unknown): Promise<unknown> {
     const command = commandSchema.parse(input)
     switch (command.action) {
+      case 'pair-device':
+        return new DeviceClient(this.client.mesh).create(
+          command.name,
+          command.operationId,
+        )
+      case 'paired-devices':
+        return new DeviceClient(this.client.mesh).list()
+      case 'revoke-device':
+        return new DeviceClient(this.client.mesh).revoke(command.credentialId)
+      case 'model-check':
+        return this.checkModel(command.sessionId, modelRoute.parse(command))
+      case 'approve-model-capacity': {
+        const target = modelRoute.parse(command),
+          agent = this.ctx.agents.get(SessionId(command.sessionId))
+        const report = await this.checkModel(command.sessionId, target)
+        if (
+          !agent ||
+          report.historyCut !== command.historyCut ||
+          !report.capacity.estimatedFits
+        )
+          throw new MeshError(
+            'MODEL_CAPACITY_CHANGED',
+            'conversation or capacity changed; check again',
+          )
+        this.capacityApprovals.set(command.sessionId, {
+          agent,
+          route: JSON.stringify(target),
+          cut: command.historyCut,
+          expires: Date.now() + 60000,
+        })
+        return { approved: true }
+      }
       case 'models': {
         const models = await this.models()
         await this.client.register(this.config.nodeName, models)
@@ -1453,19 +1762,43 @@ export class HandoffCoordinator {
         )
       case 'model-relay-status':
         return this.relay.client.get(command.operationId)
+      case 'workspace-plan':
+        return this.exclusive(command.sessionId, () =>
+          this.workspaceSource(command.sessionId, () =>
+            this.files.plan(command.sessionId, command.targetNodeId),
+          ),
+        )
+      case 'workspace-export': {
+        const id = this.files.sessionForPlan(command.planId)
+        return this.exclusive(id, () =>
+          this.workspaceSource(id, () => this.files.export(command.planId)),
+        )
+      }
+      case 'workspace-list':
+        return this.files.client.list()
+      case 'workspace-preview':
+        return this.files.preview(command.transferId)
+      case 'workspace-apply':
+        return this.files.apply(command.transferId, command.previewId)
+      case 'workspace-rollback':
+        return this.files.rollback(command.transferId)
       case 'status':
         return this.status()
       case 'refresh':
         await this.tick()
         return this.status()
       case 'handoff':
+        if (command.targetModel)
+          throw new MeshError(
+            'HANDOFF_MODEL_FIXED',
+            'handoff keeps the current conversation model',
+          )
         return this.exclusive(command.sessionId, () =>
           this.begin(
             command.sessionId,
             command.targetNodeId,
             command.projectId,
             undefined,
-            command.targetModel,
           ),
         )
       case 'takeover':
@@ -1511,6 +1844,12 @@ export class HandoffCoordinator {
   }
   async status() {
     return {
+      workspaceTransfer: true,
+      modelPreflight: true,
+      connection: {
+        endpoint: this.client.mesh.endpoint,
+        ...(await new DeviceClient(this.client.mesh).identity()),
+      },
       nodeId: this.client.nodeId,
       name: this.config.nodeName,
       nodes: await this.client.nodes(),

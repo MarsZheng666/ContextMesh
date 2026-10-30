@@ -4,6 +4,7 @@ import { realpath, stat, lstat } from 'node:fs/promises'
 import { isAbsolute, relative, resolve, sep, dirname, join } from 'node:path'
 import { MeshError } from '../../protocol/src/index.js'
 import type { ProjectMapping } from '../../client/src/handoff.js'
+import { snapshotGit } from './workspace-files.js'
 
 const execute = promisify(execFile)
 export async function git(root: string, args: string[], signal?: AbortSignal) {
@@ -97,6 +98,7 @@ export async function inspectWorkspace(
   relativeCwd: string,
   signal?: AbortSignal,
   expectedKind?: 'git' | 'directory',
+  expectedContentHash?: string,
 ) {
   const { root, cwd } = await mappedDirectory(mapping, relativeCwd)
   const kind =
@@ -106,6 +108,7 @@ export async function inspectWorkspace(
       root,
       cwd,
       proof: {
+        contentHash: undefined as string | undefined,
         kind: 'directory' as const,
         projectId: mapping.projectId,
         commit: null,
@@ -132,7 +135,14 @@ export async function inspectWorkspace(
       'UNSUPPORTED_RESOURCE',
       'submodules are not supported by M1',
     )
-  if (
+  if (expectedContentHash) {
+    const current = await snapshotGit(root)
+    if (current.treeHash !== expectedContentHash)
+      throw new MeshError(
+        'TRANSFER_CHANGED',
+        'workspace changed after file transfer approval',
+      )
+  } else if (
     await git(
       root,
       [
@@ -146,7 +156,7 @@ export async function inspectWorkspace(
   )
     throw new MeshError(
       'WORKSPACE_DIRTY',
-      'commit changes and prepare the same commit on the target before handoff',
+      'commit changes or inspect and confirm a workspace file transfer before handoff',
     )
   return {
     root,
@@ -157,6 +167,7 @@ export async function inspectWorkspace(
       commit: await git(root, ['rev-parse', 'HEAD'], signal),
       relativeCwd,
       mappingRevision: mapping.revision,
+      ...(expectedContentHash ? { contentHash: expectedContentHash } : {}),
     },
   }
 }

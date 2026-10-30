@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { digest } from './transfers.js'
 
 export const operation = z.object({ operationId: z.uuid() })
 export const nodeIdentity = z.object({ nodeId: z.uuid(), instanceId: z.uuid() })
@@ -12,6 +13,7 @@ export const nodeRegistration = operation.extend({
     projectSetupVersion: z.literal(1).optional(),
     directoryHandoffVersion: z.literal(1).optional(),
     modelRelayVersion: z.literal(1).optional(),
+    workspaceTransferVersion: z.literal(1).optional(),
     models: z
       .array(
         z.object({ provider: z.string(), model: z.string(), name: z.string() }),
@@ -56,6 +58,7 @@ export const workspaceProof = z
             p.split('/').every((s) => s !== '..' && s !== '.' && s !== '')),
       ),
     mappingRevision: z.number().int().positive(),
+    contentHash: digest.optional(),
   })
   .refine((proof) => (proof.kind === 'directory') === (proof.commit === null), {
     message: 'directory proof needs null commit; Git proof needs a commit',
@@ -63,6 +66,7 @@ export const workspaceProof = z
   })
 export const handoffManifest = z.object({
   version: z.literal(1),
+  transferId: z.uuid().optional(),
   sandbox: z.object({
     mode: z.enum(['read-only', 'workspace-write', 'danger-full-access']),
     relativeRoot: workspaceProof.shape.relativeCwd,
