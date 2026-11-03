@@ -119,7 +119,7 @@ it('does not infer model rollback from an expired lease and fences other writers
   })
 })
 
-it('blocks handoff during an unresolved model switch and rejects alternate-model transfer requests', async () => {
+it('blocks unresolved switches and only lets the receiver select a pinned handoff model', async () => {
   const f = await prepared(),
     projectId = randomUUID()
   await f.node.project('fixture', projectId)
@@ -148,6 +148,7 @@ it('blocks handoff during an unresolved model switch and rejects alternate-model
     sandbox: { mode: 'read-only' as const, relativeRoot: '' },
     model: f.request.source,
     targetModel: f.request.target,
+    modelPolicy: 'receiver' as const,
     harness: '0.2.1-rc.3' as const,
     adapter: 'deepseek' as const,
   }
@@ -164,11 +165,13 @@ it('blocks handoff during an unresolved model switch and rejects alternate-model
     code: 'MODEL_RELAY_BUSY',
   })
   await f.relay.finish(record.id, true)
-  await expect(
-    other.takeover(f.id, f.node.nodeId, randomUUID(), f.request.target),
-  ).rejects.toMatchObject({ code: 'HANDOFF_MODEL_FIXED' })
-  const intent = await other.takeover(f.id, f.node.nodeId)
-  expect(intent.targetModel).toBeUndefined()
+  const intent = await other.takeover(
+    f.id,
+    f.node.nodeId,
+    randomUUID(),
+    f.request.target,
+  )
+  expect(intent.targetModel).toEqual(f.request.target)
   await expect(
     f.node.request(
       f.id,
@@ -176,20 +179,38 @@ it('blocks handoff during an unresolved model switch and rejects alternate-model
       f.handle.handleId,
       f.handle.epoch,
       manifest,
-      intent.handoffOperationId,
-      intent.id,
     ),
-  ).rejects.toMatchObject({ code: 'HANDOFF_MODEL_FIXED' })
-  const { targetModel, ...currentModelManifest } = manifest
+  ).rejects.toMatchObject({ code: 'HANDOFF_MODEL_ON_RECEIVER' })
   const handoff = await f.node.request(
     f.id,
     other.nodeId,
     f.handle.handleId,
     f.handle.epoch,
-    currentModelManifest,
+    manifest,
     intent.handoffOperationId,
     intent.id,
   )
   expect(handoff.manifest.model).toEqual(f.request.source)
-  expect(handoff.manifest.targetModel).toBeUndefined()
+  expect(handoff.manifest.targetModel).toEqual(f.request.target)
+  const proof = {
+    ...manifest.workspace,
+    mappingRevision: (await other.mapping(projectId, '/target')).revision,
+  }
+  await expect(other.preflight(handoff, proof)).rejects.toMatchObject({
+    code: 'RECEIVER_MODEL_CHANGED',
+  })
+  await expect(
+    other.preflight(handoff, proof, undefined, f.request.source!),
+  ).rejects.toMatchObject({ code: 'RECEIVER_MODEL_CHANGED' })
+  const preparing = await other.preflight(
+    handoff,
+    proof,
+    undefined,
+    f.request.target,
+  )
+  expect(preparing.state).toBe('preparing')
+  expect(preparing.manifest.targetModel).toEqual(f.request.target)
+  await expect(
+    other.preflight(preparing, proof, undefined, f.request.source!),
+  ).rejects.toBeInstanceOf(Error)
 })

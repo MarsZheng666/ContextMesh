@@ -10,6 +10,7 @@ const previous = { provider: 'a', model: 'one' },
 const snapshot = (owner = 'A') => ({
   nodeId: 'A',
   name: 'Laptop',
+  receiverModel: target,
   nodes: [],
   projects: [],
   mappings: [{ projectId: 'project', root: '/here' }],
@@ -73,10 +74,8 @@ it('keeps a concurrently sent draft waiting until the native model change finish
     })
     await Promise.resolve()
     release()
-    expect(await selection).toBeUndefined()
-    await Promise.resolve()
     expect(admitted).toBe(false)
-    model.finishModelSelect('session')
+    expect(await selection).toBe(true)
     expect(await sending).toBe(true)
   } finally {
     model.close()
@@ -92,7 +91,7 @@ it('cancels a provider change before any host mutation', async () => {
   expect(fetch).not.toHaveBeenCalled()
   model.close()
 })
-it('shows the receiving device current-model configuration error and sends no alternate model', async () => {
+it('pins the receiving preference and preserves its configuration error', async () => {
   const commands: Array<Record<string, unknown>> = []
   vi.stubGlobal(
     'fetch',
@@ -120,9 +119,9 @@ it('shows the receiving device current-model configuration error and sends no al
     await expect(model.ensureOwned('session', t)).rejects.toThrow(
       'current-provider/current-model',
     )
-    expect(commands.find((c) => c.action === 'takeover')).not.toHaveProperty(
-      'targetModel',
-    )
+    expect(commands.find((c) => c.action === 'takeover')).toMatchObject({
+      targetModel: target,
+    })
   } finally {
     model.close()
   }
@@ -154,7 +153,7 @@ it('waits for the native model response before admitting input and preserves can
   await expect(waiting).rejects.toThrow('draft kept')
   model.close()
 })
-it('takes over with the current model before admitting a separately requested native model switch', async () => {
+it('uses the native receiver selection directly in takeover without first activating the source model', async () => {
   const actions: Array<Record<string, unknown>> = []
   let acquired = false
   vi.stubGlobal(
@@ -180,16 +179,84 @@ it('takes over with the current model before admitting a separately requested na
   )
   const confirm = vi.fn(() => true),
     model = new UiModel(confirm)
-  expect(
-    await model.beforeModelSelect('session', previous, target, t),
-  ).toBeUndefined()
+  expect(await model.beforeModelSelect('session', previous, target, t)).toBe(
+    true,
+  )
   expect(actions.find((a) => a.action === 'takeover')).toMatchObject({
     confirmed: true,
   })
-  expect(actions.find((a) => a.action === 'takeover')).not.toHaveProperty(
-    'targetModel',
-  )
+  expect(actions.find((a) => a.action === 'takeover')).toMatchObject({
+    targetModel: target,
+  })
+  expect(confirm.mock.calls.flat().join(' ')).toContain('b / two')
   expect(model.getSnapshot().data?.sessions[0]?.activeNodeId).toBe('A')
   model.finishModelSelect('session')
   model.close()
+})
+
+it('keeps a concurrently sent draft when the receiver model takeover fails', async () => {
+  let release!: () => void, entered!: () => void
+  const barrier = new Promise<void>((resolve) => {
+      release = resolve
+    }),
+    reached = new Promise<void>((resolve) => {
+      entered = resolve
+    })
+  const commands: Array<Record<string, unknown>> = []
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (_url: unknown, options: RequestInit) => {
+      const command = JSON.parse(String(options.body))
+      commands.push(command)
+      if (command.action === 'status')
+        return Response.json({ ok: true, value: snapshot('B') })
+      if (command.action === 'takeover')
+        return Response.json({ ok: true, value: { id: 'intent' } })
+      entered()
+      await barrier
+      return Response.json({
+        ok: true,
+        value: {
+          state: 'failed',
+          errorCode: 'TAKEOVER_FAILED',
+          error: 'selected model unavailable',
+        },
+      })
+    }),
+  )
+  const model = new UiModel(() => true)
+  try {
+    const selecting = model.beforeModelSelect('session', previous, target, t)
+    await reached
+    const sent = expect(model.readyToSend('session', t)).rejects.toMatchObject({
+      code: 'MODEL_SELECTION_CANCELLED',
+    })
+    release()
+    expect(await selecting).toBe(true)
+    await sent
+    expect(commands.filter((c) => c.action === 'takeover')).toHaveLength(1)
+  } finally {
+    release()
+    model.close()
+  }
+})
+it('asks for retry if ownership changes between reading the remote session and selecting a receiving model', async () => {
+  let reads = 0
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () =>
+      Response.json({ ok: true, value: snapshot(++reads === 1 ? 'B' : 'A') }),
+    ),
+  )
+  const model = new UiModel(() => true)
+  try {
+    expect(await model.beforeModelSelect('session', previous, target, t)).toBe(
+      true,
+    )
+    expect(model.getSnapshot().error).toMatchObject({
+      code: 'TAKEOVER_CHANGED',
+    })
+  } finally {
+    model.close()
+  }
 })

@@ -13,6 +13,8 @@ export const nodeRegistration = operation.extend({
     projectSetupVersion: z.literal(1).optional(),
     directoryHandoffVersion: z.literal(1).optional(),
     modelRelayVersion: z.literal(1).optional(),
+    receiverModelVersion: z.literal(1).optional(),
+    continuationVersion: z.literal(1).optional(),
     workspaceTransferVersion: z.literal(1).optional(),
     models: z
       .array(
@@ -74,6 +76,11 @@ export const handoffManifest = z.object({
   workspace: workspaceProof,
   model: modelRoute,
   targetModel: modelRoute.optional(),
+  modelPolicy: z.literal('receiver').optional(),
+  resumePolicy: z.literal('interrupted').optional(),
+  continuation: z
+    .object({ turn: z.number().int().positive(), messageId: z.uuid() })
+    .optional(),
   preset: z.string().min(1).max(200).optional(),
   harness: z.literal('0.2.1-rc.3'),
   adapter: z.literal('deepseek'),
@@ -93,7 +100,10 @@ export const handoffUpdate = operation.extend({
   nodeId: z.uuid(),
   instanceId: z.uuid(),
 })
-export const preflightReport = handoffUpdate.extend({ proof: workspaceProof })
+export const preflightReport = handoffUpdate.extend({
+  proof: workspaceProof,
+  targetModel: modelRoute.optional(),
+})
 export const failureReport = handoffUpdate.extend({
   phase: z.string().min(1).max(100),
   message: z.string().min(1).max(1000),

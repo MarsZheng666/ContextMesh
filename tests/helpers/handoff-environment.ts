@@ -77,6 +77,7 @@ export async function environment() {
     presetMode?: 'read-only' | 'workspace-write',
     skipSourceModel = false,
     connection?: DeviceConnection,
+    modelConfig?: { provider: string; model: string; skipSecond?: boolean },
   ) => {
     const home = join(root, `home-${name}`),
       stateDir = join(home, 'mesh')
@@ -126,7 +127,9 @@ export async function environment() {
     const patch = join(home, 'm1.yml')
     await writeFile(
       patch,
-      `- id: session-controller
+      `- id: agent-default-model
+  config: ${JSON.stringify({ provider: modelConfig?.provider ?? (skipSourceModel ? 'contextmesh-second' : process.env.CONTEXTMESH_TEST_REAL_MODEL === '1' ? 'deepseek-official' : 'contextmesh-e2e'), model: modelConfig?.model ?? (skipSourceModel ? 'relay' : process.env.CONTEXTMESH_TEST_REAL_MODEL === '1' ? 'deepseek-flash' : 'scripted') })}
+- id: session-controller
   config: {backgroundActivation: false}
 - id: session-persistence-jsonl
   disabled: true
@@ -164,6 +167,7 @@ ${plugins}- insert:
           TMPDIR: process.env.TMPDIR,
           DSH_HOME: home,
           TEST_SKIP_SOURCE_MODEL: skipSourceModel ? '1' : undefined,
+          TEST_SKIP_SECOND_MODEL: modelConfig?.skipSecond ? '1' : undefined,
           CONTEXTMESH_TOKEN: connection ? undefined : TOKEN,
           CONTEXTMESH_TEST_REAL_MODEL: process.env.CONTEXTMESH_TEST_REAL_MODEL,
           DEEPSEEK_API_KEY:

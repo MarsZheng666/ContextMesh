@@ -149,6 +149,8 @@ export function buildServer(options: ServerOptions) {
         'project-setup-v1',
         'directory-handoff-v1',
         'model-relay-v1',
+        'receiver-model-handoff-v1',
+        'handoff-continuation-v1',
         'device-pairing-v1',
         'workspace-transfer-v1',
       ],

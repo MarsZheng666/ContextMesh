@@ -13,7 +13,7 @@ ContextMesh stores native conversation history, tool calls, tool results, and ex
 ## What you can do
 
 - **Keep the original conversation.** Persist native Session events without replacing history with summaries or rerunning completed tools.
-- **Continue on another device.** Hand off explicitly, or confirm a takeover when sending from a remote conversation. Shared titles, history, and the owning device remain visible in DSH.
+- **Continue on another device.** Hand off explicitly, or confirm a takeover when sending from a remote conversation. A running task continues automatically on the receiver after its preflight passes and the source stops safely. Shared titles, history, and the owning device remain visible in DSH.
 - **Change models within the same conversation.** Use DSH’s native model selector to switch to another configured route. Check history compatibility and context capacity before switching.
 - **Connect a new device.** Create a one-time pairing code, run the setup wizard on the new device, and revoke its credential if needed.
 - **Bring selected files with you.** Preview workspace changes and supported file attachments, then confirm their transfer and application on the receiving device.
@@ -28,9 +28,9 @@ DeepSeek Harness · server ─┘
 
 ## Current preview
 
-The current plugin is **0.6.1**, in **developer preview**. It requires this repository’s pinned **DeepSeek Harness 0.2.1-rc.3** runtime and compatibility patches. A standard global DSH installation does not include those extensions. APIs may change.
+The current plugin is **0.6.2**, in **developer preview**. It requires this repository’s pinned **DeepSeek Harness 0.2.1-rc.3** runtime and compatibility patches. A standard global DSH installation does not include those extensions. APIs may change.
 
-Device handoff preserves the conversation’s **current provider, model, and reasoning selection**. There is no separate handoff-model selector. To use another model, change it through DSH’s native selector as a separate action. Configure the current model and its credentials on the receiving device first; API keys are not transferred and a missing model is never silently substituted.
+Device handoff uses the **receiving device’s selected model**. A device configured only with Sol can continue a Flash conversation; matching provider configurations are not required. Use DSH’s native model selector, with no separate handoff picker. ContextMesh remembers this device’s last explicit choice, falling back to its DSH default until one is made. Only the receiving model needs local credentials; API keys are never transferred. Update the server and participating devices together.
 
 Plain conversations can move between ordinary folders without Git. Code workspaces require the same base Git commit on both devices; uncommitted changes can use the confirmed file-transfer flow. ContextMesh does not clone repositories, switch branches, or synchronize an entire directory automatically.
 

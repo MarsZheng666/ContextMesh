@@ -316,10 +316,18 @@ export class PostgresStore extends TransferPostgresStore {
             'MODEL_RELAY_BUSY',
             'settle the pending model switch first',
           )
-        if (r.manifest.targetModel)
+        if (
+          r.manifest.targetModel &&
+          (!r.takeoverId || r.manifest.modelPolicy !== 'receiver')
+        )
           throw new MeshError(
-            'HANDOFF_MODEL_FIXED',
-            'handoff keeps the conversation current model; choose another model separately',
+            'HANDOFF_MODEL_ON_RECEIVER',
+            'only the receiving device may select its handoff model',
+          )
+        if (r.manifest.continuation)
+          throw new MeshError(
+            'INVALID_ARGUMENT',
+            'only the finalized source log can authorize continuation',
           )
         if (s.active_handoff)
           throw new MeshError(
@@ -351,6 +359,26 @@ export class PostgresStore extends TransferPostgresStore {
           nodeId: r.targetNodeId,
           instanceId: target.instance_id,
         })
+        if (
+          r.manifest.resumePolicy &&
+          [sourceNode, targetNode].some(
+            (n) => JSON.parse(n.capabilities).continuationVersion !== 1,
+          )
+        )
+          throw new MeshError(
+            'CONTINUATION_UNSUPPORTED',
+            'update both devices for automatic continuation',
+          )
+        if (
+          r.manifest.modelPolicy === 'receiver' &&
+          [sourceNode, targetNode].some(
+            (node) => JSON.parse(node.capabilities).receiverModelVersion !== 1,
+          )
+        )
+          throw new MeshError(
+            'RECEIVER_MODEL_UNSUPPORTED',
+            'update both devices before receiving with a local model',
+          )
         if (
           r.manifest.workspace.kind === 'directory' &&
           [sourceNode, targetNode].some(
@@ -505,7 +533,10 @@ export class PostgresStore extends TransferPostgresStore {
   async preflightHandoff(
     ns: string,
     id: string,
-    r: Update & { proof: HandoffManifest['workspace'] },
+    r: Update & {
+      proof: HandoffManifest['workspace']
+      targetModel?: HandoffManifest['model']
+    },
   ) {
     return this.operation(
       ns,
@@ -515,7 +546,26 @@ export class PostgresStore extends TransferPostgresStore {
         const { row } = await this.locked(db, ns, id)
         this.check(row, r, 'target', ['requested'])
         await this.node(db, ns, r)
-        const expected = this.record(row).manifest.workspace
+        const manifest = this.record(row).manifest
+        if (manifest.modelPolicy === 'receiver') {
+          if (
+            !r.targetModel ||
+            (manifest.targetModel &&
+              JSON.stringify(manifest.targetModel) !==
+                JSON.stringify(r.targetModel))
+          )
+            throw new MeshError(
+              'RECEIVER_MODEL_CHANGED',
+              'confirm the receiving model before releasing the source',
+            )
+          manifest.targetModel = r.targetModel
+        } else if (r.targetModel) {
+          throw new MeshError(
+            'RECEIVER_MODEL_UNSUPPORTED',
+            'this handoff does not support receiver selection',
+          )
+        }
+        const expected = manifest.workspace
         const mapping = (
           await db.query(
             'SELECT revision FROM cm_project_mappings WHERE namespace=$1 AND project_id=$2 AND node_id=$3',
@@ -536,8 +586,8 @@ export class PostgresStore extends TransferPostgresStore {
             'target project, commit, directory or mapping does not match',
           )
         await db.query(
-          'UPDATE cm_handoffs SET proof=$3 WHERE namespace=$1 AND id=$2',
-          [ns, id, JSON.stringify(r.proof)],
+          'UPDATE cm_handoffs SET proof=$3,manifest=$4 WHERE namespace=$1 AND id=$2',
+          [ns, id, JSON.stringify(r.proof), JSON.stringify(manifest)],
         )
         return this.transition(db, ns, id, 'preparing')
       },
@@ -570,9 +620,34 @@ export class PostgresStore extends TransferPostgresStore {
             'CLOSE_UNCONFIRMED',
             'successful source close must be confirmed first',
           )
+        const manifest = this.record(row).manifest
+        if (manifest.resumePolicy === 'interrupted') {
+          const last = (
+            await db.query(
+              "SELECT event FROM cm_events WHERE namespace=$1 AND session_id=$2 AND event::jsonb->>'type'='turn/end' ORDER BY seq DESC LIMIT 1",
+              [ns, s.id],
+            )
+          ).rows[0]
+          const end = z
+            .object({
+              data: z.object({
+                turn: z.number().int().positive(),
+                reason: z.object({
+                  kind: z.literal('aborted'),
+                  reason: z.object({
+                    kind: z.literal('hook'),
+                    reason: z.literal('contextmesh-handoff:' + id),
+                  }),
+                }),
+              }),
+            })
+            .safeParse(last ? this.decode(last.event) : null)
+          if (end.success)
+            manifest.continuation = { turn: end.data.data.turn, messageId: id }
+        }
         await db.query(
-          'UPDATE cm_handoffs SET final_seq=$3,final_generation=$4 WHERE namespace=$1 AND id=$2',
-          [ns, id, s.next_seq, s.generation],
+          'UPDATE cm_handoffs SET final_seq=$3,final_generation=$4,manifest=$5 WHERE namespace=$1 AND id=$2',
+          [ns, id, s.next_seq, s.generation, JSON.stringify(manifest)],
         )
         return this.transition(db, ns, id, 'ready')
       },
@@ -661,14 +736,71 @@ export class PostgresStore extends TransferPostgresStore {
             'OWNERSHIP_LOST',
             'target initialization or current writer is not confirmed',
           )
-        const targetModel = handoffManifest.parse(
-          this.decode(row.manifest),
-        ).targetModel
+        const manifest = handoffManifest.parse(this.decode(row.manifest))
+        const targetModel = manifest.targetModel
+        if (manifest.continuation) {
+          const events = (
+            await db.query(
+              'SELECT event FROM cm_events WHERE namespace=$1 AND session_id=$2 AND seq >= $3 AND seq < $4 ORDER BY seq',
+              [ns, s.id, row.final_seq, s.next_seq],
+            )
+          ).rows.map((e) =>
+            z
+              .object({ type: z.string(), data: z.unknown() })
+              .parse(this.decode(e.event)),
+          )
+          const queue: Array<{
+            id: string
+            source?: { kind: string; handoffId?: string }
+          }> = []
+          for (const event of events) {
+            if (event.type !== 'agent/inbox/spliced') continue
+            const splice = z
+              .object({
+                target: z.enum(['next-turn', 'next-step']),
+                start: z.number().int().nonnegative(),
+                removedCount: z.number().int().nonnegative().optional(),
+                inserted: z.array(
+                  z.object({
+                    id: z.string(),
+                    source: z
+                      .object({
+                        kind: z.string(),
+                        handoffId: z.string().optional(),
+                      })
+                      .optional(),
+                  }),
+                ),
+              })
+              .parse(event.data)
+            if (splice.target === 'next-turn')
+              queue.splice(
+                splice.start,
+                splice.removedCount ?? 0,
+                ...splice.inserted,
+              )
+          }
+          if (
+            events.some((e) =>
+              ['user/message', 'request/header'].includes(e.type),
+            ) ||
+            queue.filter(
+              (m) =>
+                m.id === manifest.continuation!.messageId &&
+                m.source?.kind === 'contextmesh-continuation' &&
+                m.source.handoffId === id,
+            ).length !== 1
+          )
+            throw new MeshError(
+              'CONTINUATION_UNCONFIRMED',
+              'save one pending continuation instruction before activation completes',
+            )
+        }
         if (targetModel) {
           const events = (
             await db.query(
               'SELECT event FROM cm_events WHERE namespace=$1 AND session_id=$2 AND seq >= $3 AND seq < $4 ORDER BY seq',
-              [ns, s.id, row.final_seq, r.nextSeq],
+              [ns, s.id, row.final_seq, s.next_seq],
             )
           ).rows.map((e) =>
             z
@@ -1037,7 +1169,15 @@ export class PostgresStore extends TransferPostgresStore {
       ['takeover', id, request],
       async (db) => {
         const session = await this.session(db, ns, id)
-        await this.node(db, ns, request)
+        const receiver = await this.node(db, ns, request)
+        if (
+          request.targetModel &&
+          JSON.parse(receiver.capabilities).receiverModelVersion !== 1
+        )
+          throw new MeshError(
+            'RECEIVER_MODEL_UNSUPPORTED',
+            'update the receiving device',
+          )
         if (
           !session.materialized ||
           session.recovery_required ||
@@ -1052,11 +1192,6 @@ export class PostgresStore extends TransferPostgresStore {
           throw new MeshError(
             'MODEL_RELAY_BUSY',
             'settle the pending model switch first',
-          )
-        if (request.targetModel)
-          throw new MeshError(
-            'HANDOFF_MODEL_FIXED',
-            'takeover keeps the conversation current model; choose another model after takeover',
           )
         if (session.active_handoff)
           throw new MeshError(
@@ -1082,6 +1217,14 @@ export class PostgresStore extends TransferPostgresStore {
           nodeId: source.id,
           instanceId: source.instance_id,
         })
+        if (
+          request.targetModel &&
+          JSON.parse(source.capabilities).receiverModelVersion !== 1
+        )
+          throw new MeshError(
+            'RECEIVER_MODEL_UNSUPPORTED',
+            'update the source device',
+          )
         if (JSON.parse(source.capabilities).takeoverVersion !== 1)
           throw new MeshError(
             'TAKEOVER_UNSUPPORTED',

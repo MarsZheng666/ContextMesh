@@ -28,7 +28,10 @@ export function portableHistory(value: unknown): boolean {
     return false
   return Object.values(row).every(portableHistory)
 }
-export function completeToolHistory(messages: readonly Message[]) {
+export function completeToolHistory(
+  messages: readonly Message[],
+  allowPending = false,
+) {
   const calls = new Set<string>()
   for (const message of messages) {
     if (
@@ -72,7 +75,7 @@ export function completeToolHistory(messages: readonly Message[]) {
         'a tool result has no matching call',
       )
   }
-  if (calls.size)
+  if (calls.size && !allowPending)
     throw new MeshError(
       'MODEL_HISTORY_UNSUPPORTED',
       'finish pending tool calls before switching models',
@@ -180,7 +183,11 @@ export async function analyzeModel(
   requested: ModelRoute,
   signal?: AbortSignal,
   outputLimit?: number,
-  options: { profile?: ModelProfile; capacityMode?: CapacityMode } = {},
+  options: {
+    profile?: ModelProfile
+    capacityMode?: CapacityMode
+    allowPendingTools?: boolean
+  } = {},
 ) {
   const header = session.requestHeader()
   const explicitMax =
@@ -232,7 +239,7 @@ export async function analyzeModel(
       'this version supports text and completed tools; unsupported resources cannot be relayed',
     )
   const messages = session.deriveMessages()
-  completeToolHistory(messages)
+  completeToolHistory(messages, options.allowPendingTools)
   if (
     profile?.tools === false &&
     messages.some(
@@ -297,7 +304,11 @@ export async function inspectModel(
   requested: ModelRoute,
   signal?: AbortSignal,
   outputLimit?: number,
-  options: { profile?: ModelProfile; capacityMode?: CapacityMode } = {},
+  options: {
+    profile?: ModelProfile
+    capacityMode?: CapacityMode
+    allowPendingTools?: boolean
+  } = {},
 ) {
   const analysis = await analyzeModel(
     llm,

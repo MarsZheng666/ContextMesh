@@ -1,6 +1,15 @@
 export const en = {
-  HANDOFF_MODEL_FIXED:
-    'Handoff keeps the conversation current model. Use the native model selector separately to change it.',
+  MODEL_SELECTION_CANCELLED:
+    'The model choice was not applied. Your draft is kept; choose a model and send again.',
+  HANDOFF_MODEL_ON_RECEIVER:
+    'Choose the model using the receiving device’s native model selector.',
+  RECEIVER_MODEL_REQUIRED:
+    'Select a model on this device before receiving a conversation.',
+  RECEIVER_MODEL_UNSUPPORTED:
+    'Update the server and both devices to use the receiving device’s model.',
+  RECEIVER_MODEL_CHANGED:
+    'The receiving model changed. Refresh and retry; your draft is kept.',
+  receiverModel: 'Continue on this device with',
   filesConfirmTitle: 'Review file operation',
   filesCancel: 'Cancel',
   filesConfirm: 'Confirm',
@@ -182,7 +191,7 @@ export const en = {
   takingOver: 'Taking over…',
   takeoverConfirm: 'This session is running on:',
   takeoverEffect:
-    'Take it over on this device? The other device will stop its current task. Your message will be sent only after the session arrives here.',
+    'Take it over using this device’s selected model? This device is checked first. The other device then stops safely, and unfinished work continues here automatically. Subsequent requests send the conversation history to the selected provider. Your message is sent only after takeover completes.',
   TAKEOVER_FAILED:
     'Could not take over the session. Your draft is kept. Check the handoff progress and try again.',
   TAKEOVER_UNAVAILABLE:
@@ -264,8 +273,13 @@ export const en = {
 } as const
 export type Key = keyof typeof en
 export const zh: Record<Key, string> = {
-  HANDOFF_MODEL_FIXED:
-    '交接沿用会话当前模型；如需换模型，请单独使用原生模型选择器。',
+  MODEL_SELECTION_CANCELLED:
+    '模型选择未生效，草稿已保留。请重新选择模型后发送。',
+  HANDOFF_MODEL_ON_RECEIVER: '请在接收设备上使用原生模型选择器选择模型。',
+  RECEIVER_MODEL_REQUIRED: '请先在本机选择用于接续会话的模型。',
+  RECEIVER_MODEL_UNSUPPORTED: '请更新服务端和两台设备，以使用接收端模型接续。',
+  RECEIVER_MODEL_CHANGED: '接收端模型选择已变化，请刷新后重试。草稿已保留。',
+  receiverModel: '在本机使用以下模型继续',
   filesConfirmTitle: '检查文件操作',
   filesCancel: '取消',
   filesConfirm: '确认',
@@ -417,7 +431,7 @@ export const zh: Record<Key, string> = {
   takingOver: '正在接管…',
   takeoverConfirm: '该会话正在以下设备上运行：',
   takeoverEffect:
-    '是否接管到当前设备？原设备会停止当前任务。接管完成后，才会在本机发送你的消息。',
+    '是否使用本机选择的模型接管？先检查本机是否可接续，再让原设备安全停止；未完成的任务会在这里自动继续。后续请求会将会话历史发送给选定的提供方。接管完成后，才会在本机发送你的消息。',
   TAKEOVER_FAILED: '暂时无法接管。草稿已保留，请查看交接进度后重试。',
   TAKEOVER_UNAVAILABLE:
     '无法确认原设备已停止执行。请让原设备联网，或核实已关闭后显式恢复。草稿已保留。',
