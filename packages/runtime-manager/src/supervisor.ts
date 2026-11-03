@@ -1,3 +1,4 @@
+import { Tunnel, tunnelSettings } from './tunnel.js'
 import { spawn, execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import {
@@ -125,6 +126,10 @@ export async function supervise(home: string) {
   )
   await privateDirectory(p.run)
   await prepareProfile(home, bundle)
+  const tunnelConfig = await optionalJson(join(home, 'tunnel.json'))
+  const tunnel = tunnelConfig
+    ? new Tunnel(tunnelSettings.parse(tunnelConfig))
+    : undefined
   let child: ReturnType<typeof spawn> | undefined,
     url = '',
     failure = '',
@@ -161,8 +166,10 @@ export async function supervise(home: string) {
       version: current.version,
       url: url ? new URL(url).origin : undefined,
       error: failure || undefined,
+      tunnel: tunnel?.state,
     }
   })
+  tunnel?.start()
   const env = {
     ...process.env,
     DSH_HOME: p.dsh,
@@ -207,6 +214,7 @@ export async function supervise(home: string) {
   process.on('SIGTERM', stop)
   process.on('SIGINT', stop)
   await new Promise<void>((resolve) => child!.once('close', () => resolve()))
+  await tunnel?.stop()
   await log.close()
   await control.close()
   process.off('SIGTERM', stop)

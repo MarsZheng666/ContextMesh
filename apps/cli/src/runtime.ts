@@ -1,3 +1,10 @@
+import { diagnose } from '../../../packages/runtime-manager/src/doctor.js'
+import { tunnelSettings } from '../../../packages/runtime-manager/src/tunnel.js'
+import {
+  initServer,
+  startServer,
+} from '../../../packages/runtime-manager/src/server.js'
+import { installAutostart } from '../../../packages/runtime-manager/src/autostart.js'
 import { resolve, join } from 'node:path'
 import {
   installBundle,
@@ -81,6 +88,55 @@ export async function runRuntime(args: string[]) {
       home,
       'data/dsh/contextmesh/connection.json',
     )
+  }
+  if (command === 'doctor') {
+    const report = {
+      connection: await diagnose(),
+      runtime: await runtimeStatus(home),
+    }
+    console.log(JSON.stringify(report, null, 2))
+    if (!report.connection.ready) process.exitCode = 1
+    return true
+  }
+  if (command === 'tunnel' && rest[0] === 'configure') {
+    const value = (key: string) => rest[rest.indexOf(key) + 1]
+    for (const key of ['--host', '--local-port', '--remote-port'])
+      if (!rest.includes(key)) throw new Error('Missing ' + key)
+    await atomicJson(
+      join(home, 'tunnel.json'),
+      tunnelSettings.parse({
+        host: value('--host'),
+        localPort: Number(value('--local-port')),
+        remotePort: Number(value('--remote-port')),
+      }),
+    )
+    console.log(
+      'Tunnel saved. Complete the first SSH login in your terminal, then restart the managed DSH. No password is stored.',
+    )
+    return true
+  }
+  if (command === 'autostart' && rest[0] === 'install') {
+    console.log(JSON.stringify(await installAutostart(home)))
+    return true
+  }
+  if (command === 'server') {
+    const value = (key: string) =>
+      rest.includes(key) ? rest[rest.indexOf(key) + 1] : undefined
+    const directory = value('--directory') ?? join(home, 'server')
+    if (rest[0] === 'init') {
+      const image = value('--image'),
+        endpoint = value('--endpoint')
+      if (!image || !endpoint)
+        throw new Error(
+          'server init requires --image <image@sha256:digest> --endpoint <URL>',
+        )
+      console.log(JSON.stringify(await initServer(directory, image, endpoint)))
+      return true
+    }
+    if (rest[0] === 'start') {
+      console.log(JSON.stringify(await startServer(directory)))
+      return true
+    }
   }
   return false
 }

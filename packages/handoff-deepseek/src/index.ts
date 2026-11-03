@@ -88,6 +88,7 @@ export async function apply(ctx: Context, config: Config) {
   )
   await mkdir(stateDir, { recursive: true, mode: 0o700 })
   local = await listenLocal(stateDir, (command) => service.command(command))
+  await service.retry()
   service.run()
   ctx.inject(['sessionController'], (nativeCtx) => {
     if (nativeCtx.sessionController.modelRelayVersion !== 1)

@@ -1,4 +1,4 @@
-import { cp, mkdir, rename, rm, lstat } from 'node:fs/promises'
+import { cp, mkdir, rename, rm, lstat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { randomUUID } from 'node:crypto'
@@ -57,5 +57,21 @@ export async function installBundle(
   const { manifest } = await stageBundle(source, home, hash)
   await atomicJson(join(home, 'current.json'), { version: manifest.version })
   await privateDirectory(join(home, 'data'))
+  await privateDirectory(join(home, 'bin'))
+  await privateDirectory(join(home, 'bootstrap'))
+  await cp(
+    join(home, 'releases', manifest.version, 'bin/node'),
+    join(home, 'bootstrap/node'),
+  )
+  await writeFile(
+    join(home, 'bootstrap/launch.mjs'),
+    `import {readFileSync} from 'node:fs';import {spawn} from 'node:child_process';import {fileURLToPath} from 'node:url';import {dirname,resolve,join} from 'node:path';const home=resolve(dirname(fileURLToPath(import.meta.url)),'..');const {version}=JSON.parse(readFileSync(join(home,'current.json'),'utf8'));if(!/^[0-9][a-z0-9.-]*$/.test(version))throw Error('Invalid version');const bundle=join(home,'releases',version);const child=spawn(join(bundle,'bin/node'),[join(bundle,'app/dist/cli.js'),...process.argv.slice(2)],{stdio:'inherit',env:{...process.env,CONTEXTMESH_HOME:home,CONTEXTMESH_BUNDLE:bundle}});for(const signal of ['SIGINT','SIGTERM'])process.on(signal,()=>child.kill(signal));child.on('exit',(code)=>{process.exitCode=code??1});child.on('error',()=>{process.exitCode=1});`,
+    { mode: 0o600 },
+  )
+  await writeFile(
+    join(home, 'bin/contextmesh'),
+    '#!/bin/sh\nCM_HOME=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)\nexec "$CM_HOME/bootstrap/node" "$CM_HOME/bootstrap/launch.mjs" "$@"\n',
+    { mode: 0o755 },
+  )
   return { version: manifest.version, home }
 }
