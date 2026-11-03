@@ -38,6 +38,12 @@ test('doctor separates TLS, DNS, auth, database and protocol failures without di
       )
     ).code,
   ).toBe('VERSION_INCOMPATIBLE')
+  const redacted = await diagnose({
+    endpoint: 'https://user:secret@example.invalid/?token=private',
+    token,
+  })
+  expect(redacted.code).toBe('ADDRESS_INVALID')
+  expect(JSON.stringify(redacted)).not.toMatch(/secret|private/)
 })
 test('SSH stays on loopback, fails closed for host keys and rejects option injection', () => {
   const args = tunnelArgs({

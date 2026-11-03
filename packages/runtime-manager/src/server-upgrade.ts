@@ -1,3 +1,4 @@
+import { listenLocal } from '../../handoff-deepseek/src/local-control.js'
 import { sha256 } from './manifest.js'
 import { spawn, execFile } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -22,7 +23,7 @@ async function compose(root: string, args: string[]) {
     maxBuffer: 1024 * 1024,
   })
 }
-export async function backupServer(directory: string) {
+async function backupAction(directory: string) {
   const root = resolve(directory),
     config = deployment.parse(await optionalJson(join(root, 'server.json')))
   const credential = await readConnection(join(root, 'owner-connection.json'))
@@ -47,6 +48,11 @@ export async function backupServer(directory: string) {
     'owner-connection.json',
   ])
     await cp(join(root, file), join(target, file))
+  await cp(join(root, 'Caddyfile'), join(target, 'Caddyfile')).catch(
+    (error) => {
+      if (error.code !== 'ENOENT') throw error
+    },
+  )
   const dump = await open(join(target, 'database.dump'), 'wx', 0o600)
   const child = spawn(
     'docker',
@@ -105,7 +111,7 @@ export async function backupServer(directory: string) {
   })
   return { directory: target, verified: true }
 }
-export async function serverMaintenance(directory: string, enabled: boolean) {
+async function maintenanceAction(directory: string, enabled: boolean) {
   const credential = await readConnection(
     join(resolve(directory), 'owner-connection.json'),
   )
@@ -115,7 +121,7 @@ export async function serverMaintenance(directory: string, enabled: boolean) {
     { enabled },
   )
 }
-export async function upgradeServer(directory: string, image: string) {
+async function upgradeAction(directory: string, image: string) {
   const root = resolve(directory)
   if (!digest.test(image))
     throw new Error('Pin the target image by sha256 digest')
@@ -152,8 +158,8 @@ export async function upgradeServer(directory: string, image: string) {
     throw new Error(
       'An interrupted server upgrade is recorded. Keep maintenance enabled and inspect upgrade.json before restoring or resuming the recorded image.',
     )
-  await serverMaintenance(root, true)
-  const backup = await backupServer(root)
+  await maintenanceAction(root, true)
+  const backup = await backupAction(root)
   const journal = {
     id: randomUUID(),
     from: config.image,
@@ -202,10 +208,7 @@ export async function upgradeServer(directory: string, image: string) {
 }
 
 /** Explicit disaster recovery only; never used by automatic runtime rollback. */
-export async function restoreServer(
-  directory: string,
-  backupDirectory: string,
-) {
+async function restoreAction(directory: string, backupDirectory: string) {
   const root = resolve(directory),
     backup = resolve(backupDirectory)
   const record = z
@@ -292,6 +295,11 @@ export async function restoreServer(
     'owner-connection.json',
   ])
     await cp(join(backup, name), join(root, name))
+  await cp(join(backup, 'Caddyfile'), join(root, 'Caddyfile')).catch(
+    (error) => {
+      if (error.code !== 'ENOENT') throw error
+    },
+  )
   return {
     restored: true,
     postgresMajor: record.postgresMajor,
@@ -300,7 +308,7 @@ export async function restoreServer(
   }
 }
 
-export async function resumeServerUpgrade(directory: string) {
+async function resumeAction(directory: string) {
   const root = resolve(directory)
   const journal = z
     .object({
@@ -381,3 +389,26 @@ export async function resumeServerUpgrade(directory: string) {
   })
   return { image: journal.to, maintenance: true, resumed: true }
 }
+
+async function withDeploymentLock<T>(directory: string, run: () => Promise<T>) {
+  const root = resolve(directory)
+  await privateDirectory(join(root, '.operation'))
+  const lock = await listenLocal(join(root, '.operation'), async () => ({
+    busy: true,
+  }))
+  try {
+    return await run()
+  } finally {
+    await lock.close()
+  }
+}
+export const backupServer = (directory: string) =>
+  withDeploymentLock(directory, () => backupAction(directory))
+export const serverMaintenance = (directory: string, enabled: boolean) =>
+  withDeploymentLock(directory, () => maintenanceAction(directory, enabled))
+export const upgradeServer = (directory: string, image: string) =>
+  withDeploymentLock(directory, () => upgradeAction(directory, image))
+export const restoreServer = (directory: string, backup: string) =>
+  withDeploymentLock(directory, () => restoreAction(directory, backup))
+export const resumeServerUpgrade = (directory: string) =>
+  withDeploymentLock(directory, () => resumeAction(directory))

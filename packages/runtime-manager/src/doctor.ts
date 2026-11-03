@@ -1,5 +1,6 @@
 import {
   resolveConnection,
+  safeEndpoint,
   type ConnectionOptions,
 } from '../../client/src/config.js'
 export function connectionFailure(error: unknown): {
@@ -57,7 +58,7 @@ export async function diagnose(
     }
   }
   const base = {
-    endpoint: config.endpoint,
+    endpoint: safeEndpoint(config.endpoint),
     source: config.source,
     warnings: config.warnings,
   }

@@ -80,7 +80,10 @@ export async function resolveConnection(
   const path = options.configPath ?? connectionPath()
   const explicitToken =
     (options.token ?? env[options.tokenEnv ?? 'CONTEXTMESH_TOKEN']) || undefined
-  const saved = explicitToken ? undefined : await readConnection(path)
+  const saved =
+    explicitToken && (options.endpoint ?? env.CONTEXTMESH_ENDPOINT)
+      ? undefined
+      : await readConnection(path)
   const endpoint =
     options.endpoint ?? env.CONTEXTMESH_ENDPOINT ?? saved?.endpoint
   const token = explicitToken ?? saved?.token
@@ -103,12 +106,21 @@ export async function resolveConnection(
   return {
     endpoint,
     token,
-    name: saved?.name,
-    nodeId: saved?.nodeId,
+    name: explicitToken ? undefined : saved?.name,
+    nodeId: explicitToken ? undefined : saved?.nodeId,
     source,
     path,
     warnings: explicitToken
       ? ['Environment or plugin credentials override the saved connection.']
       : [],
+  }
+}
+
+export function safeEndpoint(value?: string) {
+  try {
+    const u = new URL(value ?? '')
+    return u.origin + (u.pathname === '/' ? '' : u.pathname)
+  } catch {
+    return undefined
   }
 }

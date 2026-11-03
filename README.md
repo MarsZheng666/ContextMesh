@@ -28,13 +28,17 @@ DeepSeek Harness · server ─┘
 
 ## Current preview
 
-The current plugin is **0.6.2**, in **developer preview**. It requires this repository’s pinned **DeepSeek Harness 0.2.1-rc.3** runtime and compatibility patches. A standard global DSH installation does not include those extensions. APIs may change.
+The current plugin is **0.7.0**, in **developer preview**. It requires this repository’s pinned **DeepSeek Harness 0.2.1-rc.3** runtime and compatibility patches. A standard global DSH installation does not include those extensions. APIs may change.
 
 Device handoff uses the **receiving device’s selected model**. A device configured only with Sol can continue a Flash conversation; matching provider configurations are not required. Use DSH’s native model selector, with no separate handoff picker. ContextMesh remembers this device’s last explicit choice, falling back to its DSH default until one is made. Only the receiving model needs local credentials; API keys are never transferred. Update the server and participating devices together.
 
 Plain conversations can move between ordinary folders without Git. Code workspaces require the same base Git commit on both devices; uncommitted changes can use the confirmed file-transfer flow. ContextMesh does not clone repositories, switch branches, or synchronize an entire directory automatically.
 
 Model relay currently supports text and completed tool history. File transfer supports native **file** attachments; images, spill resources, and live processes are unsupported. See the [model](docs/model-relay.md) and [file](docs/files.md) guides for compatibility, transfer limits, and recovery.
+
+## Managed runtime packages
+
+The runtime package contains Node, the compatible DSH and the single plugin. See [installation, connection diagnostics and safe upgrades](docs/runtime.md). Packages are release candidates until separately published. Source installation remains available below.
 
 ## Quick start
 

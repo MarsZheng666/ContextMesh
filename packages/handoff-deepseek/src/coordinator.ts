@@ -285,6 +285,8 @@ export class HandoffCoordinator {
   private catalogRefreshed = 0
   private closing = false
   private upgrading = false
+  private upgradePreparing?: Promise<{ ready: true }>
+  private readonly upgradeControls = new Set<string>()
   private constructor(
     readonly ctx: Context,
     readonly config: RuntimeConfig,
@@ -1837,9 +1839,13 @@ export class HandoffCoordinator {
     const command = commandSchema.parse(input)
     if (command.action === 'prepare-upgrade') return this.prepareUpgrade()
     if (command.action === 'cancel-upgrade') {
+      await this.upgradePreparing?.catch(() => {})
+      if (!this.upgrading) return { cancelled: false }
       this.upgrading = false
-      this.ctx.contextmesh.pauseAcquisitions(false)
-      for (const id of [...this.controls.keys()]) this.release(id)
+      await this.ctx.contextmesh.pauseAcquisitions(false)
+      for (const id of this.upgradeControls)
+        if (!this.fenced.has(id)) this.release(id)
+      this.upgradeControls.clear()
       return { cancelled: true }
     }
     if (this.upgrading && !['status', 'history'].includes(command.action))
@@ -1975,8 +1981,15 @@ export class HandoffCoordinator {
       }
     }
   }
-  private async prepareUpgrade() {
-    if (this.upgrading) return { ready: true }
+  private prepareUpgrade(): Promise<{ ready: true }> {
+    if (this.upgradePreparing) return this.upgradePreparing
+    if (this.upgrading) return Promise.resolve({ ready: true })
+    this.upgradePreparing = this.prepareUpgradeOnce().finally(() => {
+      this.upgradePreparing = undefined
+    })
+    return this.upgradePreparing
+  }
+  private async prepareUpgradeOnce(): Promise<{ ready: true }> {
     const busy = () =>
       this.ctx.agents
         .list()
@@ -1986,7 +1999,6 @@ export class HandoffCoordinator {
       this.pendingRequests.size > 0 ||
       this.relay.pending.size > 0 ||
       this.files.busy ||
-      this.transfers.size > 0 ||
       this.controls.size > 0
     if (busy())
       throw new MeshError(
@@ -1994,7 +2006,15 @@ export class HandoffCoordinator {
         'Finish running tasks, queued messages, handoffs, model changes and file operations first.',
       )
     const state = await this.status()
+    // Completed transfers retain their AgentHandle for orderly disposal. They
+    // no longer represent active work, but unknown/uncertain transfers do.
+    const pendingTransfers = () =>
+      [...this.transfers.keys()].some(
+        (id) =>
+          !state.handoffs.some((h) => h.id === id && h.state === 'completed'),
+      )
     if (
+      pendingTransfers() ||
       state.handoffs.some(
         (h) => !['completed', 'cancelled', 'failed'].includes(h.state),
       ) ||
@@ -2005,10 +2025,10 @@ export class HandoffCoordinator {
         'Resolve pending handoffs and model changes first.',
       )
     this.upgrading = true
-    this.ctx.contextmesh.pauseAcquisitions(true)
+    await this.ctx.contextmesh.pauseAcquisitions(true)
     try {
       await this.polling
-      if (busy())
+      if (busy() || pendingTransfers())
         throw new MeshError(
           'UPGRADE_BUSY',
           'Work became active during preflight',
@@ -2017,6 +2037,7 @@ export class HandoffCoordinator {
         if (agent.status === 'running' || pending(agent) > 0)
           throw new MeshError('UPGRADE_BUSY', 'A task started during preflight')
         const control = this.freeze(agent.id)
+        this.upgradeControls.add(agent.id)
         await bounded(
           control.quiesce(),
           this.config.waitIdleMs,
@@ -2028,8 +2049,10 @@ export class HandoffCoordinator {
       return { ready: true }
     } catch (error) {
       this.upgrading = false
-      this.ctx.contextmesh.pauseAcquisitions(false)
-      for (const id of [...this.controls.keys()]) this.release(id)
+      await this.ctx.contextmesh.pauseAcquisitions(false)
+      for (const id of this.upgradeControls)
+        if (!this.fenced.has(id)) this.release(id)
+      this.upgradeControls.clear()
       throw error
     }
   }

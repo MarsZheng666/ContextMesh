@@ -1,0 +1,82 @@
+name: Release packages
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'scripts/release/**'
+      - 'packages/**'
+      - 'apps/**'
+      - 'patches/**'
+      - 'pnpm-lock.yaml'
+      - 'Dockerfile'
+      - '.github/workflows/release.yml'
+permissions:
+  contents: read
+jobs:
+  runtime:
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            platform: darwin-arm64
+          - runner: ubuntu-22.04
+            platform: linux-x64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.15.0'
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Install PostgreSQL archive tools for recovery tests
+        if: runner.os == 'Linux'
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl --fail --location https://www.postgresql.org/media/keys/ACCC4CF8.asc -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
+          printf 'deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt jammy-pgdg main\n' | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-18
+          echo 'CONTEXTMESH_TEST_PG_BIN=/usr/lib/postgresql/18/bin' >> "$GITHUB_ENV"
+      - run: pnpm check
+      - name: Locate Node license
+        run: |
+          curl --fail --location --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/nodejs/node/v24.15.0/LICENSE -o /tmp/NODE-LICENSE
+          echo 'NODE_LICENSE_PATH=/tmp/NODE-LICENSE' >> "$GITHUB_ENV"
+      - run: pnpm exec tsx scripts/release/build-runtime.ts "$RUNNER_TEMP/runtime"
+      - run: node scripts/release/smoke.mjs "$RUNNER_TEMP/runtime"
+      - name: Exercise paired devices using the packaged DSH
+        run: CONTEXTMESH_TEST_RUNTIME="$RUNNER_TEMP/runtime" node --import tsx scripts/test.ts tests/e2e/devices.spec.ts tests/e2e/model-relay.spec.ts tests/e2e/continuation.spec.ts tests/e2e/upgrade.spec.ts
+      - name: Archive verified runtime
+        run: |
+          mkdir -p artifacts
+          tar -czf artifacts/contextmesh-${{ matrix.platform }}.tar.gz -C "$RUNNER_TEMP/runtime" .
+          node -e "const fs=require('fs'),c=require('crypto'),p='artifacts/contextmesh-${{ matrix.platform }}.tar.gz';fs.writeFileSync(p+'.sha256',c.createHash('sha256').update(fs.readFileSync(p)).digest('hex')+'  '+p.split('/').pop()+'\n')"
+      - uses: actions/attest-build-provenance@v2
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          subject-path: 'artifacts/*.tar.gz'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: contextmesh-${{ matrix.platform }}
+          path: artifacts/*
+          if-no-files-found: error
+  image:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t contextmesh:candidate .
+      - name: Inspect image release metadata
+        run: docker run --rm --network none --read-only --entrypoint node contextmesh:candidate -e "const m=require('/app/server-release.json');if(m.schema!==6||m.protocol!==1)process.exit(1)"
+      - name: Archive image for separate publication approval
+        run: docker save contextmesh:candidate | gzip > contextmesh-image.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: contextmesh-server-image
+          path: contextmesh-image.tar.gz
+          if-no-files-found: error

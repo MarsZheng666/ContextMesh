@@ -130,6 +130,7 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 export class RemoteSessionPersistence extends SessionPersistence {
+  private listed: readonly SessionPersistenceSnapshot[] = []
   private readonly claims = new AsyncLocalStorage<{
     remote: RemoteHandle
     used: boolean
@@ -175,8 +176,9 @@ export class RemoteSessionPersistence extends SessionPersistence {
   private readonly acquisitions = new Set<Promise<SessionHandle>>()
   private stopping = false
   private draining = false
-  pauseAcquisitions(value: boolean) {
+  async pauseAcquisitions(value: boolean) {
     this.draining = value
+    if (value) await Promise.allSettled([...this.acquisitions])
   }
   constructor(
     ctx: Context,
@@ -300,9 +302,29 @@ export class RemoteSessionPersistence extends SessionPersistence {
   async list(
     options?: SessionPersistenceListOptions,
   ): Promise<readonly SessionPersistenceSnapshot[]> {
-    return (await this.client.list(options?.signal)).map((s) =>
-      this.observation(s),
-    )
+    try {
+      this.listed = (await this.client.list(options?.signal)).map((s) =>
+        this.observation(s),
+      )
+    } catch (error) {
+      options?.signal?.throwIfAborted()
+      const code =
+        error && typeof error === 'object' && 'code' in error
+          ? error.code
+          : undefined
+      if (
+        ![
+          'NOT_CONFIGURED',
+          'UNAVAILABLE',
+          'UNAUTHORIZED',
+          'MAINTENANCE',
+        ].includes(String(code))
+      )
+        throw error
+      // DSH needs a read-only catalog to mount its workspace and connection UI.
+      // This never grants a handle or creates a local replacement conversation.
+    }
+    return structuredClone(this.listed)
   }
   async flush(): Promise<void> {
     const results = await Promise.allSettled(

@@ -10,6 +10,11 @@ import {
   realpath,
   open,
   cp,
+  chmod,
+  lstat,
+  readdir,
+  rename,
+  rm,
 } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -20,6 +25,7 @@ import {
 } from '../../handoff-deepseek/src/local-control.js'
 import { atomicJson, optionalJson, privateDirectory } from './files.js'
 import { runtimeHome, selection } from './install.js'
+import { inside } from './manifest.js'
 const execute = promisify(execFile)
 export const runtimeSettings = z.object({
   port: z.number().int().min(0).max(65535).default(3080),
@@ -43,7 +49,14 @@ export async function runtimeStatus(
       )
     return reply.value
   } catch {
-    return { running: false, version: (await selection(home))?.version }
+    const last = (await optionalJson(
+      join(managedPaths(home).run, 'last-exit.json'),
+    )) as { code?: string } | undefined
+    return {
+      running: false,
+      version: (await selection(home))?.version,
+      error: last?.code,
+    }
   }
 }
 export async function prepareProfile(home: string, bundle: string) {
@@ -89,6 +102,9 @@ export async function startRuntime(home = runtimeHome()) {
   if (existing.running) return existing
   const paths = managedPaths(home)
   await privateDirectory(paths.run)
+  await unlink(join(paths.run, 'last-exit.json')).catch((e) => {
+    if (e.code !== 'ENOENT') throw e
+  })
   const bundle = join(home, 'releases', current.version)
   const output = await open(join(paths.run, 'supervisor.log'), 'a', 0o600)
   const child = spawn(
@@ -125,7 +141,6 @@ export async function supervise(home: string) {
     (await optionalJson(join(home, 'settings.json'))) ?? { cwd: process.cwd() },
   )
   await privateDirectory(p.run)
-  await prepareProfile(home, bundle)
   const tunnelConfig = await optionalJson(join(home, 'tunnel.json'))
   const tunnel = tunnelConfig
     ? new Tunnel(tunnelSettings.parse(tunnelConfig))
@@ -169,6 +184,13 @@ export async function supervise(home: string) {
       tunnel: tunnel?.state,
     }
   })
+  // Only the supervisor that owns the socket may change the profile.
+  try {
+    await prepareProfile(home, bundle)
+  } catch (error) {
+    await control.close()
+    throw error
+  }
   tunnel?.start()
   const env = {
     ...process.env,
@@ -219,6 +241,15 @@ export async function supervise(home: string) {
   await control.close()
   process.off('SIGTERM', stop)
   process.off('SIGINT', stop)
+  if (!stopping) {
+    await atomicJson(join(p.run, 'last-exit.json'), {
+      code: /EADDRINUSE|address already in use/i.test(output)
+        ? 'PORT_IN_USE'
+        : failure || 'DSH_EXITED',
+      time: Date.now(),
+    })
+    process.exitCode = 1
+  }
 }
 export async function stopRuntime(home = runtimeHome()) {
   const r = z
@@ -247,23 +278,52 @@ export async function openRuntime(home = runtimeHome(), print = false) {
 export async function adoptHome(source: string, home = runtimeHome()) {
   const p = managedPaths(home)
   await privateDirectory(p.data)
-  if (await optionalJson(join(p.dsh, 'profiles/web/package.json')))
+  if (
+    await lstat(p.dsh).catch((e) => {
+      if (e.code === 'ENOENT') return undefined
+      throw e
+    })
+  )
     throw new Error(
       'Managed DSH already exists; adoption will not overwrite it',
     )
   const original = await realpath(source)
+  const destination = await realpath(home)
+  if (inside(original, destination) || inside(destination, original))
+    throw new Error('Old and managed homes must be separate directories')
+  const stage = join(p.data, 'adopt-staging-' + Date.now())
+  const makePrivate = async (path: string): Promise<void> => {
+    const info = await lstat(path)
+    if (info.isSymbolicLink())
+      throw new Error(
+        'Adoption requires configuration without symbolic links: ' + path,
+      )
+    if (info.isDirectory()) {
+      await chmod(path, 0o700)
+      for (const name of await readdir(path))
+        await makePrivate(join(path, name))
+    } else if (info.isFile())
+      await chmod(path, info.mode & 0o100 ? 0o700 : 0o600)
+    else throw new Error('Unsupported configuration entry: ' + path)
+  }
   // Copy configuration only. Live sockets, caches and dependency links do not belong in a backup.
-  await cp(original, p.dsh, {
-    recursive: true,
-    dereference: false,
-    filter: (path) =>
-      !['node_modules', '.cache', 'logs'].some((x) =>
-        path.slice(original.length).split('/').includes(x),
-      ) && !path.endsWith('.sock'),
-  })
-  await cp(p.dsh, join(p.data, 'adopted-backup-' + Date.now()), {
-    recursive: true,
-    dereference: false,
-  })
+  try {
+    await cp(original, stage, {
+      recursive: true,
+      dereference: false,
+      filter: (path) =>
+        !['node_modules', '.cache', 'logs'].some((x) =>
+          path.slice(original.length).split('/').includes(x),
+        ) && !path.endsWith('.sock'),
+    })
+    await makePrivate(stage)
+    await cp(stage, join(p.data, 'adopted-backup-' + Date.now()), {
+      recursive: true,
+      dereference: false,
+    })
+    await rename(stage, p.dsh)
+  } finally {
+    await rm(stage, { recursive: true, force: true })
+  }
   return { adopted: true }
 }

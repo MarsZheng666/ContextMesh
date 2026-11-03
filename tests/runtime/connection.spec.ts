@@ -25,6 +25,7 @@ test('unconfigured persistence mounts offline and refuses remote writes without 
     await ctx.plugin(SessionStore)
     await ctx.plugin(Plugin, { timeoutMs: 100 })
     expect(ctx.contextmesh).toBeTruthy()
+    expect(await ctx.contextmesh.list()).toEqual([])
     await expect(
       ctx.contextmesh.create({
         id: SessionId(randomUUID()),

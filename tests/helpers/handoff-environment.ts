@@ -1,3 +1,6 @@
+import type { Options } from 'tsup'
+import { createRequire } from 'node:module'
+import { prepareProfile } from '../../packages/runtime-manager/src/supervisor.js'
 import {
   writeConnection,
   readConnection,
@@ -79,8 +82,54 @@ export async function environment() {
     connection?: DeviceConnection,
     modelConfig?: { provider: string; model: string; skipSecond?: boolean },
   ) => {
-    const home = join(root, `home-${name}`),
-      stateDir = join(home, 'mesh')
+    const bundle = process.env.CONTEXTMESH_TEST_RUNTIME
+    const managed = join(root, `home-${name}`)
+    const home = bundle ? join(managed, 'data/dsh') : managed,
+      stateDir = bundle ? join(home, 'contextmesh') : join(home, 'mesh')
+    const node = bundle ? join(bundle, 'bin/node') : process.execPath
+    const bin = bundle
+      ? join(bundle, 'app/node_modules/@deepseek-ai/dsh/lib/bin.js')
+      : resolve('node_modules/@deepseek-ai/dsh/lib/bin.js')
+    let worker = resolve('tests/helpers/handoff-worker.ts')
+    if (bundle) {
+      installed = true
+      await prepareProfile(managed, bundle)
+      const fromPlugin = createRequire(
+        join(bundle, 'app/node_modules/dsh-contextmesh-handoff/package.json'),
+      )
+      const fromSession = createRequire(
+        fromPlugin.resolve('@deepseek-ai/dsh-session'),
+      )
+      worker = join(home, 'fixture-worker.mjs')
+      const plugins: NonNullable<Options['esbuildPlugins']> = [
+        {
+          name: 'release-dependencies',
+          setup(b) {
+            b.onResolve({ filter: /^(@deepseek-ai\/|zod$)/ }, (args) => {
+              let path
+              try {
+                path = fromPlugin.resolve(args.path)
+              } catch {
+                path = fromSession.resolve(args.path)
+              }
+              return { path: pathToFileURL(path).href, external: true }
+            })
+          },
+        },
+      ]
+      const localRequire = createRequire(import.meta.url)
+      const { build } = createRequire(localRequire.resolve('tsup'))(
+        'esbuild',
+      ) as { build(options: unknown): Promise<unknown> }
+      await build({
+        entryPoints: [resolve('tests/helpers/handoff-worker.ts')],
+        outfile: worker,
+        bundle: true,
+        platform: 'node',
+        format: 'esm',
+        plugins,
+      })
+    }
     await mkdir(home, { recursive: true })
     if (connection) {
       const configPath = join(home, 'contextmesh', 'connection.json')
@@ -89,18 +138,19 @@ export async function environment() {
       else await writeConnection(connection, configPath)
     }
     if (installed) {
-      await execute(
-        process.execPath,
-        [
-          resolve('node_modules/@deepseek-ai/dsh/lib/bin.js'),
-          'plugin',
-          '--profile',
-          'web',
-          'add',
-          `link:${resolve('packages/handoff-deepseek')}`,
-        ],
-        { env: { ...process.env, DSH_HOME: home }, timeout: 30000 },
-      )
+      if (!bundle)
+        await execute(
+          process.execPath,
+          [
+            resolve('node_modules/@deepseek-ai/dsh/lib/bin.js'),
+            'plugin',
+            '--profile',
+            'web',
+            'add',
+            `link:${resolve('packages/handoff-deepseek')}`,
+          ],
+          { env: { ...process.env, DSH_HOME: home }, timeout: 30000 },
+        )
       const manifest = JSON.parse(
         await readFile(join(home, 'profiles/web/package.json'), 'utf8'),
       )
@@ -143,15 +193,14 @@ export async function environment() {
   config: {mode: workspace-write}
 ${plugins}- insert:
     - id: handoff-worker
-      name: ${JSON.stringify(pathToFileURL(resolve('tests/helpers/handoff-worker.ts')).href)}
+      name: ${JSON.stringify(pathToFileURL(worker).href)}
 `,
     )
     const child = spawn(
-      process.execPath,
+      node,
       [
-        '--import',
-        'tsx/esm',
-        'node_modules/@deepseek-ai/dsh/lib/bin.js',
+        ...(bundle ? [] : ['--import', 'tsx/esm']),
+        bin,
         '--profile',
         'web',
         '--patch',

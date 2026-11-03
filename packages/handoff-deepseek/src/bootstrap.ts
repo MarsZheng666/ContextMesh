@@ -1,5 +1,5 @@
 import { hostname } from 'node:os'
-import { resolveConnection } from '../../client/src/config.js'
+import { resolveConnection, safeEndpoint } from '../../client/src/config.js'
 import { connectDevice } from '../../../apps/cli/src/setup.js'
 import { MeshError } from '../../protocol/src/index.js'
 import { z } from 'zod'
@@ -114,7 +114,7 @@ export class ConnectionBootstrap {
           lastSync: this.lastSync ?? null,
           source: config?.source ?? {},
           warnings: config?.warnings ?? [],
-          endpoint: config?.endpoint ?? '',
+          endpoint: safeEndpoint(config?.endpoint) ?? '',
         },
       }
     }

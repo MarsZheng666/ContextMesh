@@ -14,6 +14,7 @@ export async function copyDependencies(
   roots: string[],
 ) {
   const visited = new Map<string, string>()
+  const shared = new Map<string, Set<string>>()
   const licenses: Array<{ name: string; version: string; license: unknown }> =
     []
   async function locate(name: string, from: string) {
@@ -47,6 +48,8 @@ export async function copyDependencies(
         .slice(0, 10)
     const target = join(destination, '.store', id)
     visited.set(source, target)
+    if (!shared.has(p.name)) shared.set(p.name, new Set())
+    shared.get(p.name)!.add(target)
     await mkdir(target, { recursive: true })
     await cp(source, target, {
       recursive: true,
@@ -89,6 +92,14 @@ export async function copyDependencies(
       link = join(destination, name)
     await mkdir(dirname(link), { recursive: true })
     await symlink(relative(dirname(link), target), link)
+  }
+  // Native loaders resolve platform packages from their own scope. Preserve
+  // the common ancestor lookup used by pnpm, but never guess between versions.
+  for (const [name, targets] of shared) {
+    if (targets.size !== 1) continue
+    const link = join(destination, '.store/node_modules', name)
+    await mkdir(dirname(link), { recursive: true })
+    await symlink(relative(dirname(link), [...targets][0]!), link)
   }
   return licenses.sort((a, b) => a.name.localeCompare(b.name))
 }

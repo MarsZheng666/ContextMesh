@@ -73,15 +73,26 @@ if (!serverOnly) {
     format: 1,
     version: p.version,
     platform: process.platform + '-' + process.arch,
+    ...(process.platform === 'linux'
+      ? {
+          minimumGlibc: (
+            process.report.getReport() as {
+              header: { glibcVersionRuntime: string }
+            }
+          ).header.glibcVersionRuntime,
+        }
+      : {}),
     node: process.version,
     dsh: '0.2.1-rc.3',
     protocol: 1,
     schema: 6,
     minSchema: 6,
     maxSchema: 6,
-    sourceCommit: execFileSync('git', ['rev-parse', 'HEAD'], {
-      encoding: 'utf8',
-    }).trim(),
+    sourceCommit:
+      process.env.SOURCE_COMMIT ??
+      execFileSync('git', ['rev-parse', 'HEAD'], {
+        encoding: 'utf8',
+      }).trim(),
     lockHash: sha256(await readFile('pnpm-lock.yaml')),
     patchHash: sha256(patchText),
     files: await inventory(out),

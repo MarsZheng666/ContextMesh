@@ -26,9 +26,13 @@ export class ConfiguredMeshClient extends MeshClient {
         ...this.options,
         endpoint: config.endpoint,
         token: config.token,
-        retries: 0,
       })
-      const capabilities = await client.capabilities()
+      const capabilities = await new MeshClient({
+        ...this.options,
+        endpoint: config.endpoint,
+        token: config.token,
+        retries: 0,
+      }).capabilities()
       if (this.renewalMs * 3 > capabilities.leaseMs)
         throw new MeshError(
           'VERSION_INCOMPATIBLE',
