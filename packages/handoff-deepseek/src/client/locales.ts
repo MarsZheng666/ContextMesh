@@ -1,4 +1,16 @@
 export const en = {
+  connectionSetup: 'Connection setup',
+  connectionReady: 'Connected',
+  connectionOffline:
+    'Offline — your draft and last synced list are kept. Reconnect before sending.',
+  connectionMissing:
+    'Connect this device to ContextMesh. Get a pairing code from an existing owner device.',
+  lastSync: 'Last synced',
+  configSource: 'Configuration source',
+  serviceUrl: 'Service URL',
+  connectDevice: 'Connect device',
+  retryConnection: 'Retry connection',
+
   MODEL_SELECTION_CANCELLED:
     'The model choice was not applied. Your draft is kept; choose a model and send again.',
   HANDOFF_MODEL_ON_RECEIVER:
@@ -273,6 +285,17 @@ export const en = {
 } as const
 export type Key = keyof typeof en
 export const zh: Record<Key, string> = {
+  connectionSetup: '连接设置',
+  connectionReady: '已连接',
+  connectionOffline:
+    '连接已断开，草稿和上次同步的列表已保留。重新连接后才能发送。',
+  connectionMissing: '连接此设备到 ContextMesh。请在已有管理设备上获取配对码。',
+  lastSync: '上次同步',
+  configSource: '配置来源',
+  serviceUrl: '服务地址',
+  connectDevice: '连接设备',
+  retryConnection: '重新连接',
+
   MODEL_SELECTION_CANCELLED:
     '模型选择未生效，草稿已保留。请重新选择模型后发送。',
   HANDOFF_MODEL_ON_RECEIVER: '请在接收设备上使用原生模型选择器选择模型。',

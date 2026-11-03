@@ -42,7 +42,7 @@ import {
   type SessionId,
   type SessionEvent,
 } from '@deepseek-ai/dsh-session'
-import { readConnection } from '../../client/src/config.js'
+import { ConfiguredMeshClient } from '../../client/src/connection.js'
 import { MeshClient } from '../../client/src/index.js'
 import {
   headerSchema,
@@ -570,24 +570,7 @@ class RemoteSessionHandle implements SessionHandle {
 
 /** Keep live routing through provider-dependent consumer shutdown, then close all handles. */
 export async function apply(ctx: Context, config: Config): Promise<void> {
-  const environmentToken =
-    config.token ?? process.env[config.tokenEnv ?? 'CONTEXTMESH_TOKEN']
-  const saved = environmentToken ? undefined : await readConnection()
-  const token = environmentToken ?? saved?.token
-  if (!token)
-    throw new Error('ContextMesh token environment variable is missing')
-  const client = new MeshClient({
-    ...config,
-    endpoint:
-      config.endpoint ??
-      process.env.CONTEXTMESH_ENDPOINT ??
-      saved?.endpoint ??
-      'http://127.0.0.1:8787',
-    token,
-  })
-  const capabilities = await client.capabilities()
-  if ((config.renewalMs ?? 15000) * 3 > capabilities.leaseMs)
-    throw new Error('renewalMs must be at most one third of server leaseMs')
+  const client = new ConfiguredMeshClient(config, config.renewalMs ?? 15000)
   let serviceFiber!: Fiber
   let service: RemoteSessionPersistence | undefined
   ctx.effect(function* () {

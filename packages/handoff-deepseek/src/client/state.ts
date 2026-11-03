@@ -9,6 +9,16 @@ const modelChoice = z.object({
 import { en, type Key } from './locales.js'
 import type { ListDirectory } from './directory.js'
 export const snapshotSchema = z.object({
+  connectivity: z
+    .object({
+      state: z.enum(['ready', 'offline', 'unconfigured']),
+      code: z.string(),
+      lastSync: z.number().nullable(),
+      endpoint: z.string(),
+      source: z.record(z.string(), z.string()),
+      warnings: z.array(z.string()),
+    })
+    .optional(),
   workspaceTransfer: z.boolean().optional(),
   modelPreflight: z.boolean().optional(),
   receiverModel: modelRoute.optional(),
@@ -129,6 +139,8 @@ export class UiModel {
         await this.request({ action: 'status' }),
       )
       this.set({ ...this.state, data, error: undefined })
+      if (data.connectivity && data.connectivity.state !== 'ready')
+        throw new ControlError('CONNECTION_LOST', t('CONNECTION_LOST'))
       const session = data.sessions.find((s) => s.id === sessionId)
       if (session?.activeNodeId && session.activeNodeId !== data.nodeId) {
         accepted = await this.ensureOwned(sessionId, t, undefined, target)
@@ -231,6 +243,8 @@ export class UiModel {
     return this.request({ action: 'status' }).then((value) => {
       const data = snapshotSchema.parse(value)
       this.set({ ...this.state, data })
+      if (data.connectivity && data.connectivity.state !== 'ready')
+        throw new ControlError('CONNECTION_LOST', t('CONNECTION_LOST'))
       const session = data.sessions.find((s) => s.id === sessionId)
       if (!session?.activeNodeId)
         throw new ControlError(
@@ -379,6 +393,8 @@ export class UiModel {
     signal?.throwIfAborted()
     const data = snapshotSchema.parse(await this.request({ action: 'status' }))
     this.set({ ...this.state, data, error: undefined })
+    if (data.connectivity && data.connectivity.state !== 'ready')
+      throw new ControlError('CONNECTION_LOST', t('CONNECTION_LOST'))
     const session = data.sessions.find((s) => s.id === sessionId)
     if (!session) return true
     if (session.recoveryRequired) throw friendly('TAKEOVER_UNAVAILABLE')

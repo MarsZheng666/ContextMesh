@@ -1,3 +1,4 @@
+import { MeshClient } from '../../../packages/client/src/index.js'
 import { createInterface } from 'node:readline/promises'
 import { stdin, stdout } from 'node:process'
 import { randomUUID } from 'node:crypto'
@@ -65,11 +66,29 @@ export async function setup(input: string[]) {
     )
   const prompt = createInterface({ input: stdin, output: stdout })
   try {
+    const mode = (
+      await prompt.question(
+        'Connect using [1] a pairing code or [2] a private owner connection file? [1]: ',
+      )
+    ).trim()
+    if (mode === '2') {
+      const path = (
+        await prompt.question('Private owner connection file path: ')
+      ).trim()
+      const config = await readConnection(path)
+      if (!config) throw new Error('Owner connection file not found')
+      const identity = await new DeviceClient(new MeshClient(config)).identity()
+      if (identity.role !== 'owner')
+        throw new Error('This file is not an owner connection')
+      await writeConnection(config)
+      stdout.write('Connected. Run contextmesh dsh, then contextmesh open.\n')
+      return true
+    }
     const endpoint = (await prompt.question('ContextMesh service URL: ')).trim()
     const code = (await prompt.question('One-time pairing code: ')).trim()
     const result = await connectDevice(endpoint, code)
     stdout.write(
-      `Connected as ${result.name}. Restart DSH to use this connection.\n`,
+      `Connected as ${result.name}. Open Connection setup in DSH and retry, or run contextmesh dsh.\n`,
     )
   } finally {
     prompt.close()

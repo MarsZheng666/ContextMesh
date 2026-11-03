@@ -1,3 +1,4 @@
+import { mkdir } from 'node:fs/promises'
 import type { Context } from '@deepseek-ai/cordis'
 import schema from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-client-connection'
@@ -6,6 +7,7 @@ import type { ModelProfile } from './model-profile.js'
 import { hostname } from 'node:os'
 import { join } from 'node:path'
 import { HandoffCoordinator } from './coordinator.js'
+import { ConnectionBootstrap } from './bootstrap.js'
 import { listenLocal } from './local-control.js'
 
 export const name = 'contextmesh-handoff'
@@ -57,17 +59,21 @@ export async function apply(ctx: Context, config: Config) {
     config.stateDir ?? (home ? join(home, 'contextmesh') : undefined)
   if (!stateDir)
     throw new Error('Set DSH_HOME or configure ContextMesh stateDir')
-  const service = await HandoffCoordinator.start(ctx, {
-    stateDir,
-    nodeName:
-      config.nodeName ??
-      (process.env.CONTEXTMESH_TOKEN ? undefined : await readConnection())
-        ?.name ??
-      hostname(),
-    pollMs: config.pollMs ?? 2000,
-    heartbeatMs: config.heartbeatMs ?? 15000,
-    waitIdleMs: config.waitIdleMs ?? 30000,
-    modelProfiles: config.modelProfiles,
+  const service = new ConnectionBootstrap(async () => {
+    const coordinator = await HandoffCoordinator.start(ctx, {
+      stateDir,
+      nodeName:
+        config.nodeName ??
+        (process.env.CONTEXTMESH_TOKEN ? undefined : await readConnection())
+          ?.name ??
+        hostname(),
+      pollMs: config.pollMs ?? 2000,
+      heartbeatMs: config.heartbeatMs ?? 15000,
+      waitIdleMs: config.waitIdleMs ?? 30000,
+      modelProfiles: config.modelProfiles,
+    })
+    ctx.provide('contextmeshHandoff', coordinator)
+    return coordinator
   })
   let local: Awaited<ReturnType<typeof listenLocal>> | undefined
   ctx.effect(
@@ -80,8 +86,9 @@ export async function apply(ctx: Context, config: Config) {
     },
     'contextmesh: controller shutdown',
   )
+  await mkdir(stateDir, { recursive: true, mode: 0o700 })
   local = await listenLocal(stateDir, (command) => service.command(command))
-  ctx.provide('contextmeshHandoff', service)
+  service.run()
   ctx.inject(['sessionController'], (nativeCtx) => {
     if (nativeCtx.sessionController.modelRelayVersion !== 1)
       throw new Error('Install the pinned ContextMesh model relay bridge')

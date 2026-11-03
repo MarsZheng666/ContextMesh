@@ -32,7 +32,10 @@ await writeFile(
   join(out, 'THIRD-PARTY.json'),
   JSON.stringify(licenses, null, 2),
 )
-await writeFile(join(out, 'NOTICE'), 'ContextMesh: https://github.com/MarsZheng666/ContextMesh\nThird-party license files are retained alongside each bundled package.\n')
+await writeFile(
+  join(out, 'NOTICE'),
+  'ContextMesh: https://github.com/MarsZheng666/ContextMesh\nThird-party license files are retained alongside each bundled package.\n',
+)
 if (!serverOnly) {
   await mkdir(join(out, 'bin'))
   await cp(process.execPath, join(out, 'bin/node'))

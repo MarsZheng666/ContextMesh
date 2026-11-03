@@ -1,3 +1,4 @@
+import { ConnectionSetup } from './connection.js'
 import { FilesPanel } from './files.js'
 import { ModelCheckPanel } from './models.js'
 import { DeviceSetup } from './devices.js'
@@ -497,6 +498,7 @@ export function RemotePanelView({
   return (
     <div className="cm-panel">
       <style>{style}</style>
+      <ConnectionSetup data={data} request={request} refresh={refresh} t={t} />
       <div className="cm-toolbar">
         <h1>{t('panel')}</h1>
         <button disabled={busy} onClick={() => void run(refresh)}>
