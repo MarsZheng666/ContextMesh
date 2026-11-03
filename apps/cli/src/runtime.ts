@@ -1,3 +1,15 @@
+import {
+  resumeServerUpgrade,
+  restoreServer,
+  backupServer,
+  serverMaintenance,
+  upgradeServer,
+} from '../../../packages/runtime-manager/src/server-upgrade.js'
+import {
+  upgrade,
+  checkUpgrade,
+  rollback,
+} from '../../../packages/runtime-manager/src/upgrade.js'
 import { diagnose } from '../../../packages/runtime-manager/src/doctor.js'
 import { tunnelSettings } from '../../../packages/runtime-manager/src/tunnel.js'
 import {
@@ -89,6 +101,22 @@ export async function runRuntime(args: string[]) {
       'data/dsh/contextmesh/connection.json',
     )
   }
+  if (command === 'upgrade') {
+    const source = rest.find((x) => !x.startsWith('--'))
+    if (!source)
+      throw new Error(
+        'Provide a verified unpacked runtime directory: upgrade <bundle> [--check]',
+      )
+    const result = rest.includes('--check')
+      ? await checkUpgrade(resolve(source), home)
+      : await upgrade(resolve(source), home)
+    console.log(JSON.stringify(result, null, 2))
+    return true
+  }
+  if (command === 'rollback') {
+    console.log(JSON.stringify(await rollback(home), null, 2))
+    return true
+  }
   if (command === 'doctor') {
     const report = {
       connection: await diagnose(),
@@ -131,6 +159,41 @@ export async function runRuntime(args: string[]) {
           'server init requires --image <image@sha256:digest> --endpoint <URL>',
         )
       console.log(JSON.stringify(await initServer(directory, image, endpoint)))
+      return true
+    }
+    if (rest[0] === 'maintenance') {
+      if (!['on', 'off'].includes(rest[1] ?? ''))
+        throw new Error('Use server maintenance on|off')
+      console.log(
+        JSON.stringify(await serverMaintenance(directory, rest[1] === 'on')),
+      )
+      return true
+    }
+    if (rest[0] === 'resume-upgrade') {
+      console.log(JSON.stringify(await resumeServerUpgrade(directory)))
+      return true
+    }
+    if (rest[0] === 'restore') {
+      const backup = value('--backup')
+      if (
+        !backup ||
+        !rest.includes('--confirm-stopped') ||
+        !rest.includes('--confirm-data-loss')
+      )
+        throw new Error(
+          'Restoring overwrites the database. Stop every client and the API, then provide --backup <directory> --confirm-stopped --confirm-data-loss',
+        )
+      console.log(JSON.stringify(await restoreServer(directory, backup)))
+      return true
+    }
+    if (rest[0] === 'backup') {
+      console.log(JSON.stringify(await backupServer(directory)))
+      return true
+    }
+    if (rest[0] === 'upgrade') {
+      const image = value('--image')
+      if (!image) throw new Error('Provide --image <image@sha256:digest>')
+      console.log(JSON.stringify(await upgradeServer(directory, image)))
       return true
     }
     if (rest[0] === 'start') {

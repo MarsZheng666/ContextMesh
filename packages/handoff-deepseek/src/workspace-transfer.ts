@@ -48,6 +48,9 @@ export class WorkspaceTransfers {
     { bundle: TransferBundle; cut: number; expires: number }
   >()
   private applying = false
+  get busy() {
+    return this.applying
+  }
   private approvals = new Map<
     string,
     { id: string; root: string; digest: string; expires: number }

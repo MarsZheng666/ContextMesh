@@ -15,7 +15,10 @@ export class ConnectionBootstrap {
   private cached?: Record<string, unknown>
   private lastSync?: number
   private error = 'NOT_CONFIGURED'
-  constructor(private readonly start: () => Promise<Controller>) {}
+  constructor(
+    private readonly start: () => Promise<Controller>,
+    private readonly canStopOffline: () => boolean = () => false,
+  ) {}
   async retry() {
     if (this.starting) return this.starting
     if (this.controller || this.closing) return
@@ -24,7 +27,10 @@ export class ConnectionBootstrap {
         this.controller = await this.start()
         this.error = ''
       } catch (e) {
-        this.error = e instanceof MeshError ? e.code : 'VERSION_OR_CONFIG_ERROR'
+        this.error =
+          e && typeof e === 'object' && 'code' in e
+            ? String(e.code)
+            : 'VERSION_OR_CONFIG_ERROR'
       }
     })()
     try {
@@ -42,6 +48,13 @@ export class ConnectionBootstrap {
   }
   async command(input: unknown): Promise<unknown> {
     const action = z.object({ action: z.string() }).parse(input).action
+    if (
+      action === 'prepare-upgrade' &&
+      !this.controller &&
+      this.canStopOffline()
+    ) {
+      return { ready: true }
+    }
     if (action === 'connection-pair') {
       if (this.controller)
         throw new Error(
@@ -74,7 +87,10 @@ export class ConnectionBootstrap {
           this.lastSync = Date.now()
           this.error = ''
         } catch (e) {
-          this.error = e instanceof MeshError ? e.code : 'UNAVAILABLE'
+          this.error =
+            e && typeof e === 'object' && 'code' in e
+              ? String(e.code)
+              : 'UNAVAILABLE'
         }
       return {
         ...(this.cached ?? {

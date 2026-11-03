@@ -87,6 +87,8 @@ const stateSchema = z.object({
 })
 const commandSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('status') }),
+  z.object({ action: z.literal('prepare-upgrade') }),
+  z.object({ action: z.literal('cancel-upgrade') }),
   z.object({
     action: z.literal('workspace-plan'),
     sessionId: z.string(),
@@ -282,6 +284,7 @@ export class HandoffCoordinator {
   private heartbeatTimer: ReturnType<typeof setInterval> | undefined
   private catalogRefreshed = 0
   private closing = false
+  private upgrading = false
   private constructor(
     readonly ctx: Context,
     readonly config: RuntimeConfig,
@@ -921,6 +924,7 @@ export class HandoffCoordinator {
     return result
   }
   async tick() {
+    if (this.upgrading) return
     if (this.closing) return
     if (this.polling) return this.polling
     this.polling = (async () => {
@@ -1831,6 +1835,19 @@ export class HandoffCoordinator {
   }
   async command(input: unknown): Promise<unknown> {
     const command = commandSchema.parse(input)
+    if (command.action === 'prepare-upgrade') return this.prepareUpgrade()
+    if (command.action === 'cancel-upgrade') {
+      this.upgrading = false
+      this.ctx.contextmesh.pauseAcquisitions(false)
+      for (const id of [...this.controls.keys()]) this.release(id)
+      return { cancelled: true }
+    }
+    if (this.upgrading && !['status', 'history'].includes(command.action))
+      throw new MeshError(
+        'MAINTENANCE',
+        'This device is preparing for an upgrade',
+        503,
+      )
     switch (command.action) {
       case 'pair-device':
         return new DeviceClient(this.client.mesh).create(
@@ -1956,6 +1973,64 @@ export class HandoffCoordinator {
         for (const agent of this.ctx.agents.list()) this.dirty.add(agent.id)
         return result
       }
+    }
+  }
+  private async prepareUpgrade() {
+    if (this.upgrading) return { ready: true }
+    const busy = () =>
+      this.ctx.agents
+        .list()
+        .some((a) => a.status === 'running' || pending(a) > 0) ||
+      this.jobs.size > 0 ||
+      this.retiring.size > 0 ||
+      this.pendingRequests.size > 0 ||
+      this.relay.pending.size > 0 ||
+      this.files.busy ||
+      this.transfers.size > 0 ||
+      this.controls.size > 0
+    if (busy())
+      throw new MeshError(
+        'UPGRADE_BUSY',
+        'Finish running tasks, queued messages, handoffs, model changes and file operations first.',
+      )
+    const state = await this.status()
+    if (
+      state.handoffs.some(
+        (h) => !['completed', 'cancelled', 'failed'].includes(h.state),
+      ) ||
+      state.modelRelays.length
+    )
+      throw new MeshError(
+        'UPGRADE_BUSY',
+        'Resolve pending handoffs and model changes first.',
+      )
+    this.upgrading = true
+    this.ctx.contextmesh.pauseAcquisitions(true)
+    try {
+      await this.polling
+      if (busy())
+        throw new MeshError(
+          'UPGRADE_BUSY',
+          'Work became active during preflight',
+        )
+      for (const agent of this.ctx.agents.list()) {
+        if (agent.status === 'running' || pending(agent) > 0)
+          throw new MeshError('UPGRADE_BUSY', 'A task started during preflight')
+        const control = this.freeze(agent.id)
+        await bounded(
+          control.quiesce(),
+          this.config.waitIdleMs,
+          this.abort.signal,
+        )
+        await this.resources(agent, true)
+        await this.ctx.sessions.flush(agent.session)
+      }
+      return { ready: true }
+    } catch (error) {
+      this.upgrading = false
+      this.ctx.contextmesh.pauseAcquisitions(false)
+      for (const id of [...this.controls.keys()]) this.release(id)
+      throw error
     }
   }
   async status() {

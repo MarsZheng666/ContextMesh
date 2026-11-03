@@ -6,7 +6,7 @@ import {
   readdir,
   chmod,
 } from 'node:fs/promises'
-import { resolve, join } from 'node:path'
+import { resolve, join, dirname } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import {
   inventory,
@@ -36,7 +36,24 @@ await writeFile(
   join(out, 'NOTICE'),
   'ContextMesh: https://github.com/MarsZheng666/ContextMesh\nThird-party license files are retained alongside each bundled package.\n',
 )
+if (serverOnly)
+  await writeFile(
+    join(out, 'server-release.json'),
+    JSON.stringify({
+      version: JSON.parse(
+        await readFile('packages/handoff-deepseek/package.json', 'utf8'),
+      ).version,
+      protocol: 1,
+      schema: 6,
+      postgresMajor: 18,
+    }),
+  )
 if (!serverOnly) {
+  await cp(
+    process.env.NODE_LICENSE_PATH ??
+      join(dirname(process.execPath), '../LICENSE'),
+    join(out, 'NODE-LICENSE'),
+  )
   await mkdir(join(out, 'bin'))
   await cp(process.execPath, join(out, 'bin/node'))
   await chmod(join(out, 'bin/node'), 0o755)
@@ -59,9 +76,9 @@ if (!serverOnly) {
     node: process.version,
     dsh: '0.2.1-rc.3',
     protocol: 1,
-    schema: 1,
-    minSchema: 1,
-    maxSchema: 1,
+    schema: 6,
+    minSchema: 6,
+    maxSchema: 6,
     sourceCommit: execFileSync('git', ['rev-parse', 'HEAD'], {
       encoding: 'utf8',
     }).trim(),

@@ -61,7 +61,8 @@ export function buildServer(options: ServerOptions) {
     if (credential) {
       if (
         req.url.startsWith('/v1/pairings') ||
-        req.url.startsWith('/v1/device-credentials')
+        req.url.startsWith('/v1/device-credentials') ||
+        req.url.startsWith('/v1/admin')
       )
         return reply.code(403).send({
           code: 'OWNER_REQUIRED',
@@ -95,6 +96,28 @@ export function buildServer(options: ServerOptions) {
     role: principals.has(req) ? 'device' : 'owner',
     nodeId: principals.get(req)?.nodeId ?? null,
   }))
+  app.get('/v1/admin/maintenance', async () => options.store.maintenance(ns))
+  app.post('/v1/admin/maintenance', async (req) =>
+    options.store.maintenance(
+      ns,
+      z.object({ enabled: z.boolean() }).strict().parse(req.body).enabled,
+    ),
+  )
+  app.addHook('preHandler', async (req) => {
+    if (
+      req.method !== 'POST' ||
+      req.url.startsWith('/v1/admin/maintenance') ||
+      /^\/v1\/handles\/[^/]+\/(append|flush|close|renew)$/.test(req.url) ||
+      /^\/v1\/nodes\/[^/]+\/offline$/.test(req.url)
+    )
+      return
+    if ((await options.store.maintenance(ns)).enabled)
+      throw new MeshError(
+        'MAINTENANCE',
+        'The server is draining for maintenance; try again later.',
+        503,
+      )
+  })
   registerDeviceRoutes(app, options.store, ns, options.token)
   app.setErrorHandler((error, req, reply) => {
     if (error instanceof MeshError)
@@ -141,9 +164,11 @@ export function buildServer(options: ServerOptions) {
     await options.store.pool.query('SELECT 1')
     return {
       ok: true,
+      maintenance: (await options.store.maintenance(ns)).enabled,
       protocolVersion: PROTOCOL_VERSION,
       leaseMs: options.store.leaseMs,
       features: [
+        'maintenance-v1',
         'handoff-v1',
         'takeover-v1',
         'project-setup-v1',

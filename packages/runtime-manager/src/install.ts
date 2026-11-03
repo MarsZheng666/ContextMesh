@@ -1,10 +1,18 @@
-import { cp, mkdir, rename, rm, lstat, writeFile } from 'node:fs/promises'
+import {
+  cp,
+  mkdir,
+  rename,
+  rm,
+  lstat,
+  writeFile,
+  readFile,
+} from 'node:fs/promises'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import { privateDirectory, atomicJson, optionalJson } from './files.js'
-import { verifyBundle } from './manifest.js'
+import { verifyBundle, sha256 } from './manifest.js'
 export const runtimeHome = () =>
   process.env.CONTEXTMESH_HOME ?? join(homedir(), '.contextmesh')
 export const selectionSchema = z.object({
@@ -24,6 +32,8 @@ export async function stageBundle(
   hash?: string,
 ) {
   const manifest = await verifyBundle(source, hash)
+  const sourceHash = sha256(await readFile(join(source, 'manifest.json')))
+  hash = sourceHash
   await privateDirectory(home)
   await privateDirectory(join(home, 'releases'))
   const destination = join(home, 'releases', manifest.version)

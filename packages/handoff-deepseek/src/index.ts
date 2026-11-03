@@ -59,22 +59,25 @@ export async function apply(ctx: Context, config: Config) {
     config.stateDir ?? (home ? join(home, 'contextmesh') : undefined)
   if (!stateDir)
     throw new Error('Set DSH_HOME or configure ContextMesh stateDir')
-  const service = new ConnectionBootstrap(async () => {
-    const coordinator = await HandoffCoordinator.start(ctx, {
-      stateDir,
-      nodeName:
-        config.nodeName ??
-        (process.env.CONTEXTMESH_TOKEN ? undefined : await readConnection())
-          ?.name ??
-        hostname(),
-      pollMs: config.pollMs ?? 2000,
-      heartbeatMs: config.heartbeatMs ?? 15000,
-      waitIdleMs: config.waitIdleMs ?? 30000,
-      modelProfiles: config.modelProfiles,
-    })
-    ctx.provide('contextmeshHandoff', coordinator)
-    return coordinator
-  })
+  const service = new ConnectionBootstrap(
+    async () => {
+      const coordinator = await HandoffCoordinator.start(ctx, {
+        stateDir,
+        nodeName:
+          config.nodeName ??
+          (process.env.CONTEXTMESH_TOKEN ? undefined : await readConnection())
+            ?.name ??
+          hostname(),
+        pollMs: config.pollMs ?? 2000,
+        heartbeatMs: config.heartbeatMs ?? 15000,
+        waitIdleMs: config.waitIdleMs ?? 30000,
+        modelProfiles: config.modelProfiles,
+      })
+      ctx.provide('contextmeshHandoff', coordinator)
+      return coordinator
+    },
+    () => ctx.agents.list().length === 0 && ctx.contextmesh.writers.size === 0,
+  )
   let local: Awaited<ReturnType<typeof listenLocal>> | undefined
   ctx.effect(
     () => async () => {

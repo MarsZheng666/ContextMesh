@@ -174,6 +174,10 @@ export class RemoteSessionPersistence extends SessionPersistence {
   readonly writers = new Map<string, RemoteSessionHandle>()
   private readonly acquisitions = new Set<Promise<SessionHandle>>()
   private stopping = false
+  private draining = false
+  pauseAcquisitions(value: boolean) {
+    this.draining = value
+  }
   constructor(
     ctx: Context,
     readonly client: MeshClient,
@@ -182,7 +186,7 @@ export class RemoteSessionPersistence extends SessionPersistence {
     super(ctx)
   }
   private acquire(run: () => Promise<SessionHandle>): Promise<SessionHandle> {
-    if (this.stopping)
+    if (this.stopping || this.draining)
       return Promise.reject(new Error('ContextMesh provider is stopping'))
     const result = run()
     this.acquisitions.add(result)

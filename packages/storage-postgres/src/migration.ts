@@ -1,6 +1,7 @@
 import type { Pool } from 'pg'
 
 const sql = `
+CREATE TABLE IF NOT EXISTS cm_maintenance (namespace text PRIMARY KEY, enabled boolean NOT NULL DEFAULT false, updated_at timestamptz NOT NULL DEFAULT clock_timestamp());
 CREATE TABLE IF NOT EXISTS cm_schema (version integer PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS cm_sessions (
  namespace text NOT NULL, id text NOT NULL, adapter text NOT NULL,
