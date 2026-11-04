@@ -2,135 +2,170 @@
 
 English | [中文](README.zh.md)
 
-**Continue the same agent conversation across devices and models.**
+**One conversation. Different devices. Different models.**
 
-ContextMesh stores native conversation history, tool calls, tool results, and execution events in a shared PostgreSQL service. Start on your laptop, hand the conversation to another device, and continue from the same history—with one device in control at a time.
+Start a task on your laptop, continue on another machine, and switch models while keeping the original conversation and tool history.
 
-[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) is the first integration. The goal is a model-independent context service that can connect different coding agents over time.
+ContextMesh has two parts: **a plugin on each device that sends and retrieves session events** and **one shared remote server that persists them in PostgreSQL**. [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) is the first supported client; support for other coding agents is planned.
 
-[Getting started](docs/getting-started.md) · [Device pairing](docs/devices.md) · [Handoff](docs/handoff.md) · [Model relay](docs/model-relay.md) · [File transfer](docs/files.md) · [Deployment](docs/deployment.md)
+[Deploy the server](#1-deploy-the-server) · [Install the plugin](#2-install-the-plugin-on-each-device) · [Connect devices](#3-connect-your-devices) · [Use ContextMesh](#4-continue-a-conversation)
+
+## How it fits together
+
+```mermaid
+flowchart LR
+  A["Device A · DSH + ContextMesh plugin"] <-->|"Send / retrieve session events"| S["Remote ContextMesh Server"]
+  B["Device B · DSH + ContextMesh plugin"] <-->|"Send / retrieve session events"| S
+  S -->|"Persist session history"| DB[(PostgreSQL)]
+```
+
+| Component  | Where it runs                            | What it needs                                                      | What it does                                                                                                                         |
+| ---------- | ---------------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| **Server** | One machine reachable by your devices    | PostgreSQL and service credentials                                 | Persists session history in PostgreSQL, authenticates devices, and coordinates ownership and transfers                               |
+| **Plugin** | Inside DSH on every participating device | The server URL, a device credential, and locally configured models | Sends native session events to the server, retrieves history for restoration, and provides shared conversations and handoff controls |
+
+Deploy the server once. Each device connects to that same service; it does not need its own database. A server machine can also run DSH, in which case it also needs the plugin. Model requests and tools run on the device executing the task; model API keys stay on that device.
+
+The server's PostgreSQL database is the authoritative store for shared session history. Device-local files retain connection settings, device identity, model credentials, caches, and handoff state.
 
 ## What you can do
 
-- **Keep the original conversation.** Persist native Session events without replacing history with summaries or rerunning completed tools.
-- **Continue on another device.** Hand off explicitly, or confirm a takeover when sending from a remote conversation. A running task continues automatically on the receiver after its preflight passes and the source stops safely. Shared titles, history, and the owning device remain visible in DSH.
-- **Change models within the same conversation.** Use DSH’s native model selector to switch to another configured route. Check history compatibility and context capacity before switching.
-- **Connect a new device.** Create a one-time pairing code, run the setup wizard on the new device, and revoke its credential if needed.
-- **Bring selected files with you.** Preview workspace changes and supported file attachments, then confirm their transfer and application on the receiving device.
-- **Install one plugin.** `dsh-contextmesh-handoff` includes persistence and the UI; internal components load automatically.
-- **Run your own service.** Use PostgreSQL with a local connection, an SSH tunnel, or HTTPS. Write leases and epochs keep one session writer active at a time.
+- **Keep native context:** the plugin sends messages, tool calls, results, and execution events to the remote server for persistence in PostgreSQL.
+- **Continue across devices:** hand off explicitly, or confirm a takeover. For an unfinished task, the receiver is checked before the source stops, then execution continues automatically.
+- **Use the receiver's model:** a device configured only with Sol can continue a Flash task. Select models through DSH's native selector; devices do not need identical model configurations.
+- **Bring selected files:** preview and confirm workspace changes and supported file attachments before applying them on the receiver.
 
-```text
-DeepSeek Harness · laptop ─┐
-                          ├── ContextMesh ── PostgreSQL
-DeepSeek Harness · server ─┘
-```
+## Before you install
 
-## Current preview
+**0.7.0 is a developer preview.** The plugin requires this repository's pinned **DSH 0.2.1-rc.3 and compatibility patches**. Use the runtime built below; installing the plugin into an arbitrary global DSH is not supported.
 
-The current plugin is **0.7.0**, in **developer preview**. It requires this repository’s pinned **DeepSeek Harness 0.2.1-rc.3** runtime and compatibility patches. A standard global DSH installation does not include those extensions. APIs may change.
+The instructions below use the available source installation path. Self-contained macOS Apple Silicon and Linux x64 packages are also built by CI, but are currently **candidate artifacts, not published releases**. Their installation and upgrade commands are covered in the [runtime guide](docs/runtime.md).
 
-Device handoff uses the **receiving device’s selected model**. A device configured only with Sol can continue a Flash conversation; matching provider configurations are not required. Use DSH’s native model selector, with no separate handoff picker. ContextMesh remembers this device’s last explicit choice, falling back to its DSH default until one is made. Only the receiving model needs local credentials; API keys are never transferred. Update the server and participating devices together.
+## 1. Deploy the server
 
-Plain conversations can move between ordinary folders without Git. Code workspaces require the same base Git commit on both devices; uncommitted changes can use the confirmed file-transfer flow. ContextMesh does not clone repositories, switch branches, or synchronize an entire directory automatically.
-
-Model relay currently supports text and completed tool history. File transfer supports native **file** attachments; images, spill resources, and live processes are unsupported. See the [model](docs/model-relay.md) and [file](docs/files.md) guides for compatibility, transfer limits, and recovery.
-
-## Managed runtime packages
-
-The runtime package contains Node, the compatible DSH and the single plugin. See [installation, connection diagnostics and safe upgrades](docs/runtime.md). Packages are release candidates until separately published. Source installation remains available below.
-
-## Quick start
-
-Requires **Node.js 24.9+** and **pnpm 11.25.0**. The steps below build the compatible DSH runtime and the single plugin from source. A local development PostgreSQL launcher is included; you can also use your own PostgreSQL instance.
-
-### 1. Build from source
+**Run on the service host.** Requires Git and Docker Compose. This starts the API and PostgreSQL; Node and DSH do not need to be installed on the host.
 
 ```sh
-git clone https://github.com/MarsZheng666/ContextMesh.git
-cd ContextMesh
+git clone https://github.com/MarsZheng666/ContextMesh.git contextmesh-server
+cd contextmesh-server
+cp .env.example .env
+chmod 600 .env
+```
+
+Set these two values in the server's `.env`:
+
+| Setting             | Value                                                              |
+| ------------------- | ------------------------------------------------------------------ |
+| `CONTEXTMESH_TOKEN` | A random owner credential, used to connect the first owner device  |
+| `POSTGRES_PASSWORD` | A different random PostgreSQL password; add this setting to `.env` |
+
+Generate each value separately with `openssl rand -hex 32`. For this Compose deployment, the database address and API bind settings are supplied by [deploy/compose.yml](deploy/compose.yml); the example `DATABASE_URL` is for native local development.
+
+```sh
+docker compose --env-file .env -f deploy/compose.yml up --build -d
+docker compose --env-file .env -f deploy/compose.yml ps
+```
+
+The API is available on the **server's** `http://127.0.0.1:8787`. PostgreSQL stays inside the Docker network and keeps its data in a named volume.
+
+For other devices, either put the API behind HTTPS, such as `https://mesh.example.com`, or open an SSH tunnel **on each connecting device**:
+
+```sh
+ssh -N -o ExitOnForwardFailure=yes \
+  -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
+  -L 127.0.0.1:8788:127.0.0.1:8787 user@server
+```
+
+A device using this tunnel connects to `http://127.0.0.1:8788`. Keep the tunnel open. `127.0.0.1` always refers to the machine using it. The ContextMesh API URL is separate from the DSH Web UI URL.
+
+See [server installation and configuration](docs/deployment.md) for HTTPS, an existing PostgreSQL database, persistent data, and upgrades.
+
+## 2. Install the plugin on each device
+
+**Run on every machine that will execute tasks.** Requires Git, **Node.js 24.9+**, and **pnpm 11.25.0**. Use a separate client checkout even if the server is on the same machine, so its `.env` does not override device credentials.
+
+```sh
+git clone https://github.com/MarsZheng666/ContextMesh.git contextmesh-client
+cd contextmesh-client
 corepack enable
 pnpm install --frozen-lockfile
 pnpm build
-cp .env.example .env
-```
 
-Set `CONTEXTMESH_TOKEN` in `.env` to a long random value. Generate one with:
-
-```sh
-node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
-```
-
-### 2. Start the service
-
-Start the local PostgreSQL process in one terminal:
-
-```sh
-pnpm db:local
-```
-
-In another terminal, from the repository root:
-
-```sh
-pnpm start
-```
-
-The API listens on `http://127.0.0.1:8787`. Local database files remain in `.contextmesh/postgres` between runs. Startup applies database migrations automatically.
-
-### 3. Install the plugin and start DSH
-
-From the repository root, in the terminal that will run DSH:
-
-```sh
 export DSH_HOME="$HOME/.dsh-contextmesh"
 export CONTEXTMESH_NODE_NAME='My laptop'
-export CONTEXTMESH_ENDPOINT='http://127.0.0.1:8787'
-export CONTEXTMESH_TOKEN='your-token-from-.env'
 pnpm exec dsh plugin --profile web add "link:$PWD/packages/handoff-deepseek"
+```
+
+This installs **one plugin: `dsh-contextmesh-handoff`**. The session transport adapter and handoff UI load together. Give each device its own DSH home and name. Keep using the same `DSH_HOME` in subsequent commands and launches.
+
+Only the service host needs PostgreSQL. Device checkouts do not need a server `.env`, `pnpm db:local`, or `pnpm start`.
+
+## 3. Connect your devices
+
+### First device: owner connection
+
+In the client checkout and the same terminal, set the service URL reachable from this device and the owner token from the server's `.env`:
+
+```sh
+export CONTEXTMESH_ENDPOINT='http://127.0.0.1:8788'
+export CONTEXTMESH_TOKEN='your-server-owner-token'
+pnpm cli doctor
 pnpm exec dsh --profile web --host 127.0.0.1 --port 3080 --no-open
 ```
 
-Open the authenticated URL printed by DSH. Keep using this repository’s `pnpm exec dsh` so the compatibility patches are loaded. Configure your model provider in DSH separately; the ContextMesh service token does not sign you in to a model provider.
+The example URL uses the SSH tunnel above. Use your HTTPS URL for a direct connection, or `http://127.0.0.1:8787` when DSH runs on the service host.
 
-### 4. Connect another device and continue
+Open the authenticated URL printed by DSH, then configure a model provider in DSH. These environment settings apply to the current terminal; load them again on later launches, or use the [private connection-file setup](docs/getting-started.md#save-the-owner-connection) for persistent configuration.
 
-Install the same runtime and single plugin on the new device, using its own DSH home. On the owner device, open **Remote sessions → Service connection → Add or revoke a device** and create a pairing code. Run `pnpm cli setup` on the new device with the same DSH home selected, enter its reachable service URL and the code, then restart DSH. Keep the owner token and owner `.env` on the owner device; explicit credentials override a paired connection. Use the [device pairing guide](docs/devices.md) for connection-file settings and credential precedence.
+### Additional devices: pairing
 
-Open **Remote sessions** to map a project to a folder on each device. Paths may differ. In a conversation, choose an online target and **Hand off**; on the receiving device, open the conversation and continue. Sending from a remote conversation can also ask to **Take over here**. See the [handoff guide](docs/handoff.md) for project setup and recovery.
+After installing the plugin on the new device:
 
-## Inspect sessions
+1. On the owner device, open **Remote sessions → Service connection → Add or revoke a device**. Name the new device and create a one-time pairing code.
+2. On the new device, from its client checkout with its own `DSH_HOME` set, run:
 
-```sh
-pnpm cli list
-pnpm cli stat SESSION_ID
-pnpm cli export SESSION_ID
-```
+   ```sh
+   unset CONTEXTMESH_TOKEN CONTEXTMESH_ENDPOINT
+   pnpm cli setup
+   ```
 
-Export writes the native session log to standard output. The CLI reads connection settings from the repository’s `.env` or a paired-device connection file. Explicit environment credentials take precedence. The [plugin API](docs/api/deepseek-adapter.md) describes the persistence interface.
+3. Choose **pairing code**, enter the server URL reachable from this device, then enter the code. The wizard saves this device's credential and identity privately.
+4. Start DSH and configure its local model provider:
 
-## Deployment and upgrades
+   ```sh
+   pnpm cli doctor
+   pnpm exec dsh --profile web --host 127.0.0.1 --port 3080 --no-open
+   ```
 
-All paired devices share the configured owner namespace and its conversations; pairing is separate from DSH’s browser login. Use HTTPS for remote service connections, or a loopback endpoint through an SSH tunnel. A loopback address always refers to the device using it.
+Open the URL printed by that DSH instance. Devices on different machines can use the same Web port.
 
-The current database schema is **6**. Before upgrading an existing installation, back up PostgreSQL and stop older writers, then upgrade the server and participating devices together. Older server binaries cannot use schema 6; rollback requires the backup. See [deployment](docs/deployment.md), [device pairing](docs/devices.md), and [file-transfer upgrades](docs/files.md#upgrade).
+Do not copy the owner's `.env`, DSH home, or model keys to other devices. Paired devices receive separate, revocable credentials. All devices paired with this server share its conversation namespace. **ContextMesh pairing, DSH browser login, and model-provider authentication are separate.** See [device access and revocation](docs/devices.md).
 
-## Roadmap
+## 4. Continue a conversation
 
-| Capability                                                    | Status               |
-| ------------------------------------------------------------- | -------------------- |
-| Native Session persistence and recovery                       | Available in preview |
-| Cross-device handoff, takeover, and workspace mapping         | Available in preview |
-| Model switching, compatibility checks, and capacity preflight | Available in preview |
-| Device pairing and revocable credentials                      | Available in preview |
-| Confirmed workspace changes and file attachment transfer      | Available in preview |
-| Additional coding-agent integrations                          | Planned              |
+Open **Remote sessions** to see connected devices and shared conversations. Map a project to a local directory on each device when prompted; the paths can differ.
+
+- In the source conversation, choose an online target and select **Hand off**.
+- Or open the conversation on another device, send a message, and confirm **Take over here**.
+- The receiver uses its locally selected model. If it has no explicit selection yet, it uses its DSH default. Model compatibility and context capacity are checked before transfer.
+
+Ordinary conversations work in non-Git folders. Code workspaces need the same Git base commit; uncommitted changes can use the confirmed file-transfer flow. ContextMesh does not clone repositories, switch branches, or synchronize entire directories automatically.
+
+See [handoff](docs/handoff.md), [model relay](docs/model-relay.md), and [file transfer](docs/files.md) for supported cases and recovery. Model relay currently supports text and completed tool history; file transfer supports native file attachments, with images, spill resources, and live processes outside the current scope.
+
+## Upgrades and troubleshooting
+
+| What you are maintaining                                             | Guide                                   |
+| -------------------------------------------------------------------- | --------------------------------------- |
+| Server, PostgreSQL, network access, and backups                      | [Server deployment](docs/deployment.md) |
+| Plugin installation, persistent connection settings, and model login | [Device setup](docs/getting-started.md) |
+| Packaged runtimes, connection diagnostics, and controlled upgrades   | [Runtime management](docs/runtime.md)   |
+| Pairing codes, device credentials, and revocation                    | [Device access](docs/devices.md)        |
+
+Keep the server and participating devices on compatible versions. Back up PostgreSQL and stop writers before upgrading; schema-changing upgrades and upgrades from a server without the maintenance API need the procedures in the runtime guide. Current schema: **6**.
 
 ## Development
 
-```sh
-pnpm check
-```
+Run `pnpm check` from a built client checkout to check formatting, types, builds, upstream fixtures, and tests. Tests use an isolated PostgreSQL instance and need no model API credentials.
 
-Runs formatting, upstream fixture integrity checks, type checking, builds, and tests. The suite uses an isolated PostgreSQL instance and does not require model API credentials.
-
-Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md), or [open an issue](https://github.com/MarsZheng666/ContextMesh/issues) for bugs and feature requests.
+See [CONTRIBUTING.md](CONTRIBUTING.md), the [plugin API](docs/api/deepseek-adapter.md), or [open an issue](https://github.com/MarsZheng666/ContextMesh/issues).
