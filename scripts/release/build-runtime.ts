@@ -12,6 +12,7 @@ import {
   inventory,
   sha256,
 } from '../../packages/runtime-manager/src/manifest.js'
+import { STORAGE_SCHEMA_VERSION } from '../../packages/protocol/src/index.js'
 import { copyDependencies } from './copy-dependencies.js'
 const repo = process.cwd(),
   out = resolve(process.argv[2] ?? 'artifacts/runtime'),
@@ -44,7 +45,7 @@ if (serverOnly)
         await readFile('packages/handoff-deepseek/package.json', 'utf8'),
       ).version,
       protocol: 1,
-      schema: 6,
+      schema: STORAGE_SCHEMA_VERSION,
       postgresMajor: 18,
     }),
   )
@@ -85,9 +86,9 @@ if (!serverOnly) {
     node: process.version,
     dsh: '0.2.1-rc.3',
     protocol: 1,
-    schema: 6,
-    minSchema: 6,
-    maxSchema: 6,
+    schema: STORAGE_SCHEMA_VERSION,
+    minSchema: STORAGE_SCHEMA_VERSION,
+    maxSchema: STORAGE_SCHEMA_VERSION,
     sourceCommit:
       process.env.SOURCE_COMMIT ??
       execFileSync('git', ['rev-parse', 'HEAD'], {

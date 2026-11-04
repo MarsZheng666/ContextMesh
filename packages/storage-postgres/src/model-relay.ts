@@ -58,6 +58,7 @@ export class ModelRelayPostgresStore extends DevicePostgresStore {
           request.handleId,
           request.epoch,
         )
+        this.assertDeepSeek(session)
         this.assertWriter(session, handle)
         await this.relayNode(db, ns, request)
         if (

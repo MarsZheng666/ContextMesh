@@ -22,16 +22,28 @@ it('upgrades schema 1 transactionally, retains old sessions, and rejects future 
     expect(
       (await db.query('SELECT max(version) AS version FROM cm_schema')).rows[0]
         .version,
-    ).toBe(6)
+    ).toBe(7)
     expect(
       (await db.query('SELECT active_handoff,header FROM cm_sessions')).rows[0],
     ).toEqual({ active_handoff: null, header: '{"id":"session","version":4}' })
     expect((await db.query('SELECT event FROM cm_events')).rows[0].event).toBe(
       'original history',
     )
+    // The previous release's schema 6 migrates without changing raw history.
+    await db.query('DROP INDEX cm_sessions_adapter')
+    await db.query('DELETE FROM cm_schema WHERE version=7')
+    await migrate(db)
+    expect(
+      (await db.query("SELECT to_regclass('cm_sessions_adapter') AS name"))
+        .rows[0].name,
+    ).toBe('cm_sessions_adapter')
+    expect((await db.query('SELECT event FROM cm_events')).rows[0].event).toBe(
+      'original history',
+    )
     // Exercise a direct upgrade from the previous schema-2 boundary as well.
     await db.query('DROP TABLE IF EXISTS cm_workspace_transfers')
-    await db.query('DELETE FROM cm_schema WHERE version=6')
+    await db.query('DROP INDEX IF EXISTS cm_sessions_adapter')
+    await db.query('DELETE FROM cm_schema WHERE version>=6')
     await db.query('DROP TABLE IF EXISTS cm_pairings,cm_device_credentials')
     await db.query('DELETE FROM cm_schema WHERE version=5')
     await db.query('DROP TABLE cm_model_relays')
@@ -44,7 +56,8 @@ it('upgrades schema 1 transactionally, retains old sessions, and rejects future 
         .name,
     ).toBe('cm_model_relays')
     await db.query('DROP TABLE IF EXISTS cm_workspace_transfers')
-    await db.query('DELETE FROM cm_schema WHERE version=6')
+    await db.query('DROP INDEX IF EXISTS cm_sessions_adapter')
+    await db.query('DELETE FROM cm_schema WHERE version>=6')
     await db.query('DROP TABLE IF EXISTS cm_pairings,cm_device_credentials')
     await db.query('DELETE FROM cm_schema WHERE version=5')
     await db.query('DROP TABLE cm_model_relays')

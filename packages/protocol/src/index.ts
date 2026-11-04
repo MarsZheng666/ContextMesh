@@ -1,6 +1,13 @@
 import { z } from 'zod'
 
 export const PROTOCOL_VERSION = 1
+export const STORAGE_SCHEMA_VERSION = 7
+export const nativeAdapterId = z
+  .string()
+  .min(1)
+  .max(64)
+  .regex(/^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/)
+export type NativeAdapterId = z.infer<typeof nativeAdapterId>
 export const nativeId = z.string().min(1).max(256)
 export const integer = z
   .number()
@@ -23,7 +30,7 @@ export type StoredHeader = z.infer<typeof headerSchema>
 export const sessionSchema = z.object({
   id: nativeId,
   incarnation: z.uuid(),
-  adapter: z.literal('deepseek'),
+  adapter: nativeAdapterId,
   header: headerSchema,
   inheritedEventCount: integer,
   nextSeq: integer,
@@ -34,7 +41,7 @@ export type SessionSnapshot = z.infer<typeof sessionSchema>
 export const createSchema = z.object({
   operationId: z.uuid(),
   instanceId: z.uuid(),
-  adapter: z.literal('deepseek'),
+  adapter: nativeAdapterId,
   header: headerSchema,
   inheritedEventCount: integer,
 })
@@ -42,6 +49,7 @@ export const openSchema = z.object({
   operationId: z.uuid(),
   instanceId: z.uuid(),
   access: z.enum(['read', 'write']),
+  adapter: nativeAdapterId.optional(),
 })
 export const handleSchema = z.object({
   handleId: z.uuid(),

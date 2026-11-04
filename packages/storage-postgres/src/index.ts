@@ -309,6 +309,7 @@ export class PostgresStore extends TransferPostgresStore {
       ['handoff-request', id, r],
       async (db) => {
         const s = await this.session(db, ns, id)
+        this.assertDeepSeek(s)
         if (!s.materialized)
           throw new MeshError('NOT_READY', 'flush the source session first')
         if (s.active_model_relay)
@@ -993,6 +994,7 @@ export class PostgresStore extends TransferPostgresStore {
   ) {
     return this.operation(ns, r.operationId, ['summary', id, r], async (db) => {
       const s = await this.session(db, ns, id)
+      this.assertDeepSeek(s)
       await this.node(db, ns, r)
       if (
         s.incarnation !== r.incarnation ||
@@ -1035,6 +1037,7 @@ export class PostgresStore extends TransferPostgresStore {
       ['assign-project', id, r],
       async (db) => {
         const session = await this.session(db, ns, id)
+        this.assertDeepSeek(session)
         await this.node(db, ns, r)
         if (
           session.incarnation !== r.incarnation ||
@@ -1169,6 +1172,7 @@ export class PostgresStore extends TransferPostgresStore {
       ['takeover', id, request],
       async (db) => {
         const session = await this.session(db, ns, id)
+        this.assertDeepSeek(session)
         const receiver = await this.node(db, ns, request)
         if (
           request.targetModel &&

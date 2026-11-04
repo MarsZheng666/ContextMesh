@@ -7,12 +7,13 @@ import {
   type SessionSnapshot,
   type StoredEvent,
   type StoredHeader,
+  type NativeAdapterId,
 } from '../../protocol/src/index.js'
 import { migrate, assertDurability } from './migration.js'
 
 export interface Row {
   id: string
-  adapter: 'deepseek'
+  adapter: NativeAdapterId
   header: string
   incarnation: string
   inherited_count: string
@@ -95,6 +96,13 @@ export class BasePostgresStore {
   }
   async stop(): Promise<void> {
     await this.pool.end()
+  }
+  protected assertDeepSeek(row: Row): void {
+    if (row.adapter !== 'deepseek')
+      throw new MeshError(
+        'ADAPTER_MISMATCH',
+        'this workflow requires a DeepSeek Harness session',
+      )
   }
   protected snapshot(row: Row): SessionSnapshot {
     try {
@@ -280,7 +288,7 @@ export class BasePostgresStore {
     request: {
       operationId: string
       instanceId: string
-      adapter: 'deepseek'
+      adapter: NativeAdapterId
       header: StoredHeader
       inheritedEventCount: number
     },
@@ -332,6 +340,7 @@ export class BasePostgresStore {
       operationId: string
       instanceId: string
       access: 'read' | 'write'
+      adapter?: NativeAdapterId
     },
   ): Promise<RemoteHandle> {
     return this.operation(
@@ -340,6 +349,11 @@ export class BasePostgresStore {
       ['open', id, request],
       async (db) => {
         const row = await this.session(db, ns, id)
+        if (row.adapter !== (request.adapter ?? 'deepseek'))
+          throw new MeshError(
+            'ADAPTER_MISMATCH',
+            'use the session native adapter',
+          )
         if (!row.materialized && row.creator_instance !== request.instanceId)
           throw new MeshError('NOT_FOUND', `session "${id}" not found`, 404)
         if (request.access === 'write') {
@@ -379,11 +393,12 @@ export class BasePostgresStore {
     ns: string,
     id: string,
     instance: string,
+    adapter: NativeAdapterId = 'deepseek',
   ): Promise<SessionSnapshot | null> {
     const row = (
       await this.pool.query(
-        'SELECT * FROM cm_sessions WHERE namespace=$1 AND id=$2 AND (materialized OR creator_instance=$3)',
-        [ns, id, instance],
+        'SELECT * FROM cm_sessions WHERE namespace=$1 AND id=$2 AND (materialized OR creator_instance=$3) AND adapter=$4',
+        [ns, id, instance, adapter],
       )
     ).rows[0]
     return row ? this.snapshot(row) : null
@@ -393,11 +408,12 @@ export class BasePostgresStore {
     instance: string,
     after = '',
     limit = 100,
+    adapter: NativeAdapterId = 'deepseek',
   ): Promise<{ sessions: SessionSnapshot[]; cursor: string | null }> {
     const rows = (
       await this.pool.query(
-        'SELECT * FROM cm_sessions WHERE namespace=$1 AND (materialized OR creator_instance=$2) AND id COLLATE "C" > $3 COLLATE "C" ORDER BY id COLLATE "C" LIMIT $4',
-        [ns, instance, after, limit + 1],
+        'SELECT * FROM cm_sessions WHERE namespace=$1 AND (materialized OR creator_instance=$2) AND id COLLATE "C" > $3 COLLATE "C" AND adapter=$5 ORDER BY id COLLATE "C" LIMIT $4',
+        [ns, instance, after, limit + 1, adapter],
       )
     ).rows
     return {
@@ -567,9 +583,21 @@ export class BasePostgresStore {
       return { closed: true }
     })
   }
-  async recover(ns: string, id: string, operationId: string) {
-    return this.operation(ns, operationId, ['recover', id], async (db) => {
+  async recover(
+    ns: string,
+    id: string,
+    operationId: string,
+    adapter: NativeAdapterId = 'deepseek',
+  ) {
+    const intent =
+      adapter === 'deepseek' ? ['recover', id] : ['recover', id, adapter]
+    return this.operation(ns, operationId, intent, async (db) => {
       const s = await this.session(db, ns, id)
+      if (s.adapter !== adapter)
+        throw new MeshError(
+          'ADAPTER_MISMATCH',
+          'use the session native adapter',
+        )
       if (s.active_handoff)
         throw new MeshError(
           'HANDOFF_IN_PROGRESS',

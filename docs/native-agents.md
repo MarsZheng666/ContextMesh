@@ -1,0 +1,60 @@
+# Native Agent storage
+
+[中文](native-agents.zh.md) · [Server deployment](deployment.md) · [DSH handoff](handoff.md)
+
+ContextMesh Server can persist independent native Agent logs. DSH remains the only installed Agent integration. Selecting `adapter: 'codex'` in the SDK names a storage format; it does not install Codex or make a DSH session executable by Codex. Cross-Agent conversion, tool compatibility and automatic task relay require a dedicated adapter and are not available yet.
+
+## Storage contract
+
+Create one `MeshClient` per native format:
+
+```ts
+const client = new MeshClient({
+  endpoint: 'https://mesh.example.com',
+  token: deviceCredential,
+  adapter: 'codex',
+})
+```
+
+The default is `deepseek`. Adapter names contain 1–64 lowercase letters, digits and single `.`, `_` or `-` separators, starting with a letter. Examples: `deepseek`, `codex`, `claude-code`. They identify codecs, not model names or devices. Changing a model within DSH still uses `deepseek`.
+
+| Field                       | Meaning                                                                                                                           |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `header.id`                 | Stable ContextMesh ID, unique across every adapter in the namespace; include an adapter prefix or use a UUID to avoid collisions. |
+| `header.version`            | Adapter-owned envelope format version; other Agents must not interpret it as a DSH format version.                                |
+| `header.createdAt`          | Nonnegative safe-integer timestamp.                                                                                               |
+| `header.isSeeded`           | Whether an inherited prefix exists; unseeded logs require inherited count 0.                                                      |
+| Additional header fields    | JSON preserved with the header; record the original native thread ID and native format metadata here.                             |
+| Event `seq`, `type`, `time` | Contiguous nonnegative safe-integer sequence from 0, nonempty event type and nonnegative safe-integer timestamp.                  |
+| Additional event fields     | Opaque JSON owned by the adapter, including the original native item where appropriate.                                           |
+
+The Server validates the storage envelope, not each Agent's executable semantics. It stores the original JSON; it does not flatten tool calls, replay tools, copy model credentials, or synthesize successful results. The adapter must validate its native payload before execution. Keep credentials out of headers and events. Existing single-writer leases, fencing epochs, append order, operation IDs, flush, failed-writer recovery and read pagination apply to every format.
+
+## Catalog and ownership
+
+| Operation                       | Adapter selection                                                                                                                      |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /v1/sessions`             | Required body `adapter`; immutable after creation.                                                                                     |
+| `GET /v1/sessions`              | Query `adapter`; defaults to `deepseek`. Filtering happens before pagination.                                                          |
+| `GET /v1/sessions/:id`          | Query `adapter`; defaults to `deepseek`; another format returns a null session.                                                        |
+| `POST /v1/sessions/:id/handles` | Optional body `adapter`; defaults to `deepseek`. Mismatch returns `ADAPTER_MISMATCH` before acquiring a handle.                        |
+| `POST /v1/sessions/:id/recover` | Optional body `adapter`; defaults to `deepseek`. Still requires `confirmStopped: true`; mismatch cannot close another format's writer. |
+
+The SDK supplies the selection for create, list, stat and open automatically. Raw `request` calls, including recovery, must specify a nondefault adapter explicitly. Existing DeepSeek mutation bodies keep their omitted-adapter encoding for operation retry compatibility. Handle reads/writes use the authenticated namespace and acquired handle, as before. DSH-only handoff, model relay, summary and project-setup workflows reject foreign native formats; they do not convert those formats.
+
+Adapters are **not access-control boundaries**. Authorized devices in the same configured namespace can explicitly select another format. Separate users and permissions require a future authorization layer. IDs remain namespace-wide: creating an existing ID with another adapter returns `ALREADY_EXISTS`, preserving the original history.
+
+For inspection, the remote CLI accepts a selector:
+
+```sh
+contextmesh list --adapter codex
+contextmesh stat codex-thread-id --adapter codex
+contextmesh export codex-thread-id --adapter codex
+contextmesh recover codex-thread-id --confirm-stopped --adapter codex
+```
+
+Exports include the adapter, original header, inherited count and events. Recovery is an explicit administrative action only after the previous process and its tools have stopped; selecting an adapter does not authorize stopping a running Agent.
+
+## Compatibility
+
+Authenticated `/health/ready` advertises `native-agent-storage-v1` with database schema **7**. An older Server cannot accept other native formats. Schema 7 retains existing DSH headers/events and adds a catalog index; it also prevents older binaries from opening a database containing foreign native logs. See the [schema migration procedure](runtime.md#migrate-schema-6-to-7). The public installation still contains exactly one DSH ContextMesh plugin.

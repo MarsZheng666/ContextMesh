@@ -10,6 +10,8 @@ import {
   type RemoteHandle,
   type StoredHeader,
   type StoredEvent,
+  nativeAdapterId,
+  type NativeAdapterId,
 } from '../../protocol/src/index.js'
 
 export interface ClientOptions {
@@ -19,12 +21,15 @@ export interface ClientOptions {
   retries?: number
   allowInsecureHttp?: boolean
   fetch?: typeof fetch
+  adapter?: NativeAdapterId
 }
 export class MeshClient {
   readonly instanceId = randomUUID()
   readonly endpoint: string
+  readonly adapter: NativeAdapterId
   private readonly transport: typeof fetch
   constructor(private readonly config: ClientOptions) {
+    this.adapter = nativeAdapterId.parse(config.adapter ?? 'deepseek')
     const url = new URL(config.endpoint)
     if (url.username || url.password || url.search || url.hash)
       throw new Error(
@@ -115,7 +120,7 @@ export class MeshClient {
         {
           operationId: randomUUID(),
           instanceId: this.instanceId,
-          adapter: 'deepseek',
+          adapter: this.adapter,
           header,
           inheritedEventCount,
         },
@@ -131,7 +136,12 @@ export class MeshClient {
     return handleSchema.parse(
       await this.request(
         `/v1/sessions/${encodeURIComponent(id)}/handles`,
-        { operationId: randomUUID(), instanceId: this.instanceId, access },
+        {
+          operationId: randomUUID(),
+          instanceId: this.instanceId,
+          access,
+          ...(this.adapter === 'deepseek' ? {} : { adapter: this.adapter }),
+        },
         signal,
       ),
     )
@@ -141,7 +151,7 @@ export class MeshClient {
       .object({ session: sessionSchema.nullable() })
       .parse(
         await this.request(
-          `/v1/sessions/${encodeURIComponent(id)}?instanceId=${this.instanceId}`,
+          `/v1/sessions/${encodeURIComponent(id)}?instanceId=${this.instanceId}&adapter=${encodeURIComponent(this.adapter)}`,
           undefined,
           signal,
         ),
@@ -158,7 +168,7 @@ export class MeshClient {
         })
         .parse(
           await this.request(
-            `/v1/sessions?instanceId=${this.instanceId}&after=${encodeURIComponent(cursor)}`,
+            `/v1/sessions?instanceId=${this.instanceId}&adapter=${encodeURIComponent(this.adapter)}&after=${encodeURIComponent(cursor)}`,
             undefined,
             signal,
           ),

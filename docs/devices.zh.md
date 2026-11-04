@@ -2,7 +2,7 @@
 
 [English](devices.md) · [部署说明](deployment.zh.md)
 
-每台设备继续安装唯一的 `dsh-contextmesh-handoff` 插件及本仓库锁定的运行时。先启动或升级 ContextMesh 服务端。服务端使用 schema **6**，迁移前备份 PostgreSQL 并停止旧写者，保留原有 Session header 和事件日志。
+每台设备继续安装唯一的 `dsh-contextmesh-handoff` 插件及本仓库锁定的运行时。先启动或升级 ContextMesh 服务端。服务端使用 schema **7**；请按[迁移指南](runtime.zh.md#从-schema-6-迁移到-7)升级并保留校验过的备份，原有 Session header 和事件日志不变。
 
 ## 配对新设备
 

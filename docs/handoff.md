@@ -79,7 +79,7 @@ Recovery clears the reservation and fences the previous writer; resuming remains
 
 ## Upgrade and transport
 
-The current server uses database schema **6**. Back up PostgreSQL and stop old clients before upgrading the server. Startup migrates schemas 1–5 transactionally, preserving existing sessions and adding durable takeover, model relay, device pairing and workspace-transfer records. M0 ordinary storage clients remain usable outside an active handoff; their write-open and ordinary recovery cannot bypass its reservation. Older server binaries cannot run against schema 6. Rolling back requires the backup, not just replacing the binary.
+The current server uses schema **7**. Migration preserves existing native Session headers and events, adds an adapter-scoped catalog index and establishes a compatibility boundary for native formats. Back up PostgreSQL and stop writers before following the [migration guide](runtime.md#migrate-schema-6-to-7). Older servers refuse schema 7; rollback requires the backup. The DSH Session format is unchanged.
 
 Use HTTPS direct connection by default. [SSH tunneling](deployment.md#optional-ssh-tunnel) is an optional alternative for private access through a loopback address; loopback HTTP alone does not encrypt traffic. Paired devices use separate credentials within the server's shared namespace; device IDs route work and do not replace those credentials. Native DSH Host/Origin and owner authentication protect the browser control endpoint. The local Unix socket is accessible only to its OS user.
 
@@ -91,4 +91,4 @@ When a remote conversation has no project, or this device has no matching direct
 
 The folder browser reads directories from the current DSH host: the server page browses server folders, and the local page browses local folders. Navigate folders or breadcrumbs, optionally show hidden folders or jump to a path, and choose **Use this folder** to fill the project directory. Cancelling browsing keeps the setup form unchanged.
 
-Directory handoffs declare `kind: directory` with no commit, while Git handoffs retain commit validation; legacy manifests without a kind remain Git handoffs. Both devices and the server must be updated before using directory handoffs. Database schema 6 adds model-relay records.
+Directory handoffs declare `kind: directory` with no commit, while Git handoffs retain commit validation; legacy manifests without a kind remain Git handoffs. Both devices and the server must be updated before using directory handoffs. Model relay and directory handoff use the existing DSH Session format.

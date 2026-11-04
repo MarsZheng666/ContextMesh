@@ -56,4 +56,4 @@ pnpm cli workspace-rollback TRANSFER_ID --confirm
 
 ## 升级
 
-服务端使用 schema **6**。升级前备份 PostgreSQL 并停止旧写者，同时更新服务端和参与设备。schema 1–5 的迁移保留 Session header 和事件，增加带有效期的文件传输记录。旧服务端拒绝 schema 6，回退需要恢复备份，DSH 原生 Session 格式不变。
+当前服务端使用 schema **7**。迁移保留已有原生 Session header 和事件，增加按适配器查询的索引，并建立不同原生格式的版本兼容边界。升级前备份 PostgreSQL、停止写者，并按[迁移指南](runtime.zh.md#从-schema-6-迁移到-7)执行。旧 Server 拒绝 schema 7，回退需要恢复备份，DSH Session 格式不变。

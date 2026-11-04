@@ -14,6 +14,8 @@ import {
   openSchema,
   MeshError,
   PROTOCOL_VERSION,
+  STORAGE_SCHEMA_VERSION,
+  nativeAdapterId,
 } from '../../../packages/protocol/src/index.js'
 
 export interface ServerOptions {
@@ -149,8 +151,13 @@ export function buildServer(options: ServerOptions) {
       requestId: req.id,
     })
   })
-  const instance = (query: unknown) =>
-    z.object({ instanceId: z.uuid() }).parse(query).instanceId
+  const lookup = (query: unknown) =>
+    z
+      .object({
+        instanceId: z.uuid(),
+        adapter: nativeAdapterId.default('deepseek'),
+      })
+      .parse(query)
   const id = (params: unknown) =>
     z.object({ id: z.string().min(1).max(256) }).parse(params).id
   const schema = (body: z.ZodType) => ({
@@ -168,6 +175,7 @@ export function buildServer(options: ServerOptions) {
       protocolVersion: PROTOCOL_VERSION,
       leaseMs: options.store.leaseMs,
       features: [
+        'native-agent-storage-v1',
         'maintenance-v1',
         'handoff-v1',
         'takeover-v1',
@@ -179,7 +187,7 @@ export function buildServer(options: ServerOptions) {
         'device-pairing-v1',
         'workspace-transfer-v1',
       ],
-      schemaVersion: 6,
+      schemaVersion: STORAGE_SCHEMA_VERSION,
     }
   })
   app.post('/v1/sessions', { schema: schema(createSchema) }, async (req) =>
@@ -190,14 +198,23 @@ export function buildServer(options: ServerOptions) {
       .object({
         instanceId: z.uuid(),
         after: z.string().max(256).default(''),
+        adapter: nativeAdapterId.default('deepseek'),
         limit: z.coerce.number().int().min(1).max(500).default(100),
       })
       .parse(req.query)
-    return options.store.list(ns, q.instanceId, q.after, q.limit)
+    return options.store.list(ns, q.instanceId, q.after, q.limit, q.adapter)
   })
-  app.get('/v1/sessions/:id', async (req) => ({
-    session: await options.store.stat(ns, id(req.params), instance(req.query)),
-  }))
+  app.get('/v1/sessions/:id', async (req) => {
+    const q = lookup(req.query)
+    return {
+      session: await options.store.stat(
+        ns,
+        id(req.params),
+        q.instanceId,
+        q.adapter,
+      ),
+    }
+  })
   app.post(
     '/v1/sessions/:id/handles',
     { schema: schema(openSchema) },
@@ -263,9 +280,13 @@ export function buildServer(options: ServerOptions) {
   )
   app.post('/v1/sessions/:id/recover', async (req) => {
     const r = z
-      .object({ operationId: z.uuid(), confirmStopped: z.literal(true) })
+      .object({
+        operationId: z.uuid(),
+        confirmStopped: z.literal(true),
+        adapter: nativeAdapterId.optional(),
+      })
       .parse(req.body)
-    return options.store.recover(ns, id(req.params), r.operationId)
+    return options.store.recover(ns, id(req.params), r.operationId, r.adapter)
   })
   return app
 }
