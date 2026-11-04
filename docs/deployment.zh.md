@@ -6,7 +6,7 @@
 
 ## 方式 A：通过源码与 Docker Compose 部署
 
-服务端需要 Git 和 Docker Compose。[Dockerfile](../Dockerfile) 在容器内构建 API，宿主机不需要安装 Node、pnpm 或 DSH。
+服务端需要 Git 和 Docker Compose；默认 HTTPS 部署还需服务域名和 TLS 反向代理。[Dockerfile](../Dockerfile) 在容器内构建 API，宿主机不需要安装 Node、pnpm 或 DSH。
 
 ```sh
 git clone https://github.com/MarsZheng666/ContextMesh.git contextmesh-server
@@ -36,15 +36,15 @@ PostgreSQL 仅在 Compose 网络内访问，数据存放在 `postgres-data` 命�
 
 ## 让设备能够访问 API
 
-选择一种连接方式，给每台设备配置它实际能访问的地址：
+**默认使用 HTTPS 直连。** 在 Server 上配置一次 HTTPS 入口，各设备填写同一个服务地址，并用自己的凭据鉴权，无需各自建立 SSH 隧道。
 
-| 连接方式                   | 设备端填写的地址                                       |
-| -------------------------- | ------------------------------------------------------ |
-| DSH 与 Server 在同一台机器 | `http://127.0.0.1:8787`                                |
-| 其他设备通过 SSH 连接      | 该设备的转发地址，例如 `http://127.0.0.1:8788`         |
-| 设备直接通过网络连接       | 自己配置的 HTTPS 地址，例如 `https://mesh.example.com` |
+| 连接方式             | 设备端填写的地址                                       |
+| -------------------- | ------------------------------------------------------ |
+| **默认：HTTPS 直连** | 自己配置的 HTTPS 地址，例如 `https://mesh.example.com` |
+| 服务端同机本地开发   | `http://127.0.0.1:8787`                                |
+| 可选 SSH 隧道        | 该设备的转发地址，例如 `http://127.0.0.1:8788`         |
 
-### 通过 HTTPS 连接
+### HTTPS 直连（默认）
 
 在 API 前配置 TLS 反向代理。例如，直接运行在同一宿主机上的 Caddy 可以使用：
 
@@ -58,7 +58,9 @@ mesh.example.com {
 
 设备端填写 `https://mesh.example.com`。数据库保持私网访问，模型提供方凭据保存在各个 DSH 中，不需要交给代理或 ContextMesh Server。
 
-### 通过 SSH 连接
+### 可选 SSH 隧道
+
+希望 API 仅通过 SSH 访问时可选择此方案，例如没有公网 HTTPS 入口的私有部署。默认 HTTPS 直连无需执行本节配置。
 
 在**每台需要连接的设备上**分别建立隧道：
 
@@ -68,13 +70,13 @@ ssh -N -o ExitOnForwardFailure=yes \
   -L 127.0.0.1:8788:127.0.0.1:8787 user@server
 ```
 
-将 `user@server` 换成实际 SSH 目标。保持隧道运行，该设备的 ContextMesh 地址为 `http://127.0.0.1:8788`；本机 8788 已占用时换一个端口。
+将 `user@server` 换成实际 SSH 目标。选择此方案时，将该设备连接配置中的 HTTPS endpoint 换成本机隧道地址。保持隧道运行，该设备的 ContextMesh 地址为 `http://127.0.0.1:8788`；本机 8788 已占用时换一个端口。
 
 API 不提供 DSH 网页。如果需要访问远程 DSH，应单独转发它的网页端口，并使用该 DSH 打印的登录地址。同时查看两个 DSH 时，一个使用 `127.0.0.1`、另一个使用 `localhost`，避免认证 Cookie 共用同一主机名。
 
 ## 连接首台所有者设备，再配对其他设备
 
-在首台所有者设备[安装插件](getting-started.zh.md)，配置可访问的 API 地址和服务端 `CONTEXTMESH_TOKEN`。其他设备通过所有者 DSH 创建的一次性配对码加入，不再分发所有者 Token。
+在首台所有者设备[安装插件](getting-started.zh.md)，配置服务 HTTPS 地址和服务端 `CONTEXTMESH_TOKEN`。其他设备通过所有者 DSH 创建的一次性配对码加入，不再分发所有者 Token。
 
 所有配对设备共享该 Server 配置的会话命名空间，各自获得独立、可撤销的凭据。DSH 网页登录和模型提供方登录不会自动获得 ContextMesh 访问权，详见[设备权限](devices.zh.md)。
 
@@ -110,7 +112,7 @@ chmod 600 .env
 pnpm start
 ```
 
-使用进程管理器时，从服务端源码目录执行 `node --env-file=.env dist/server.js`。启动时初始化数据库结构，并要求开启 `fsync` 和同步提交。网络连接方式与前面的 HTTPS、SSH 配置相同。
+使用进程管理器时，从服务端源码目录执行 `node --env-file=.env dist/server.js`。启动时初始化数据库结构，并要求开启 `fsync` 和同步提交。使用前面的默认 HTTPS 入口；SSH 隧道仍是可选方案。
 
 `pnpm db:local` 仅是本地开发替代方案：由普通用户在另一终端运行，会在 `127.0.0.1:55432` 启动与 `.env.example` 匹配的 PostgreSQL，数据保存到 `.contextmesh/postgres`。客户端设备或 Docker Compose 部署无需运行它。
 

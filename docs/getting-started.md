@@ -41,14 +41,16 @@ Do not create the server's `.env` in this client checkout. The source CLI loads 
 | DSH data directory         | `DSH_HOME`; this guide uses `$HOME/.dsh-contextmesh`                                     |
 | Model provider and API key | Configure locally in DSH, independently of ContextMesh                                   |
 
-Use your HTTPS service URL, the local SSH-tunnel URL, or server loopback when DSH and the API share a machine. For example, the [SSH forwarding example](deployment.md#connect-through-ssh) uses `http://127.0.0.1:8788` on the connecting device.
+**Use HTTPS direct connection by default**, for example `https://mesh.example.com`. Replace that example with your deployed service URL; each device connects to it with its own credential. No SSH setup is required. The server's [HTTPS configuration](deployment.md#https-direct-connection-default) must be ready before pairing.
+
+For an optional SSH-only deployment, use the local forwarded URL from the [SSH guide](deployment.md#optional-ssh-tunnel). Same-host local development can use `http://127.0.0.1:8787`.
 
 ### First owner: try the connection
 
 In the client checkout, with the `DSH_HOME` above still set:
 
 ```sh
-export CONTEXTMESH_ENDPOINT='http://127.0.0.1:8788'
+export CONTEXTMESH_ENDPOINT='https://mesh.example.com'
 export CONTEXTMESH_TOKEN='your-server-owner-token'
 pnpm cli doctor
 ```
@@ -85,7 +87,7 @@ unset CONTEXTMESH_TOKEN CONTEXTMESH_ENDPOINT
 pnpm cli doctor
 ```
 
-If the server was created with `contextmesh server init`, it already generated a private `owner-connection.json`. Transfer that file securely to the first owner device, preserve mode 600, run `pnpm cli setup`, and choose **private owner connection file** to import it instead of creating another file. Its URL must be reachable from this device; for SSH, update the imported copy's endpoint to the local tunnel address before setup.
+If the server was created with `contextmesh server init`, it already generated a private `owner-connection.json`. Transfer that file securely to the first owner device, preserve mode 600, run `pnpm cli setup`, and choose **private owner connection file** to import it instead of creating another file. For the default HTTPS deployment, keep its service HTTPS endpoint so all devices use the same address. Only for the optional SSH deployment, update the imported copy's endpoint to this device's local tunnel address before setup.
 
 ### Additional devices: pair instead of copying the owner token
 
@@ -97,7 +99,7 @@ If the server was created with `contextmesh server init`, it already generated a
    pnpm cli setup
    ```
 
-3. Select **pairing code**, then enter this device's reachable service URL and the code. The wizard writes `$DSH_HOME/contextmesh/connection.json` with a private credential and stable identity.
+3. Select **pairing code**, then enter the same HTTPS service URL used by the owner device and the code. The wizard writes `$DSH_HOME/contextmesh/connection.json` with a private credential and stable identity.
 4. Run `pnpm cli doctor` to check the connection, then start DSH below.
 
 The code is single-use and expires within ten minutes. See [device access](devices.md) for retries and revocation. Explicit plugin or environment credentials override the saved connection; `doctor` shows which source is in use without printing the credential. `CONTEXTMESH_CONFIG` can select a different private connection file.

@@ -8,7 +8,7 @@ Packages are produced by the **Release packages** workflow. Publication is a sep
 
 ## First device
 
-Inside the unpacked directory:
+First deploy the server with the default HTTPS entry point described below. Then, inside the unpacked directory on each device:
 
 ```sh
 ./bin/contextmesh install "$PWD"
@@ -20,28 +20,32 @@ contextmesh open
 
 `CONTEXTMESH_HOME` selects a different managed directory. Programs live in `releases/<version>`; persistent configuration, model credentials, device identity and local import journals live in `data/dsh`; the server persists conversation history and project mappings. Upgrades do not replace that directory. Keep its backups private. Use `contextmesh dsh --port 3080` to choose a loopback Web port, or `--port 0` for an available port.
 
-The setup wizard accepts a pairing code or an existing private owner connection file. Model login remains in DSH. Open **Remote sessions → Connection setup** to pair an unconfigured device from the browser. That page remains available when the service is offline. Remote writes are blocked while unavailable: there is no hidden local storage fallback or automatic replay of tools/messages.
+The setup wizard accepts a pairing code or an existing private owner connection file. **HTTPS direct connection is the default:** enter the service URL, such as `https://mesh.example.com`; all devices use that URL with their own credentials. No SSH setup is required. Model login remains in DSH. Open **Remote sessions → Connection setup** to pair an unconfigured device from the browser. That page remains available when the service is offline. Remote writes are blocked while unavailable: there is no hidden local storage fallback or automatic replay of tools/messages.
 
 `contextmesh open` opens the current authenticated address. For a headless machine, use `contextmesh open --print-url` and keep that URL private. The normal `status` output does not expose its login token.
 
 ## New server
 
-Docker Compose is required only on the service host. Use a published image pinned by digest:
+Docker Compose is required only on the service host. On that host, unpack its verified runtime package, install the CLI, and use a published image pinned by digest:
 
 ```sh
+./bin/contextmesh install "$PWD"
+export PATH="$HOME/.contextmesh/bin:$PATH"
 contextmesh server init --image ghcr.io/OWNER/IMAGE@sha256:DIGEST --endpoint https://mesh.example.com
 contextmesh server start
 ```
 
 Replace the image and domain with real values. Initialization generates separate PostgreSQL and owner secrets, saves them privately, and never regenerates them on restart. Import `~/.contextmesh/server/owner-connection.json` into the first owner's setup wizard. Do not distribute that owner credential to ordinary devices.
 
-HTTPS setup includes Caddy with persistent certificate storage. DNS must point to this host and certificate issuance must be possible through ports 80/443. Use an existing HTTPS proxy if those conditions do not apply. The API and database stay inside the Compose network. For local access through SSH, initialize with an explicit loopback HTTP origin such as `http://127.0.0.1:8787`; only that API port is published to loopback. Never expose PostgreSQL to the Internet.
+The default HTTPS setup includes Caddy with persistent certificate storage. DNS must point to this host and certificate issuance must be possible through ports 80/443. An existing HTTPS proxy can provide the entry point instead. The API and database stay inside the Compose network; devices connect directly to the HTTPS URL.
+
+For same-host local development or the [optional SSH-only deployment](#optional-ssh-tunnel), initialize with an explicit loopback HTTP origin such as `http://127.0.0.1:8787`; only that API port is published to loopback. Never expose PostgreSQL to the Internet.
 
 ## Another device
 
 1. Install the same platform runtime.
 2. On an owner device, open **Remote sessions → Service connection → Add or revoke a device** and create an invitation.
-3. Run `contextmesh setup` on the new device, or use **Connection setup** in its DSH page. Enter a URL reachable from this device and the one-time code.
+3. Run `contextmesh setup` on the new device, or use **Connection setup** in its DSH page. Enter the same HTTPS service URL used by the owner device and the one-time code. Only for the optional SSH deployment, use this device's local forwarded URL instead.
 4. Configure a local model in DSH. Select a local project directory when needed. The receiving device uses its own selected model.
 
 Each device has its own private credentials and identity. A revoked credential cannot reconnect. Existing environment/plugin credentials override the saved connection; `doctor` and the UI show the effective source without exposing the token. Changes to an already active connection require a controlled restart; use a separate managed home to connect another account.
@@ -57,21 +61,28 @@ contextmesh dsh
 
 Adoption copies configuration and saves a backup; it does not move or delete the original. Dependencies and sockets are excluded. Review custom profile patches for absolute paths and third-party plugins before startup. The managed profile installs only ContextMesh. Model credentials are copied only as part of this explicitly selected local configuration import, never between devices during handoff.
 
-## Connection checks and SSH
+## Connection checks
 
 ```sh
 contextmesh status
 contextmesh doctor
-contextmesh tunnel configure --host my-ssh-alias --local-port 18793 --remote-port 8787
 ```
-
-`my-ssh-alias` comes from your system SSH configuration. Complete the first login in a terminal so keys, agent access and host verification are ready. The supervisor uses SSH batch authentication and strict host checking. It stores no SSH password. Set the service URL to the matching local endpoint, then restart the managed DSH.
-
-The tunnel binds only to loopback, sends keepalives, retries transient exits up to eight times with bounded backoff, and stops retrying on authentication, host-key or port errors. After attention is required, fix the cause and restart the managed instance. It never kills a process that it did not start. A running SSH process alone is not proof of a healthy service; `doctor` also checks the service and authentication.
 
 `doctor` distinguishes missing/invalid settings, DNS, refused connections, TLS verification, timeouts, rejected credentials, database readiness and incompatible protocol versions. Its JSON report excludes credentials, model keys and conversation contents. Do not solve certificate errors by disabling TLS verification. Session ownership and failed-writer recovery remain separate from connectivity.
 
 `contextmesh autostart install` generates a per-user launchd/systemd configuration. It prints the activation step; stop the manually started instance before enabling it. Only the managed instance is supervised. On Linux, user services normally start at login; unattended boot may require the administrator's user-lingering policy.
+
+### Optional SSH tunnel
+
+Use this only for an SSH-only deployment whose API is bound to server loopback; the default HTTPS connection does not need it. If changing an existing connection, finish active work and stop the managed DSH first.
+
+```sh
+contextmesh tunnel configure --host my-ssh-alias --local-port 18793 --remote-port 8787
+```
+
+`my-ssh-alias` comes from your system SSH configuration. Complete the first login in a terminal so keys, agent access and host verification are ready. The supervisor uses SSH batch authentication and strict host checking. It stores no SSH password. Set only the endpoint in this device’s private connection file to `http://127.0.0.1:18793`, retaining its credential and identity, then start the managed DSH.
+
+The tunnel binds only to loopback, sends keepalives, retries transient exits up to eight times with bounded backoff, and stops retrying on authentication, host-key or port errors. After attention is required, fix the cause and restart the managed instance. It never kills a process that it did not start. A running SSH process alone is not proof of a healthy service; `doctor` also checks the service and authentication.
 
 ## Client upgrades
 

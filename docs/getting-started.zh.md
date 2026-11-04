@@ -41,14 +41,16 @@ pnpm exec dsh plugin --profile web add "link:$PWD/packages/handoff-deepseek"
 | DSH 数据目录         | `DSH_HOME`，本指南使用 `$HOME/.dsh-contextmesh`                |
 | 模型提供方与 API Key | 在本机 DSH 中配置，与 ContextMesh 独立                         |
 
-服务地址可使用 HTTPS、本机 SSH 隧道地址，或 DSH 与 API 同机时的服务端回环地址。例如，[SSH 转发示例](deployment.zh.md#通过-ssh-连接)在连接设备上使用 `http://127.0.0.1:8788`。
+**默认使用 HTTPS 直连**，例如 `https://mesh.example.com`，实际使用时替换为已部署的服务地址。各设备用自己的凭据连接同一个地址，无需配置 SSH。配对前先完成服务端的 [HTTPS 配置](deployment.zh.md#https-直连默认)。
+
+选择可选的 SSH 专用部署时，使用 [SSH 指南](deployment.zh.md#可选-ssh-隧道)中的本机转发地址。同机本地开发可使用 `http://127.0.0.1:8787`。
 
 ### 首台所有者设备：先验证连接
 
 在客户端目录中，保持前面的 `DSH_HOME` 已设置：
 
 ```sh
-export CONTEXTMESH_ENDPOINT='http://127.0.0.1:8788'
+export CONTEXTMESH_ENDPOINT='https://mesh.example.com'
 export CONTEXTMESH_TOKEN='your-server-owner-token'
 pnpm cli doctor
 ```
@@ -85,7 +87,7 @@ unset CONTEXTMESH_TOKEN CONTEXTMESH_ENDPOINT
 pnpm cli doctor
 ```
 
-如果 Server 由 `contextmesh server init` 创建，它已经生成私有 `owner-connection.json`。将该文件安全传到首台所有者设备，保持权限 600，运行 `pnpm cli setup` 并选择 **private owner connection file** 导入，无需再手工创建文件。其中的地址必须能从本设备访问；使用 SSH 时，导入前将该副本的 endpoint 改为本机隧道地址。
+如果 Server 由 `contextmesh server init` 创建，它已经生成私有 `owner-connection.json`。将该文件安全传到首台所有者设备，保持权限 600，运行 `pnpm cli setup` 并选择 **private owner connection file** 导入，无需再手工创建文件。默认 HTTPS 部署保留文件中的服务 HTTPS 地址，各设备使用同一个地址。仅选择可选 SSH 部署时，才在导入前将该副本的 endpoint 改为本设备的本机隧道地址。
 
 ### 其他设备：通过配对加入
 
@@ -97,7 +99,7 @@ pnpm cli doctor
    pnpm cli setup
    ```
 
-3. 选择 **pairing code**，输入本设备可访问的 Server 地址和配对码。向导会将独立凭据和稳定身份保存到 `$DSH_HOME/contextmesh/connection.json`。
+3. 选择 **pairing code**，输入与所有者设备相同的 HTTPS 服务地址和配对码。向导会将独立凭据和稳定身份保存到 `$DSH_HOME/contextmesh/connection.json`。
 4. 运行 `pnpm cli doctor` 检查连接，再按下文启动 DSH。
 
 配对码只能使用一次，最长十分钟过期。重试与撤销见[设备权限](devices.zh.md)。插件显式配置和环境凭据优先于保存的连接，`doctor` 会显示配置来源而不输出凭据。可用 `CONTEXTMESH_CONFIG` 指定其他私有连接文件。
