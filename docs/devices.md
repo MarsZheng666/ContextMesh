@@ -8,9 +8,10 @@ Install the single `dsh-contextmesh-handoff` plugin with the pinned runtime on e
 
 On an existing owner device, open **Remote sessions → Service connection → Add or revoke a device**. Enter the new device's name and create a pairing code. The invitation is single-use and expires within ten minutes. Only share it with your trusted device.
 
-On the new device, from the repository run:
+On the new device, use the [client checkout](getting-started.md) and the same `DSH_HOME` that will run DSH. Do not copy the server’s `.env` into that checkout. Then run:
 
 ```sh
+unset CONTEXTMESH_TOKEN CONTEXTMESH_ENDPOINT
 pnpm cli setup
 ```
 
@@ -32,4 +33,4 @@ This is a single-owner service: all paired devices share the server's configured
 
 The panel retains the last known list, marks connection errors and retries reads with capped backoff. Drafts stay in the client. Before sending, the client checks the current service and ownership again; it never queues offline writes or automatically takes over a failed writer. The transport retries ambiguous mutations using the same request identity.
 
-Keep the server and any required tunnel reachable when starting DSH. Restore connectivity before retrying a failed send. An expired writer still requires the explicit [recovery procedure](handoff.md#interruption-and-recovery) after confirming the original process and its tools have stopped. Reconnecting alone does not authorize recovery or tool replay.
+Keep the server and any required tunnel reachable when starting DSH. Restore connectivity before retrying a failed send. An expired writer still requires the explicit [recovery procedure](handoff.md#interrupted-handoffs) after confirming the original process and its tools have stopped. Reconnecting alone does not authorize recovery or tool replay.

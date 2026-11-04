@@ -8,18 +8,7 @@ ContextMesh 可以在两台机器的目录之间交接 DeepSeek Harness 会话�
 
 要求 **Node.js 24.9+、pnpm 11.25.0，以及本仓库锁定的 DSH 0.2.1-rc.3 依赖图**。先执行 `pnpm install --frozen-lockfile` 和 `pnpm build`。`patches/` 中的兼容补丁补充入口冻结、实际所有者关闭和本地沙箱目录绑定。普通全局安装的 DSH 没有这些扩展，交接插件会拒绝不兼容的运行时。升级 DSH 时需要重新评审补丁，上游代码继续遵循 MIT 许可证。
 
-两端分别在仓库根目录执行，为每端使用不同的私有 DSH 数据目录：
-
-```sh
-export DSH_HOME="$HOME/.dsh-contextmesh-m1"
-export CONTEXTMESH_NODE_NAME='我的电脑'
-export CONTEXTMESH_ENDPOINT='http://127.0.0.1:8787'
-export CONTEXTMESH_TOKEN='服务端令牌'
-pnpm exec dsh plugin --profile web add "link:$PWD/packages/handoff-deepseek"
-pnpm exec dsh --profile web --host 127.0.0.1 --port 3080 --no-open
-```
-
-通过 DSH 打印的认证地址打开页面。只需安装这一个完整插件，安装列表显示 `dsh-contextmesh-handoff`；持久化组件作为内部依赖自动加载。之后继续使用本仓库的 `pnpm exec dsh`，确保生命周期补丁生效。令牌只放在主机环境，浏览器通过 DSH 现有认证连接控制。模型凭证和预设在每端独立配置，不通过交接传送 API Key。
+先按[服务端指南](deployment.zh.md)部署一个 Server，再按[设备端安装与配置](getting-started.zh.md)为每台 DSH 安装唯一的 `dsh-contextmesh-handoff` 插件。首台设备配置所有者连接，其他设备通过配对加入；每台设备使用自己的 DSH 主目录、身份和模型配置。后续继续使用兼容运行时启动 DSH。
 
 ### 从双插件安装升级
 

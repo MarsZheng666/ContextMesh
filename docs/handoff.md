@@ -8,18 +8,7 @@ ContextMesh transfers a live DeepSeek Harness session between folders on two dev
 
 ContextMesh requires **Node.js 24.9+, pnpm 11.25.0 and the exact DSH 0.2.1-rc.3 dependency graph in this repository**. Use `pnpm install --frozen-lockfile` and `pnpm build`. The compatibility patches in `patches/` add lifecycle admission, owned disposal, durable continuation and local sandbox workspace binding. An ordinary global DSH installation does not include these extensions; the handoff plugin refuses incompatible runtimes. Review the patches when upgrading DSH. The upstream code remains MIT licensed.
 
-Run these commands from the repository root, on each device, with a **different private DSH home**:
-
-```sh
-export DSH_HOME="$HOME/.dsh-contextmesh-m1"
-export CONTEXTMESH_NODE_NAME='My laptop'
-export CONTEXTMESH_ENDPOINT='http://127.0.0.1:8787'
-export CONTEXTMESH_TOKEN='your-service-token'
-pnpm exec dsh plugin --profile web add "link:$PWD/packages/handoff-deepseek"
-pnpm exec dsh --profile web --host 127.0.0.1 --port 3080 --no-open
-```
-
-Use the authenticated URL printed by DSH. Install only this complete plugin. The installed list shows `dsh-contextmesh-handoff`; the persistence component loads as an internal dependency. Keep using this workspace's `pnpm exec dsh` so the lifecycle patches are loaded. Keep the server token in the host environment; the browser uses DSH's existing authenticated connection. Configure the model provider and preset independently on both devices. API keys are not transferred.
+Deploy one server using the [server guide](deployment.md), then follow [device installation and configuration](getting-started.md) on each DSH device. Install only `dsh-contextmesh-handoff`: the first device uses an owner connection and additional devices pair with it. Keep each device’s DSH home, identity, and model configuration separate, and continue launching the compatible runtime.
 
 ### Upgrade an existing two-plugin installation
 

@@ -1,6 +1,6 @@
 # 接入另一台设备
 
-[English](devices.md) · [部署说明](deployment.md)
+[English](devices.md) · [部署说明](deployment.zh.md)
 
 每台设备继续安装唯一的 `dsh-contextmesh-handoff` 插件及本仓库锁定的运行时。先启动或升级 ContextMesh 服务端。服务端使用 schema **6**，迁移前备份 PostgreSQL 并停止旧写者，保留原有 Session header 和事件日志。
 
@@ -8,9 +8,10 @@
 
 在已有的管理设备中打开“远程会话 → 服务连接 → 添加或撤销设备”，输入新设备名称，生成配对码。邀请只能兑换一次，最长十分钟失效，只分享给你信任的自有设备。
 
-在新设备的仓库目录运行：
+在新设备的[客户端源码目录](getting-started.zh.md)中，设置与该设备 DSH 一致的 `DSH_HOME`。不要复制服务端 `.env` 到该目录，然后运行：
 
 ```sh
+unset CONTEXTMESH_TOKEN CONTEXTMESH_ENDPOINT
 pnpm cli setup
 ```
 
