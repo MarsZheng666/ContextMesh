@@ -1,3 +1,8 @@
+import {
+  ToolBoundary,
+  stageContinuation,
+  wakeContinuation,
+} from './continuation.js'
 import { WorkspaceTransfers } from './workspace-transfer.js'
 import { fileReferences } from './file-attachments.js'
 import type { TransferRecord } from '../../protocol/src/transfers.js'
@@ -24,6 +29,7 @@ import type { ModelRoute } from '../../protocol/src/model-relay.js'
 import { SessionId, Session, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { setSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
 import type {} from '@deepseek-ai/dsh-jobs'
+import type {} from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-terminal'
 import type {} from '@deepseek-ai/dsh-schedule'
 import type {} from '@deepseek-ai/dsh-agent-preset-registry'
@@ -62,6 +68,7 @@ const bindingSchema = z.object({
 const stateSchema = z.object({
   version: z.literal(1),
   nodeId: z.uuid(),
+  receiverModel: modelRoute.optional(),
   bindings: z.record(z.string(), bindingSchema),
   workspaceTransfers: z.record(z.string(), z.uuid()).default({}),
   modelBudgets: z
@@ -80,6 +87,8 @@ const stateSchema = z.object({
 })
 const commandSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('status') }),
+  z.object({ action: z.literal('prepare-upgrade') }),
+  z.object({ action: z.literal('cancel-upgrade') }),
   z.object({
     action: z.literal('workspace-plan'),
     sessionId: z.string(),
@@ -257,6 +266,7 @@ export class HandoffCoordinator {
   private readonly abort = new AbortController()
   private readonly controls = new Map<string, AgentControl>()
   private readonly transfers = new Map<string, LocalTransfer>()
+  private readonly toolBoundary = new ToolBoundary()
   private readonly jobs = new Map<string, Promise<unknown>>()
   private readonly errors = new Map<string, string>()
   private readonly fenced = new Set<string>()
@@ -274,6 +284,9 @@ export class HandoffCoordinator {
   private heartbeatTimer: ReturnType<typeof setInterval> | undefined
   private catalogRefreshed = 0
   private closing = false
+  private upgrading = false
+  private upgradePreparing?: Promise<{ ready: true }>
+  private readonly upgradeControls = new Set<string>()
   private constructor(
     readonly ctx: Context,
     readonly config: RuntimeConfig,
@@ -329,6 +342,8 @@ export class HandoffCoordinator {
       throw new Error(
         'ContextMesh M1 requires the pinned DSH lifecycle and workspace patches; install with the ContextMesh lockfile',
       )
+    if (ctx.agentLoop.continuationControlVersion !== 1)
+      throw new Error('Install the pinned DSH continuation bridge')
     const capabilities = await ctx.contextmesh.client.capabilities()
     if (
       !capabilities.features?.includes('handoff-v1') ||
@@ -336,10 +351,12 @@ export class HandoffCoordinator {
       !capabilities.features.includes('directory-handoff-v1') ||
       !capabilities.features.includes('model-relay-v1') ||
       !capabilities.features.includes('device-pairing-v1') ||
-      !capabilities.features.includes('workspace-transfer-v1')
+      !capabilities.features.includes('workspace-transfer-v1') ||
+      !capabilities.features.includes('receiver-model-handoff-v1') ||
+      !capabilities.features.includes('handoff-continuation-v1')
     )
       throw new Error(
-        'Upgrade ContextMesh server: handoff-v1, takeover-v1, directory-handoff-v1, model-relay-v1 and device-pairing-v1 are required',
+        'Upgrade ContextMesh server: handoff-v1, takeover-v1, directory-handoff-v1, model-relay-v1, device-pairing-v1, workspace-transfer-v1 and receiver-model-handoff-v1 and handoff-continuation-v1 are required',
       )
     await mkdir(config.stateDir, { recursive: true, mode: 0o700 })
     const path = join(config.stateDir, 'node.json')
@@ -386,6 +403,15 @@ export class HandoffCoordinator {
     await service.relay
       .reconcile()
       .catch((error) => service.warn('model-relay', error))
+    ctx.on('tools/execute', async (exec, next) => {
+      if (!exec.agent || exec.parent) return next()
+      const leave = await service.toolBoundary.enter(exec.agent.id, exec.signal)
+      try {
+        return await next()
+      } finally {
+        leave()
+      }
+    })
     ctx.on('llm/stream', async function* (options, next) {
       const budget =
         options.sessionId && service.state.modelBudgets[options.sessionId]
@@ -585,6 +611,7 @@ export class HandoffCoordinator {
     return control
   }
   private release(id: string) {
+    this.toolBoundary.release(id)
     if (this.fenced.has(id)) return
     this.controls.get(id)?.release()
     this.controls.delete(id)
@@ -734,11 +761,6 @@ export class HandoffCoordinator {
     projectId?: string,
     takeover?: TakeoverRecord,
   ) {
-    if (takeover?.targetModel)
-      throw new MeshError(
-        'HANDOFF_MODEL_FIXED',
-        'handoff keeps the current conversation model; change it separately with the native model selector',
-      )
     if (this.closing) throw new Error('ContextMesh is stopping')
     const native = this.ctx.get('sessionController')
     if (native && native.lifecycleControlVersion !== 1)
@@ -765,14 +787,17 @@ export class HandoffCoordinator {
         this.abort.signal,
       )
       control.ownedHandle()
-      if (takeover && !pending(agent) && agent.status === 'running')
-        agent.cancel({ kind: 'user' }, { keepInbox: true })
       if (pending(agent))
         throw new MeshError(
           'PENDING_INPUT',
           'pending input must be handled before handoff',
         )
-      await bounded(agent.whenIdle(), this.config.waitIdleMs, this.abort.signal)
+      if (!takeover)
+        await bounded(
+          agent.whenIdle(),
+          this.config.waitIdleMs,
+          this.abort.signal,
+        )
       const { mapping, relativeCwd } = await this.localMapping(
         agent,
         projectId ?? this.state.bindings[sessionId]?.projectId,
@@ -819,6 +844,9 @@ export class HandoffCoordinator {
         adapter: 'deepseek',
         workspace: workspace.proof,
         model: this.route(agent),
+        modelPolicy: 'receiver',
+        ...(takeover ? { resumePolicy: 'interrupted' } : {}),
+        ...(takeover?.targetModel ? { targetModel: takeover.targetModel } : {}),
         sandbox: {
           mode: resolved.mode,
           relativeRoot: relativeInside(workspace.root, resolved.workspaceRoot),
@@ -898,6 +926,7 @@ export class HandoffCoordinator {
     return result
   }
   async tick() {
+    if (this.upgrading) return
     if (this.closing) return
     if (this.polling) return this.polling
     this.polling = (async () => {
@@ -951,7 +980,44 @@ export class HandoffCoordinator {
       })
     return this.polling
   }
+  private receiverSelection() {
+    const selected =
+      this.state.receiverModel ??
+      this.ctx.get('agentDefaultModel')?.currentSelection()
+    const parsed = modelRoute.safeParse(selected)
+    return parsed.success ? parsed.data : undefined
+  }
+  private receiverModel() {
+    const selected = this.receiverSelection()
+    if (!selected)
+      throw new MeshError(
+        'RECEIVER_MODEL_REQUIRED',
+        'select a model on the receiving device first',
+      )
+    return selected
+  }
+  private async rememberReceiverModel(selected: ModelRoute) {
+    const previous = this.state.receiverModel
+    this.state.receiverModel = modelRoute.parse(selected)
+    try {
+      await this.save()
+    } catch (error) {
+      this.state.receiverModel = previous
+      throw error
+    }
+  }
+  private changesModel(manifest: HandoffManifest) {
+    return (
+      !!manifest.targetModel &&
+      JSON.stringify(manifest.targetModel) !== JSON.stringify(manifest.model)
+    )
+  }
   private async preflight(record: HandoffRecord) {
+    const targetModel =
+      record.manifest.targetModel ??
+      (record.manifest.modelPolicy === 'receiver'
+        ? this.receiverModel()
+        : undefined)
     const mapping = await this.mapping(record.manifest.workspace.projectId)
     const fileTransfer = record.manifest.transferId
       ? await this.files.approved(
@@ -996,7 +1062,7 @@ export class HandoffCoordinator {
         presets?.serviceFor({ ctx: context }, 'llm') ??
         context.get('llm') ??
         this.ctx.llm
-      const currentModel = record.manifest.targetModel ?? record.manifest.model
+      const currentModel = targetModel ?? record.manifest.model
       try {
         await llm.prepareCall(
           this.options({ ...record.manifest, model: currentModel }),
@@ -1004,10 +1070,10 @@ export class HandoffCoordinator {
       } catch (error) {
         throw new MeshError(
           'HANDOFF_MODEL_UNAVAILABLE',
-          `Receiving device cannot use the current model ${currentModel.provider}/${currentModel.model}. Configure that same model and its credentials before handoff. ${message(error)}`,
+          `Receiving device cannot use its selected model ${currentModel.provider}/${currentModel.model}. Configure that model or choose another on this device. ${message(error)}`,
         )
       }
-      if (record.manifest.targetModel) {
+      if (this.changesModel({ ...record.manifest, targetModel })) {
         if (this.ctx.get('sessionController')?.modelRelayVersion !== 1)
           throw new MeshError(
             'MODEL_RELAY_UNSUPPORTED',
@@ -1029,10 +1095,15 @@ export class HandoffCoordinator {
           await inspectModel(
             llm,
             snapshot,
-            record.manifest.targetModel,
+            targetModel!,
             this.abort.signal,
             undefined,
-            { profile: this.profile(record.manifest.targetModel) },
+            {
+              profile: this.profile(targetModel!),
+              allowPendingTools:
+                record.state === 'requested' &&
+                record.manifest.resumePolicy === 'interrupted',
+            },
           )
         } finally {
           await handle.close()
@@ -1056,7 +1127,7 @@ export class HandoffCoordinator {
     } finally {
       await reader.close()
     }
-    return { mapping, workspace }
+    return { mapping, workspace, targetModel }
   }
   private async advance(record: HandoffRecord) {
     const source =
@@ -1065,12 +1136,31 @@ export class HandoffCoordinator {
     const target =
       record.targetNodeId === this.client.nodeId &&
       record.targetInstanceId === this.client.mesh.instanceId
+    if (
+      record.state === 'completed' &&
+      record.targetNodeId === this.client.nodeId &&
+      record.manifest.continuation
+    ) {
+      const agent = this.ctx.agents.get(SessionId(record.sessionId))
+      if (agent && !this.ctx.agents.isControlled(agent.id)) {
+        this.ctx.contextmesh.writerClaim(agent.id)
+        wakeContinuation(agent, record)
+      }
+      return
+    }
     if (!source && !target) return
     let local = this.transfers.get(record.id)
     if (record.state === 'requested' && target) {
       try {
         const checked = await this.preflight(record)
-        await this.client.preflight(record, checked.workspace.proof)
+        await this.client.preflight(
+          record,
+          checked.workspace.proof,
+          undefined,
+          record.manifest.modelPolicy === 'receiver'
+            ? checked.targetModel
+            : undefined,
+        )
       } catch (error) {
         await this.client.fail(record, 'target-preflight', message(error))
         this.warn(record.sessionId, error)
@@ -1094,11 +1184,20 @@ export class HandoffCoordinator {
               'CLOSE_UNCONFIRMED',
               'source runtime owner is missing',
             )
-          await bounded(
-            agent.whenIdle(),
-            this.config.waitIdleMs,
-            this.abort.signal,
-          )
+          if (!record.manifest.resumePolicy)
+            await bounded(
+              agent.whenIdle(),
+              this.config.waitIdleMs,
+              this.abort.signal,
+            )
+          if (record.manifest.resumePolicy === 'interrupted')
+            await this.toolBoundary.pause(
+              agent.id,
+              AbortSignal.any([
+                this.abort.signal,
+                AbortSignal.timeout(this.config.waitIdleMs),
+              ]),
+            )
           const fileTransfer = record.manifest.transferId
             ? await this.files.approved(
                 record.manifest.transferId,
@@ -1127,6 +1226,19 @@ export class HandoffCoordinator {
               'WORKSPACE_MISMATCH',
               'source project changed during preflight',
             )
+          if (record.manifest.resumePolicy === 'interrupted') {
+            if (agent.status === 'running')
+              agent.cancel(
+                { kind: 'hook', reason: 'contextmesh-handoff:' + record.id },
+                { keepInbox: true },
+              )
+            await bounded(
+              agent.whenIdle(),
+              this.config.waitIdleMs,
+              this.abort.signal,
+            )
+            await this.resources(agent, !!fileTransfer)
+          }
           await this.ctx.sessions.flush(agent.session)
           local.phase = 'uncertain'
           await local.control.stop()
@@ -1216,12 +1328,14 @@ export class HandoffCoordinator {
         )
         local.agent = owned
         local.phase = 'target-live'
+        local.control.run(() => stageContinuation(owned.agent, current))
         await this.ctx.sessions.flush(owned.agent.session)
         const snapshot = await this.client.mesh.stat(record.sessionId)
         if (!snapshot) throw new Error('restored session disappeared')
         await this.client.complete(current, snapshot.nextSeq)
         this.fenced.delete(record.sessionId)
         this.release(record.sessionId)
+        wakeContinuation(owned.agent, current)
         this.errors.delete(record.sessionId)
         await this.publish(owned.agent, mapping.projectId).catch((error) =>
           this.warn(record.sessionId, error),
@@ -1230,6 +1344,7 @@ export class HandoffCoordinator {
         const fresh = await this.client.get(record.id)
         if (fresh.state === 'completed') {
           this.release(record.sessionId)
+          if (local.agent) wakeContinuation(local.agent.agent, fresh)
           return
         }
         if (isMeshError(error) && error.status >= 500) throw error
@@ -1262,6 +1377,7 @@ export class HandoffCoordinator {
       if (snapshot) {
         await this.client.complete(record, snapshot.nextSeq)
         this.release(record.sessionId)
+        wakeContinuation(local.agent.agent, record)
       }
     } else if (
       (record.state === 'cancelled' || record.state === 'failed') &&
@@ -1321,16 +1437,18 @@ export class HandoffCoordinator {
           this.ctx.get('agentPresets')?.serviceFor(agent, 'llm') ??
           agentCtx.get('llm') ??
           this.ctx.llm
-        const budget = await inspectModel(
-          llm,
-          agent.session,
-          manifest.targetModel,
-          this.abort.signal,
-          agent.options.maxTokens,
-          { profile: this.profile(manifest.targetModel) },
-        )
+        if (this.changesModel(manifest)) {
+          const budget = await inspectModel(
+            llm,
+            agent.session,
+            manifest.targetModel,
+            this.abort.signal,
+            agent.options.maxTokens,
+            { profile: this.profile(manifest.targetModel) },
+          )
+          await this.guardModel(id, budget)
+        }
         native.installModelSelection(agent, manifest.targetModel)
-        await this.guardModel(id, budget)
       }
       this.state.bindings[id] = binding
       await this.save()
@@ -1662,11 +1780,9 @@ export class HandoffCoordinator {
     operationId: string = randomUUID(),
     targetModel?: ModelRoute,
   ) {
-    if (targetModel)
-      throw new MeshError(
-        'HANDOFF_MODEL_FIXED',
-        'take over using the current model, then change models separately',
-      )
+    const selected = targetModel
+      ? modelRoute.parse(targetModel)
+      : this.receiverModel()
     const session = (await this.client.sessions()).find(
       (s) => s.id === sessionId,
     )
@@ -1686,12 +1802,16 @@ export class HandoffCoordinator {
         'choose a project for this session first',
       )
     await mappedDirectory(await this.mapping(session.projectId), '')
-    return this.client.takeover(
+    const intent = await this.client.takeover(
       sessionId,
       session.activeNodeId,
       operationId,
-      targetModel,
+      selected,
     )
+    // A confirmed local picker choice becomes this device's receiving preference.
+    // Incoming handoffs never overwrite that preference.
+    if (targetModel) await this.rememberReceiverModel(selected)
+    return intent
   }
   async takeoverStatus(id: string) {
     const intent = await this.client.getTakeover(id)
@@ -1717,6 +1837,23 @@ export class HandoffCoordinator {
   }
   async command(input: unknown): Promise<unknown> {
     const command = commandSchema.parse(input)
+    if (command.action === 'prepare-upgrade') return this.prepareUpgrade()
+    if (command.action === 'cancel-upgrade') {
+      await this.upgradePreparing?.catch(() => {})
+      if (!this.upgrading) return { cancelled: false }
+      this.upgrading = false
+      await this.ctx.contextmesh.pauseAcquisitions(false)
+      for (const id of this.upgradeControls)
+        if (!this.fenced.has(id)) this.release(id)
+      this.upgradeControls.clear()
+      return { cancelled: true }
+    }
+    if (this.upgrading && !['status', 'history'].includes(command.action))
+      throw new MeshError(
+        'MAINTENANCE',
+        'This device is preparing for an upgrade',
+        503,
+      )
     switch (command.action) {
       case 'pair-device':
         return new DeviceClient(this.client.mesh).create(
@@ -1757,9 +1894,11 @@ export class HandoffCoordinator {
         return models
       }
       case 'select-model':
-        return this.exclusive(command.sessionId, () =>
-          this.relay.select(command),
-        )
+        return this.exclusive(command.sessionId, async () => {
+          const result = await this.relay.select(command)
+          await this.rememberReceiverModel(result.selected)
+          return result
+        })
       case 'model-relay-status':
         return this.relay.client.get(command.operationId)
       case 'workspace-plan':
@@ -1790,8 +1929,8 @@ export class HandoffCoordinator {
       case 'handoff':
         if (command.targetModel)
           throw new MeshError(
-            'HANDOFF_MODEL_FIXED',
-            'handoff keeps the current conversation model',
+            'HANDOFF_MODEL_ON_RECEIVER',
+            'choose the model on the receiving device',
           )
         return this.exclusive(command.sessionId, () =>
           this.begin(
@@ -1842,10 +1981,86 @@ export class HandoffCoordinator {
       }
     }
   }
+  private prepareUpgrade(): Promise<{ ready: true }> {
+    if (this.upgradePreparing) return this.upgradePreparing
+    if (this.upgrading) return Promise.resolve({ ready: true })
+    this.upgradePreparing = this.prepareUpgradeOnce().finally(() => {
+      this.upgradePreparing = undefined
+    })
+    return this.upgradePreparing
+  }
+  private async prepareUpgradeOnce(): Promise<{ ready: true }> {
+    const busy = () =>
+      this.ctx.agents
+        .list()
+        .some((a) => a.status === 'running' || pending(a) > 0) ||
+      this.jobs.size > 0 ||
+      this.retiring.size > 0 ||
+      this.pendingRequests.size > 0 ||
+      this.relay.pending.size > 0 ||
+      this.files.busy ||
+      this.controls.size > 0
+    if (busy())
+      throw new MeshError(
+        'UPGRADE_BUSY',
+        'Finish running tasks, queued messages, handoffs, model changes and file operations first.',
+      )
+    const state = await this.status()
+    // Completed transfers retain their AgentHandle for orderly disposal. They
+    // no longer represent active work, but unknown/uncertain transfers do.
+    const pendingTransfers = () =>
+      [...this.transfers.keys()].some(
+        (id) =>
+          !state.handoffs.some((h) => h.id === id && h.state === 'completed'),
+      )
+    if (
+      pendingTransfers() ||
+      state.handoffs.some(
+        (h) => !['completed', 'cancelled', 'failed'].includes(h.state),
+      ) ||
+      state.modelRelays.length
+    )
+      throw new MeshError(
+        'UPGRADE_BUSY',
+        'Resolve pending handoffs and model changes first.',
+      )
+    this.upgrading = true
+    await this.ctx.contextmesh.pauseAcquisitions(true)
+    try {
+      await this.polling
+      if (busy() || pendingTransfers())
+        throw new MeshError(
+          'UPGRADE_BUSY',
+          'Work became active during preflight',
+        )
+      for (const agent of this.ctx.agents.list()) {
+        if (agent.status === 'running' || pending(agent) > 0)
+          throw new MeshError('UPGRADE_BUSY', 'A task started during preflight')
+        const control = this.freeze(agent.id)
+        this.upgradeControls.add(agent.id)
+        await bounded(
+          control.quiesce(),
+          this.config.waitIdleMs,
+          this.abort.signal,
+        )
+        await this.resources(agent, true)
+        await this.ctx.sessions.flush(agent.session)
+      }
+      return { ready: true }
+    } catch (error) {
+      this.upgrading = false
+      await this.ctx.contextmesh.pauseAcquisitions(false)
+      for (const id of this.upgradeControls)
+        if (!this.fenced.has(id)) this.release(id)
+      this.upgradeControls.clear()
+      throw error
+    }
+  }
   async status() {
     return {
       workspaceTransfer: true,
       modelPreflight: true,
+      receiverModel: this.receiverSelection(),
       connection: {
         endpoint: this.client.mesh.endpoint,
         ...(await new DeviceClient(this.client.mesh).identity()),

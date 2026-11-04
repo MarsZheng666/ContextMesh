@@ -1,19 +1,15 @@
-FROM node:24-bookworm-slim AS build
+FROM node:24.15.0-bookworm-slim AS build
 WORKDIR /app
 RUN corepack enable
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-COPY packages/adapter-deepseek/package.json packages/adapter-deepseek/package.json
-RUN pnpm install --frozen-lockfile --ignore-scripts
 COPY . .
-RUN pnpm exec tsup
+RUN pnpm install --frozen-lockfile
+RUN pnpm exec tsup && pnpm exec tsx scripts/release/build-runtime.ts /runtime --server-only
 
-FROM node:24-bookworm-slim AS runtime
+FROM node:24.15.0-bookworm-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production CONTEXTMESH_HOST=0.0.0.0
-RUN corepack enable
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN pnpm install --prod --frozen-lockfile --ignore-scripts
-COPY --from=build /app/dist ./dist
+COPY --from=build --chown=node:node /runtime/ ./
 USER node
 EXPOSE 8787
+HEALTHCHECK --interval=15s --timeout=5s CMD node -e "fetch('http://127.0.0.1:8787/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 CMD ["node", "dist/server.js"]

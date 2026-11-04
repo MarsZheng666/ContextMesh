@@ -1,8 +1,7 @@
 diff --git a/lib/index.js b/lib/index.js
-index 332c382bc90be78ab38b595c99f046f9d15d3f27..8ea42c22ffc9b7dd74a3701d2e216fafc8457cda 100644
 --- a/lib/index.js
 +++ b/lib/index.js
-@@ -71,7 +71,8 @@ var ReactLoopInbox = class {
+@@ -71,7 +71,8 @@
  	projections;
  	session;
  	dispatch;
@@ -12,7 +11,7 @@ index 332c382bc90be78ab38b595c99f046f9d15d3f27..8ea42c22ffc9b7dd74a3701d2e216faf
  		this.projections = projections;
  		this.session = session;
  		this.dispatch = dispatch;
-@@ -156,7 +157,9 @@ var ReactLoopInbox = class {
+@@ -156,7 +157,9 @@
  	* @param inserted - messages to insert at the resolved position.
  	* @returns messages removed by the splice.
  	*/
@@ -23,7 +22,7 @@ index 332c382bc90be78ab38b595c99f046f9d15d3f27..8ea42c22ffc9b7dd74a3701d2e216faf
  		return this.mutate(target, start, deleteCount, inserted, true);
  	}
  	/** Locate one pending identity across both owned lists. */
-@@ -777,7 +780,7 @@ var ReactLoopAgent = class {
+@@ -777,7 +780,7 @@
  		this.dispatch = agentEvents(loopCtx, this);
  		this.scope = createScope(loopCtx, this);
  		this.ctx = this.scope.ctx;
@@ -32,15 +31,29 @@ index 332c382bc90be78ab38b595c99f046f9d15d3f27..8ea42c22ffc9b7dd74a3701d2e216faf
  		/* v8 ignore next -- the loop registers its own turnBoundary unit, so the key is always present */
  		const lastTurn = this.loopCtx.sessionProjections.stateOf(session, "turnBoundary")?.lastTurn ?? 0;
  		this.phase = {
-@@ -798,6 +801,7 @@ var ReactLoopAgent = class {
+@@ -797,7 +800,21 @@
+ 		const status = this.status;
  		if (status !== previousStatus) this.dispatch.emit("agent/status", { status });
  	}
++    continuationControlVersion = 1;
++    // Host-only staging while lifecycle control holds input closed. The inbox
++    // event and its identity survive a lost completion response or restart.
++    stageContinuation(message) {
++        this.loopCtx.agents.assertLifecycleAllowed(this.id);
++        if (this.status !== "idle") throw new Error("continuation staging requires an idle agent");
++        if (this.inbox.nextTurn.some(m => m.id === message.id) || this.inbox.nextStep.some(m => m.id === message.id)) return;
++        this.inbox.spliceRuntime("next-turn", Infinity, 0, [message]);
++    }
++    wakePending() {
++        this.loopCtx.agents.assertInputAllowed(this.id);
++        if (this.status === "idle" && this.inbox.hasPending) this.wakeDriver();
++    }
  	send(message, target, wakeup) {
 +        this.loopCtx.agents.assertInputAllowed(this.id);
  		const wakingAfterAbort = wakeup && this.phase.kind !== "idle" && this.phase.abort.signal.aborted;
  		const resolvedTarget = wakingAfterAbort ? "next-turn" : target;
  		this.inbox.splice(resolvedTarget, Infinity, 0, [message]);
-@@ -820,6 +824,7 @@ var ReactLoopAgent = class {
+@@ -820,6 +837,7 @@
  		if (this.phase.kind !== "idle") this.phase.abort.abort(cause);
  	}
  	runMaintenance(job) {
@@ -48,7 +61,7 @@ index 332c382bc90be78ab38b595c99f046f9d15d3f27..8ea42c22ffc9b7dd74a3701d2e216faf
  		if (this.phase.kind !== "idle") throw new Error(`agent "${this.id}" already has active work`);
  		const done = Promise.withResolvers();
  		const maintenance = {
-@@ -1163,7 +1168,7 @@ var ReactLoopAgent = class {
+@@ -1163,7 +1181,7 @@
  				if (finish.kind === "max-tokens") return { kind: "max-tokens" };
  				const toolCalls = message.content.filter((block) => block.type === "tool-call");
  				if (toolCalls.length === 0) return { kind: "completed" };
@@ -57,22 +70,23 @@ index 332c382bc90be78ab38b595c99f046f9d15d3f27..8ea42c22ffc9b7dd74a3701d2e216faf
  				return concluded ? { kind: "completed" } : null;
  			} catch (error) {
  				if (!live.ended) live.abandon();
-@@ -1541,6 +1546,7 @@ function validateConfiguredAgents(agents) {
+@@ -1541,6 +1559,8 @@
  }
  /** Concrete agent factory and driver service. */
  var AgentLoop = class extends Service {
++ continuationControlVersion = 1;
 + controlVersion = 1;
  	static inject = [
  		"agents",
  		"sessions",
 diff --git a/lib/types/index.d.ts b/lib/types/index.d.ts
-index be9292f235ee91af25cb92ea853a16865b87875a..47321a6e22e890c0eb19ca23a87a2186c421eee8 100644
 --- a/lib/types/index.d.ts
 +++ b/lib/types/index.d.ts
-@@ -97,6 +97,7 @@ export interface Config {
+@@ -97,6 +97,8 @@
  }
  /** Concrete agent factory and driver service. */
  export declare class AgentLoop extends Service implements AgentFactory {
++    readonly continuationControlVersion: 1;
 +    readonly controlVersion: 1;
      static inject: string[];
      /** Runtime schema for declarative agents. */

@@ -73,6 +73,8 @@ export class HandoffClient {
         projectSetupVersion: 1,
         directoryHandoffVersion: 1,
         modelRelayVersion: 1,
+        receiverModelVersion: 1,
+        continuationVersion: 1,
         workspaceTransferVersion: 1,
         models,
         harness: '0.2.1-rc.3',
@@ -240,11 +242,13 @@ export class HandoffClient {
     record: HandoffRecord,
     proof: HandoffManifest['workspace'],
     operationId: string = randomUUID(),
+    targetModel?: HandoffManifest['model'],
   ) {
     return recordSchema.parse(
       await this.mesh.request(`/v1/handoffs/${record.id}/preflight`, {
         ...this.update(record, operationId),
         proof,
+        ...(targetModel ? { targetModel } : {}),
       }),
     )
   }

@@ -65,3 +65,62 @@ export async function writeConnection(
     await unlink(tmp).catch(() => {})
   }
 }
+
+export interface ConnectionOptions {
+  endpoint?: string
+  token?: string
+  tokenEnv?: string
+  configPath?: string
+}
+/** Resolve each field once; callers expose sources, never credentials. */
+export async function resolveConnection(
+  options: ConnectionOptions = {},
+  env: NodeJS.ProcessEnv = process.env,
+) {
+  const path = options.configPath ?? connectionPath()
+  const explicitToken =
+    (options.token ?? env[options.tokenEnv ?? 'CONTEXTMESH_TOKEN']) || undefined
+  const saved =
+    explicitToken && (options.endpoint ?? env.CONTEXTMESH_ENDPOINT)
+      ? undefined
+      : await readConnection(path)
+  const endpoint =
+    options.endpoint ?? env.CONTEXTMESH_ENDPOINT ?? saved?.endpoint
+  const token = explicitToken ?? saved?.token
+  const source = {
+    endpoint: options.endpoint
+      ? 'plugin'
+      : env.CONTEXTMESH_ENDPOINT
+        ? 'environment'
+        : saved
+          ? path
+          : 'missing',
+    token: options.token
+      ? 'plugin'
+      : explicitToken
+        ? 'environment'
+        : saved
+          ? path
+          : 'missing',
+  }
+  return {
+    endpoint,
+    token,
+    name: explicitToken ? undefined : saved?.name,
+    nodeId: explicitToken ? undefined : saved?.nodeId,
+    source,
+    path,
+    warnings: explicitToken
+      ? ['Environment or plugin credentials override the saved connection.']
+      : [],
+  }
+}
+
+export function safeEndpoint(value?: string) {
+  try {
+    const u = new URL(value ?? '')
+    return u.origin + (u.pathname === '/' ? '' : u.pathname)
+  } catch {
+    return undefined
+  }
+}

@@ -1,3 +1,4 @@
+import { runRuntime } from './runtime.js'
 import { setup } from './setup.js'
 import { readConnection } from '../../../packages/client/src/config.js'
 import { randomUUID } from 'node:crypto'
@@ -6,7 +7,9 @@ import { MeshError } from '../../../packages/protocol/src/index.js'
 import { runLocal } from './local.js'
 const input = process.argv.slice(2)
 const handled = await (async () =>
-  (await setup(input)) || (await runLocal(input)))().catch((error) => {
+  (await runRuntime(input)) ||
+  (await setup(input)) ||
+  (await runLocal(input)))().catch((error) => {
   console.error(error instanceof Error ? error.message : String(error))
   process.exitCode = 1
   return true

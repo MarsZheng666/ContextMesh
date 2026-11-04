@@ -65,6 +65,34 @@ export class BasePostgresStore {
     await assertDurability(this.pool)
     await migrate(this.pool)
   }
+  async maintenance(ns: string, enabled?: boolean) {
+    if (enabled !== undefined)
+      await this.tx(async (db) => {
+        await db.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [
+          'maintenance:' + ns,
+        ])
+        await db.query(
+          'INSERT INTO cm_maintenance(namespace,enabled) VALUES($1,$2) ON CONFLICT(namespace) DO UPDATE SET enabled=$2,updated_at=clock_timestamp()',
+          [ns, enabled],
+        )
+      })
+    const result = await this.pool.query(
+      `SELECT
+      COALESCE((SELECT enabled FROM cm_maintenance WHERE namespace=$1),false) AS enabled,
+      (SELECT count(*)::int FROM cm_sessions WHERE namespace=$1 AND active_handle IS NOT NULL) AS writers,
+      (SELECT count(*)::int FROM cm_sessions WHERE namespace=$1 AND (active_handoff IS NOT NULL OR active_model_relay IS NOT NULL OR recovery_required)) AS unresolved,
+      (SELECT count(*)::int FROM cm_takeovers WHERE namespace=$1 AND state='requested') AS takeovers,
+      (SELECT max(version)::int FROM cm_schema) AS schema`,
+      [ns],
+    )
+    return result.rows[0] as {
+      enabled: boolean
+      writers: number
+      unresolved: number
+      takeovers: number
+      schema: number
+    }
+  }
   async stop(): Promise<void> {
     await this.pool.end()
   }
@@ -137,6 +165,25 @@ export class BasePostgresStore {
           )
         return JSON.parse(prior.result) as T
       }
+      await db.query(
+        'SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))',
+        ['maintenance:' + ns],
+      )
+      const kind = Array.isArray(payload) ? payload[0] : undefined
+      if (
+        !['append', 'flush', 'close'].includes(kind) &&
+        (
+          await db.query(
+            'SELECT enabled FROM cm_maintenance WHERE namespace=$1',
+            [ns],
+          )
+        ).rows[0]?.enabled
+      )
+        throw new MeshError(
+          'MAINTENANCE',
+          'The server is draining for maintenance. Existing writers may finish saving.',
+          503,
+        )
       const result = await body(db)
       await db.query(
         'INSERT INTO cm_operations(namespace,id,digest,result) VALUES($1,$2,$3,$4)',

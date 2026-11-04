@@ -6,9 +6,9 @@ ContextMesh can continue the same DeepSeek Harness conversation with another con
 
 ## Requirements
 
-Use the single `dsh-contextmesh-handoff` plugin with this repository's pinned DSH runtime and compatibility patches. Update the ContextMesh server and participating devices together. The server advertises `model-relay-v1`; a device without the model-selection bridge cannot perform model relay.
+Use the single `dsh-contextmesh-handoff` plugin with this repository's pinned DSH runtime and compatibility patches. Update the ContextMesh server and participating devices together. The server advertises `model-relay-v1`, `receiver-model-handoff-v1` and `handoff-continuation-v1`; a device without the model-selection bridge cannot perform model relay.
 
-Configure model credentials independently on the device that will execute the conversation. They never enter relay records or travel with a handoff. The receiving device must configure the conversation’s current provider/model route. Providers used earlier in the history do not need to remain installed once the conversation has switched away from them.
+Configure model credentials independently on the device that will execute the conversation. They never enter relay records or travel with a handoff. The receiving device needs only its own selected provider/model route; source providers do not need to be installed there.
 
 This preview supports text conversations with completed tool calls and results. Image, file and spill resources, addressed child agents, persistent terminals, background jobs, schedules and pending input are not portable. End or remove those resources before relay. Adapters remain responsible for translating the common DSH message vocabulary and their own private replay state; not every provider/model combination is certified by ContextMesh.
 
@@ -20,11 +20,13 @@ ContextMesh freezes new input, waits for admitted work to finish, checks the tar
 
 The existing native selector remains the entry point. No additional plugin needs installation. A live task that cannot finish within the configured wait period leaves the existing model in place; let the task finish and retry.
 
-## Hand off with the current model
+## Hand off using the receiver’s model
 
-In the input dock, choose the receiving device and click **Hand off**. ContextMesh carries the conversation’s current provider, model and reasoning selection. The dock offers no separate model choice. **Take over here** follows the same rule.
+In the input dock, choose the receiving device and click **Hand off**. **Take over here** also uses the receiving device’s selected provider, model and reasoning settings. If A uses Flash and B has only Sol, B can continue directly with Sol. There is no intermediate Flash activation and no additional model picker.
 
-Configure that current model on the receiving device first. If it is unavailable, handoff fails before the source writer is stopped; ContextMesh never substitutes another model. To change models, use DSH’s native selector as a separate action on the owning device. A native model selection made while viewing a remote conversation first completes a confirmed takeover with its existing model, then runs the separately requested local model change. Cancelling takeover leaves the model and draft unchanged.
+The device remembers its last successful native model switch or explicitly confirmed local takeover choice, surviving restarts. Until a choice is made, it uses its local DSH default. Incoming conversation history never overwrites this preference, and the DSH global default is unchanged. Selecting Sol through the native picker while viewing a remote conversation takes it over directly with Sol after confirmation. Cancelling keeps the draft.
+
+The receiver validates its selection and history compatibility, then pins the route in the handoff record before the source is released. Later changes to the device preference do not redirect that transfer. A native `model/selection` event is persisted before input opens; only the next message calls the model. If the selected route is unavailable, too small or incompatible, preflight fails while the source remains usable. ContextMesh never falls back to the source route or an arbitrary available model. Credentials and provider availability can still fail at actual dispatch.
 
 Ordinary folders need no Git. Git workspaces require matching base commits and either clean contents or an explicitly approved [workspace file transfer](files.md).
 

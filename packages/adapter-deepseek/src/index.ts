@@ -42,7 +42,7 @@ import {
   type SessionId,
   type SessionEvent,
 } from '@deepseek-ai/dsh-session'
-import { readConnection } from '../../client/src/config.js'
+import { ConfiguredMeshClient } from '../../client/src/connection.js'
 import { MeshClient } from '../../client/src/index.js'
 import {
   headerSchema,
@@ -130,6 +130,7 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 export class RemoteSessionPersistence extends SessionPersistence {
+  private listed: readonly SessionPersistenceSnapshot[] = []
   private readonly claims = new AsyncLocalStorage<{
     remote: RemoteHandle
     used: boolean
@@ -174,6 +175,11 @@ export class RemoteSessionPersistence extends SessionPersistence {
   readonly writers = new Map<string, RemoteSessionHandle>()
   private readonly acquisitions = new Set<Promise<SessionHandle>>()
   private stopping = false
+  private draining = false
+  async pauseAcquisitions(value: boolean) {
+    this.draining = value
+    if (value) await Promise.allSettled([...this.acquisitions])
+  }
   constructor(
     ctx: Context,
     readonly client: MeshClient,
@@ -182,7 +188,7 @@ export class RemoteSessionPersistence extends SessionPersistence {
     super(ctx)
   }
   private acquire(run: () => Promise<SessionHandle>): Promise<SessionHandle> {
-    if (this.stopping)
+    if (this.stopping || this.draining)
       return Promise.reject(new Error('ContextMesh provider is stopping'))
     const result = run()
     this.acquisitions.add(result)
@@ -296,9 +302,29 @@ export class RemoteSessionPersistence extends SessionPersistence {
   async list(
     options?: SessionPersistenceListOptions,
   ): Promise<readonly SessionPersistenceSnapshot[]> {
-    return (await this.client.list(options?.signal)).map((s) =>
-      this.observation(s),
-    )
+    try {
+      this.listed = (await this.client.list(options?.signal)).map((s) =>
+        this.observation(s),
+      )
+    } catch (error) {
+      options?.signal?.throwIfAborted()
+      const code =
+        error && typeof error === 'object' && 'code' in error
+          ? error.code
+          : undefined
+      if (
+        ![
+          'NOT_CONFIGURED',
+          'UNAVAILABLE',
+          'UNAUTHORIZED',
+          'MAINTENANCE',
+        ].includes(String(code))
+      )
+        throw error
+      // DSH needs a read-only catalog to mount its workspace and connection UI.
+      // This never grants a handle or creates a local replacement conversation.
+    }
+    return structuredClone(this.listed)
   }
   async flush(): Promise<void> {
     const results = await Promise.allSettled(
@@ -570,24 +596,7 @@ class RemoteSessionHandle implements SessionHandle {
 
 /** Keep live routing through provider-dependent consumer shutdown, then close all handles. */
 export async function apply(ctx: Context, config: Config): Promise<void> {
-  const environmentToken =
-    config.token ?? process.env[config.tokenEnv ?? 'CONTEXTMESH_TOKEN']
-  const saved = environmentToken ? undefined : await readConnection()
-  const token = environmentToken ?? saved?.token
-  if (!token)
-    throw new Error('ContextMesh token environment variable is missing')
-  const client = new MeshClient({
-    ...config,
-    endpoint:
-      config.endpoint ??
-      process.env.CONTEXTMESH_ENDPOINT ??
-      saved?.endpoint ??
-      'http://127.0.0.1:8787',
-    token,
-  })
-  const capabilities = await client.capabilities()
-  if ((config.renewalMs ?? 15000) * 3 > capabilities.leaseMs)
-    throw new Error('renewalMs must be at most one third of server leaseMs')
+  const client = new ConfiguredMeshClient(config, config.renewalMs ?? 15000)
   let serviceFiber!: Fiber
   let service: RemoteSessionPersistence | undefined
   ctx.effect(function* () {

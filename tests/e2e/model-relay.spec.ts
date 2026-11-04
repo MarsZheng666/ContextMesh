@@ -177,191 +177,258 @@ it('waits for current work while freezing new input, then switches before the ne
   }
 }, 30000)
 
-it('hands off the conversation current selection without requiring its obsolete original provider on the target', async () => {
-  const f = await environment()
-  try {
-    const a = await f.launch('A', f.source, true),
-      b = await f.launch('B', f.target, true, false, undefined, true)
-    const sessionId = randomUUID(),
-      projectId = randomUUID()
-    await a.rpc('m1', {
-      command: { action: 'project', projectId, name: 'model relay' },
-    })
-    await a.rpc('m1', {
-      command: { action: 'mapping', projectId, root: f.source },
-    })
-    await b.rpc('m1', {
-      command: { action: 'mapping', projectId, root: f.target },
-    })
-    await a.rpc('create', { sessionId })
-    await a.rpc('prompt', {
-      sessionId,
-      text: 'Remember CONTINUITY-PHRASE-4817.',
-    })
-    await a.rpc('select-model', { sessionId, selection: target })
-    const original = await read(f, sessionId)
-    await expect
-      .poll(
-        async () =>
-          z
-            .array(
-              z.object({ id: z.string(), projectId: z.string().nullable() }),
-            )
-            .parse(await f.client.request('/v1/remote-sessions'))
-            .find((s) => s.id === sessionId)?.projectId,
-      )
-      .toBe(projectId)
-    const intent = z.object({ id: z.string() }).parse(
-      await b.rpc('m1', {
-        command: {
-          action: 'takeover',
-          sessionId,
-          confirmed: true,
-        },
-      }),
-    )
-    await expect
-      .poll(
-        async () =>
-          z
-            .object({
-              handoffState: z.string().optional(),
-              error: z.string().nullable(),
-            })
-            .parse(
-              await b.rpc('m1', {
-                command: { action: 'takeover-status', takeoverId: intent.id },
-              }),
-            ).handoffState,
-        { timeout: 15000 },
-      )
-      .toBe('completed')
-    expect(
-      z.object({ live: z.boolean() }).parse(await a.rpc('state', { sessionId }))
-        .live,
-    ).toBe(false)
-    await b.rpc('prompt', {
-      sessionId,
-      text: 'READ_WORKSPACE and recall the original marker.',
-    })
-    const requests = workerState.parse(
-      await b.rpc('state', { sessionId }),
-    ).modelRequests
-    expect(requests[0]).toMatchObject(target)
-    expect(JSON.stringify(requests[0]?.messages)).toContain(
-      'CONTINUITY-PHRASE-4817',
-    )
-    const final = await read(f, sessionId)
-    expect(final.events.slice(0, original.events.length)).toEqual(
-      original.events,
-    )
-    expect(
-      final.events.some(
-        (e) =>
-          e.type === 'model/selection' &&
-          z.object({ provider: z.string() }).parse(e.data).provider ===
-            target.provider,
-      ),
-    ).toBe(true)
-    expect((await f.client.stat(sessionId))?.header).toEqual(original.header)
-    expect(final.events.filter((e) => e.type === 'model/selection')).toEqual(
-      original.events.filter((e) => e.type === 'model/selection'),
-    )
-  } finally {
-    await f.close()
-  }
-}, 40000)
-
-it('keeps the source available when the receiving device has no current model configured', async () => {
-  const f = await environment()
-  try {
-    const a = await f.launch('A', f.source),
-      b = await f.launch('B', f.target, false, false, undefined, true),
-      projectId = randomUUID(),
-      sessionId = randomUUID()
-    await a.rpc('m1', {
-      command: { action: 'project', projectId, name: 'same model' },
-    })
-    await a.rpc('m1', {
-      command: { action: 'mapping', projectId, root: f.source },
-    })
-    await b.rpc('m1', {
-      command: { action: 'mapping', projectId, root: f.target },
-    })
-    await a.rpc('create', { sessionId })
-    await a.rpc('prompt', {
-      sessionId,
-      text: 'Remember CONTINUITY-PHRASE-4817.',
-    })
-    await expect(
-      a.rpc('m1', {
-        command: {
-          action: 'handoff',
-          sessionId,
-          targetNodeId: b.nodeId,
-          targetModel: target,
-        },
-      }),
-    ).rejects.toThrow('current')
-    await expect(
-      b.rpc('m1', {
-        command: {
-          action: 'takeover',
-          sessionId,
-          confirmed: true,
-          targetModel: target,
-        },
-      }),
-    ).rejects.toThrow('current')
-    const operation = z.object({ id: z.string() }).parse(
+it.each(['push', 'takeover'] as const)(
+  'continues on a receiver with only its own model via %s, preserving history and restart',
+  async (mode) => {
+    const f = await environment()
+    try {
+      const a = await f.launch(
+          'A',
+          f.source,
+          true,
+          false,
+          undefined,
+          false,
+          undefined,
+          { provider: 'contextmesh-e2e', model: 'scripted', skipSecond: true },
+        ),
+        b = await f.launch('B', f.target, true, false, undefined, true)
+      const sessionId = randomUUID(),
+        projectId = randomUUID()
       await a.rpc('m1', {
-        command: { action: 'handoff', sessionId, targetNodeId: b.nodeId },
-      }),
-    )
-    await expect
-      .poll(
-        async () =>
-          z
-            .object({ state: z.string() })
-            .parse(await f.client.request('/v1/handoffs/' + operation.id))
-            .state,
-        { timeout: 10000 },
+        command: { action: 'project', projectId, name: 'model relay' },
+      })
+      await a.rpc('m1', {
+        command: { action: 'mapping', projectId, root: f.source },
+      })
+      await b.rpc('m1', {
+        command: { action: 'mapping', projectId, root: f.target },
+      })
+      await a.rpc('create', { sessionId })
+      await a.rpc('prompt', {
+        sessionId,
+        text: 'READ_WORKSPACE and remember CONTINUITY-PHRASE-4817.',
+      })
+      const original = await read(f, sessionId)
+      await expect
+        .poll(
+          async () =>
+            z
+              .array(
+                z.object({ id: z.string(), projectId: z.string().nullable() }),
+              )
+              .parse(await f.client.request('/v1/remote-sessions'))
+              .find((s) => s.id === sessionId)?.projectId,
+        )
+        .toBe(projectId)
+      const operation = z.object({ id: z.string() }).parse(
+        mode === 'push'
+          ? await a.rpc('m1', {
+              command: {
+                action: 'handoff',
+                sessionId,
+                targetNodeId: b.nodeId,
+              },
+            })
+          : await b.rpc('m1', {
+              command: { action: 'takeover', sessionId, confirmed: true },
+            }),
       )
-      .toBe('failed')
-    await expect
-      .poll(
-        async () =>
-          workerState.parse(await a.rpc('state', { sessionId })).controlled,
-        { timeout: 10000 },
+      await expect
+        .poll(
+          async () => {
+            if (mode === 'push')
+              return z
+                .object({ state: z.string() })
+                .parse(await f.client.request('/v1/handoffs/' + operation.id))
+                .state
+            return z.object({ handoffState: z.string().optional() }).parse(
+              await b.rpc('m1', {
+                command: {
+                  action: 'takeover-status',
+                  takeoverId: operation.id,
+                },
+              }),
+            ).handoffState
+          },
+          { timeout: 15000 },
+        )
+        .toBe('completed')
+      expect(
+        workerState.parse(await b.rpc('state', { sessionId })).modelRequests,
+      ).toHaveLength(0)
+      expect(
+        z
+          .object({ live: z.boolean() })
+          .parse(await a.rpc('state', { sessionId })).live,
+      ).toBe(false)
+      await b.rpc('prompt', {
+        sessionId,
+        text: 'Recall the original marker without running tools again.',
+      })
+      const requests = workerState.parse(
+        await b.rpc('state', { sessionId }),
+      ).modelRequests
+      expect(requests[0]).toMatchObject(target)
+      expect(JSON.stringify(requests[0]?.messages)).toContain(
+        'CONTINUITY-PHRASE-4817',
       )
-      .toBe(false)
-    expect(
-      z.object({ live: z.boolean() }).parse(await a.rpc('state', { sessionId }))
-        .live,
-    ).toBe(true)
-    expect(
-      z.object({ live: z.boolean() }).parse(await b.rpc('state', { sessionId }))
-        .live,
-    ).toBe(false)
-    const before = await read(f, sessionId)
-    expect(
-      before.events.filter((e) => e.type === 'model/selection'),
-    ).not.toContainEqual(
-      expect.objectContaining({ data: expect.objectContaining(target) }),
-    )
-    await a.rpc('prompt', {
-      sessionId,
-      text: 'Continue with the original current model.',
-    })
-    expect(
-      workerState
-        .parse(await a.rpc('state', { sessionId }))
-        .modelRequests.at(-1),
-    ).toMatchObject({ provider: 'contextmesh-e2e', model: 'scripted' })
-  } finally {
-    await f.close()
-  }
-}, 30000)
+      const final = await read(f, sessionId)
+      expect(final.events.slice(0, original.events.length)).toEqual(
+        original.events,
+      )
+      expect(
+        final.events.some(
+          (e) =>
+            e.type === 'model/selection' &&
+            z.object({ provider: z.string() }).parse(e.data).provider ===
+              target.provider,
+        ),
+      ).toBe(true)
+      expect((await f.client.stat(sessionId))?.header).toEqual(original.header)
+      expect(
+        final.events.filter((e) => e.type === 'model/selection'),
+      ).toHaveLength(
+        original.events.filter((e) => e.type === 'model/selection').length + 1,
+      )
+      expect(final.events.filter((e) => e.type === 'tool/result')).toHaveLength(
+        original.events.filter((e) => e.type === 'tool/result').length,
+      )
+      expect(JSON.stringify(requests[0]?.messages)).toContain(
+        'fixture-sentinel',
+      )
+      await b.stop()
+      const restarted = await f.launch(
+        'B',
+        f.target,
+        true,
+        false,
+        undefined,
+        true,
+      )
+      await restarted.rpc('native-resume', { sessionId })
+      await restarted.rpc('prompt', {
+        sessionId,
+        text: 'Continue after restart.',
+      })
+      expect(
+        workerState
+          .parse(await restarted.rpc('state', { sessionId }))
+          .modelRequests.at(-1),
+      ).toMatchObject(target)
+    } finally {
+      await f.close()
+    }
+  },
+  40000,
+)
+
+it.each(['missing', 'too-small', 'non-text'] as const)(
+  'keeps the source available when the receiver selection is %s',
+  async (failure) => {
+    const f = await environment()
+    try {
+      const a = await f.launch('A', f.source),
+        b = await f.launch(
+          'B',
+          f.target,
+          false,
+          false,
+          undefined,
+          true,
+          undefined,
+          {
+            provider:
+              failure === 'missing' ? 'missing-provider' : target.provider,
+            model:
+              failure === 'too-small'
+                ? 'tiny'
+                : failure === 'non-text'
+                  ? 'no-text'
+                  : 'missing',
+          },
+        ),
+        projectId = randomUUID(),
+        sessionId = randomUUID()
+      await a.rpc('m1', {
+        command: { action: 'project', projectId, name: 'same model' },
+      })
+      await a.rpc('m1', {
+        command: { action: 'mapping', projectId, root: f.source },
+      })
+      await b.rpc('m1', {
+        command: { action: 'mapping', projectId, root: f.target },
+      })
+      await a.rpc('create', { sessionId })
+      await a.rpc('prompt', {
+        sessionId,
+        text:
+          'Remember CONTINUITY-PHRASE-4817.' +
+          (failure === 'too-small' ? ' long context'.repeat(2000) : ''),
+      })
+      await expect(
+        a.rpc('m1', {
+          command: {
+            action: 'handoff',
+            sessionId,
+            targetNodeId: b.nodeId,
+            targetModel: target,
+          },
+        }),
+      ).rejects.toThrow('receiving device')
+      const operation = z.object({ id: z.string() }).parse(
+        await a.rpc('m1', {
+          command: { action: 'handoff', sessionId, targetNodeId: b.nodeId },
+        }),
+      )
+      await expect
+        .poll(
+          async () =>
+            z
+              .object({ state: z.string() })
+              .parse(await f.client.request('/v1/handoffs/' + operation.id))
+              .state,
+          { timeout: 10000 },
+        )
+        .toBe('failed')
+      await expect
+        .poll(
+          async () =>
+            workerState.parse(await a.rpc('state', { sessionId })).controlled,
+          { timeout: 10000 },
+        )
+        .toBe(false)
+      expect(
+        z
+          .object({ live: z.boolean() })
+          .parse(await a.rpc('state', { sessionId })).live,
+      ).toBe(true)
+      expect(
+        z
+          .object({ live: z.boolean() })
+          .parse(await b.rpc('state', { sessionId })).live,
+      ).toBe(false)
+      const before = await read(f, sessionId)
+      expect(
+        before.events.filter((e) => e.type === 'model/selection'),
+      ).not.toContainEqual(
+        expect.objectContaining({ data: expect.objectContaining(target) }),
+      )
+      await a.rpc('prompt', {
+        sessionId,
+        text: 'Continue with the original current model.',
+      })
+      expect(
+        workerState
+          .parse(await a.rpc('state', { sessionId }))
+          .modelRequests.at(-1),
+      ).toMatchObject({ provider: 'contextmesh-e2e', model: 'scripted' })
+    } finally {
+      await f.close()
+    }
+  },
+  30000,
+)
 
 it('reconciles lost prepare and completion responses without appending the selection twice', async () => {
   const f = await environment()
@@ -408,3 +475,101 @@ it('reconciles lost prepare and completion responses without appending the selec
     await f.close()
   }
 }, 30000)
+
+it('persists explicit receiver choices and pins a transfer before later local selections', async () => {
+  const f = await environment()
+  let unblock = () => {}
+  try {
+    const a = await f.launch('A', f.source),
+      b = await f.launch('B', f.target),
+      scratch = randomUUID(),
+      sessionId = randomUUID(),
+      projectId = randomUUID()
+    await b.rpc('create', { sessionId: scratch })
+    await b.rpc('select-model', { sessionId: scratch, selection: target })
+    await b.stop()
+    const receiver = await f.launch('B', f.target)
+    expect(
+      await receiver.rpc('m1', { command: { action: 'status' } }),
+    ).toMatchObject({ receiverModel: target })
+    await receiver.rpc('native-resume', { sessionId: scratch })
+    await a.rpc('m1', {
+      command: { action: 'project', projectId, name: 'receiver selection' },
+    })
+    await a.rpc('m1', {
+      command: { action: 'mapping', projectId, root: f.source },
+    })
+    await receiver.rpc('m1', {
+      command: { action: 'mapping', projectId, root: f.target },
+    })
+    await a.rpc('create', { sessionId })
+    await a.rpc('prompt', {
+      sessionId,
+      text: 'Remember CONTINUITY-PHRASE-4817.',
+    })
+    let entered!: () => void
+    const reached = new Promise<void>((resolve) => {
+        entered = resolve
+      }),
+      barrier = new Promise<void>((resolve) => {
+        unblock = resolve
+      }),
+      original = f.store.preflightHandoff.bind(f.store)
+    const intercepted = vi
+      .spyOn(f.store, 'preflightHandoff')
+      .mockImplementation(async (...args) => {
+        const result = await original(...args)
+        entered()
+        await barrier
+        return result
+      })
+    const operation = z.object({ id: z.string() }).parse(
+      await a.rpc('m1', {
+        command: {
+          action: 'handoff',
+          sessionId,
+          targetNodeId: receiver.nodeId,
+        },
+      }),
+    )
+    await reached
+    const laterChoice = { provider: 'contextmesh-e2e', model: 'scripted' }
+    await receiver.rpc('select-model', {
+      sessionId: scratch,
+      selection: laterChoice,
+    })
+    unblock()
+    await expect
+      .poll(
+        async () =>
+          z
+            .object({ state: z.string() })
+            .parse(await f.client.request('/v1/handoffs/' + operation.id))
+            .state,
+        { timeout: 15000 },
+      )
+      .toBe('completed')
+    intercepted.mockRestore()
+    expect(
+      await receiver.rpc('m1', { command: { action: 'status' } }),
+    ).toMatchObject({ receiverModel: laterChoice })
+    await receiver.rpc('prompt', {
+      sessionId,
+      text: 'Recall the original marker.',
+    })
+    expect(
+      workerState
+        .parse(await receiver.rpc('state', { sessionId }))
+        .modelRequests.at(-1),
+    ).toMatchObject(target)
+    await receiver.stop()
+    const restarted = await f.launch('B', f.target)
+    expect(
+      await restarted.rpc('m1', { command: { action: 'status' } }),
+    ).toMatchObject({ receiverModel: laterChoice })
+  } finally {
+    unblock()
+    vi.restoreAllMocks()
+    await f.close()
+  }
+}, 60000)

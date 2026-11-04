@@ -4,7 +4,7 @@ import { fixture, TOKEN } from '../fixture.js'
 import { MeshClient } from '../../packages/client/src/index.js'
 import { HandoffClient } from '../../packages/client/src/handoff.js'
 
-async function prepared() {
+async function prepared(continuation = false) {
   const f = await fixture(),
     id = randomUUID(),
     projectId = randomUUID()
@@ -47,6 +47,7 @@ async function prepared() {
       model: { provider: 'scripted', model: 'test' },
       harness: '0.2.1-rc.3',
       adapter: 'deepseek',
+      ...(continuation ? { resumePolicy: 'interrupted' as const } : {}),
     },
   )
   return { ...f, id, a, b, handle, requested, proof }
@@ -221,3 +222,87 @@ it('does not finalize a failed source close', async () => {
     (await f.a.fail(preparing, 'source-close', 'failed', false)).state,
   ).toBe('recovery_required')
 })
+
+it.each(['handoff', 'natural', 'user'] as const)(
+  'authorizes continuation only for this handoff cancellation, completion requires a still-pending queue entry: %s',
+  async (reason) => {
+    const f = await prepared(true),
+      preparing = await f.b.preflight(f.requested, f.proof)
+    await f.client.append(
+      f.handle,
+      [
+        {
+          seq: 1,
+          type: 'turn/end',
+          time: 2,
+          data: {
+            turn: 1,
+            reason:
+              reason === 'natural'
+                ? { kind: 'completed' }
+                : {
+                    kind: 'aborted',
+                    reason:
+                      reason === 'handoff'
+                        ? {
+                            kind: 'hook',
+                            reason: 'contextmesh-handoff:' + f.requested.id,
+                          }
+                        : { kind: 'user' },
+                  },
+          },
+        },
+      ],
+      randomUUID(),
+    )
+    await f.client.close(f.handle, randomUUID())
+    const ready = await f.a.finalize(preparing)
+    if (reason !== 'handoff') {
+      expect(ready.manifest.continuation).toBeUndefined()
+      return
+    }
+    expect(ready.manifest.continuation).toEqual({
+      turn: 1,
+      messageId: ready.id,
+    })
+    const accepted = await f.b.accept(ready, f.proof)
+    await expect(f.b.complete(accepted.handoff, 2)).rejects.toMatchObject({
+      code: 'CONTINUATION_UNCONFIRMED',
+    })
+    const message = {
+      id: ready.id,
+      role: 'user',
+      source: {
+        kind: 'contextmesh-continuation',
+        handoffId: ready.id,
+        sourceTurn: 1,
+        form: 'notice',
+        summary: 'Continuing',
+      },
+      content: [{ type: 'text', text: 'Continue the original task' }],
+    }
+    const splice = (
+      seq: number,
+      inserted: (typeof message)[],
+      removedCount = 0,
+    ) => ({
+      seq,
+      type: 'agent/inbox/spliced',
+      time: 3,
+      data: { target: 'next-turn', start: 0, removedCount, inserted },
+    })
+    await f.b.mesh.append(
+      accepted.handle,
+      [splice(2, [message]), splice(3, [], 1)],
+      randomUUID(),
+    )
+    await f.b.mesh.flush(accepted.handle, randomUUID())
+    await expect(f.b.complete(accepted.handoff, 3)).rejects.toMatchObject({
+      code: 'CONTINUATION_UNCONFIRMED',
+    })
+    await f.b.mesh.append(accepted.handle, [splice(4, [message])], randomUUID())
+    await f.b.mesh.flush(accepted.handle, randomUUID())
+    expect((await f.b.complete(accepted.handoff, 5)).state).toBe('completed')
+    await f.b.mesh.close(accepted.handle, randomUUID())
+  },
+)

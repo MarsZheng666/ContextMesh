@@ -11,7 +11,8 @@ ContextMesh is a public project. Design installation, upgrades, configuration, d
 - Make the default setup straightforward, minimize required configuration, and explain actions and errors in terms users understand. Users should not need to learn the internal architecture or milestone names to complete a task.
 - Review changes for their effect on both first-time installation and upgrades by existing users. Keep English and Chinese user documentation aligned with the actual experience.
 
-- Handoff and takeover preserve the conversation’s current provider, model and reasoning selection. Keep device transfer separate from model selection; use the native model selector for model changes. If the receiving device lacks the current model, explain the missing configuration instead of silently selecting a substitute.
+- Handoff and takeover use the receiving device’s selected provider, model and reasoning settings. Devices need not configure the same models. Use the native model selector; never add a separate handoff model picker. Remember explicit local choices independently from incoming session history, and use the local DSH default until a choice is made. Validate and persist the receiving model before releasing the source; never silently choose an arbitrary available model.
+- For running-task takeover, preflight the receiver before cancelling the source. Wait for dispatched tools to settle; if preparation fails before cancellation, leave the source running. Persist one continuation in the native inbox before target activation; never requeue consumed work or blindly retry uncertain tool side effects. Idle/completed tasks must not start new work.
 
 ## Development setup
 
@@ -50,6 +51,8 @@ Keep `README.md` and `README.zh.md` aligned. Put installation and API guidance i
 Preserve native Session data, contiguous event ordering, single-writer ownership, and idempotent retries. Changes to these behaviors should include relevant contract or integration coverage. Never point tests at a production database or replay real user sessions as test fixtures.
 
 The adapted upstream fixtures in `tests/upstream/` retain their original license and source metadata. Preserve those files and update their recorded hashes only when intentionally updating the fixtures.
+
+Release validation also runs `scripts/release/smoke.mjs <bundle>` with only system tools on `PATH`. Set `CONTEXTMESH_TEST_RUNTIME` to an unpacked bundle to run native device/handoff tests against its bundled Node and DSH. Set `CONTEXTMESH_TEST_PG_BIN` to PostgreSQL 18's client-tool directory to enable the archive recovery test; this test substitutes Docker command transport while using real `pg_dump`, `pg_restore`, and `psql` against a disposable database. Linux release CI enables it. Neither test uses production data.
 
 ## Private data
 

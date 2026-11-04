@@ -1,5 +1,7 @@
 # Deployment
 
+For managed runtime setup, generated HTTPS deployment, diagnostics, maintenance, upgrades and restoration, see the [runtime guide](runtime.md) ([中文](runtime.zh.md)).
+
 ContextMesh runs as a Node.js HTTP service backed by PostgreSQL. Keep the database private and connect Harness clients through HTTPS or an SSH tunnel.
 
 ## Docker Compose

@@ -7,6 +7,7 @@ import type {} from '@deepseek-ai/dsh-api-session-controller'
 import type { SessionRequestId } from '@deepseek-ai/dsh-api-session-controller/types'
 import type {} from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-host-webserver'
+import type {} from '@deepseek-ai/dsh-tools'
 import { brandString } from '@deepseek-ai/dsh-brand'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { setSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
@@ -132,6 +133,8 @@ const input = z.object({
     'api',
     'local-settings',
     'start-running',
+    'start-tool',
+    'finish-tool',
     'history-follow',
     'native-resume',
     'select-model',
@@ -181,10 +184,37 @@ export async function apply(ctx: Context) {
   })
   const adapter = new ScriptedModel()
   const second = new ScriptedModel('contextmesh-second')
+  let holdTool = false,
+    toolHeld = false,
+    toolAborted = false
+  let finishTool: (() => void) | undefined
+  ctx.on('tools/execute', async (exec, next) => {
+    const result = await next()
+    if (!holdTool || exec.parent) return result
+    toolHeld = true
+    await new Promise<void>((resolve) => {
+      const done = () => {
+        exec.signal.removeEventListener('abort', abort)
+        resolve()
+      }
+      const abort = () => {
+        toolAborted = true
+        done()
+      }
+      finishTool = done
+      exec.signal.addEventListener('abort', abort, { once: true })
+      if (exec.signal.aborted) abort()
+    })
+    toolHeld = false
+    holdTool = false
+    adapter.hold = true
+    return result
+  })
   if (!realModel) {
     if (process.env.TEST_SKIP_SOURCE_MODEL !== '1')
       ctx.llm.registerAdapter([provider], adapter)
-    ctx.llm.registerAdapter(['contextmesh-second'], second)
+    if (process.env.TEST_SKIP_SECOND_MODEL !== '1')
+      ctx.llm.registerAdapter(['contextmesh-second'], second)
   }
   const receive = (raw: unknown) => {
     void (async () => {
@@ -215,8 +245,15 @@ export async function apply(ctx: Context) {
             sessionId,
             ...request.selection,
           })
-        } else if (request.action === 'start-running') {
-          adapter.hold = true
+        } else if (request.action === 'finish-tool') {
+          finishTool?.()
+          value = { released: true }
+        } else if (
+          request.action === 'start-running' ||
+          request.action === 'start-tool'
+        ) {
+          adapter.hold = request.action === 'start-running'
+          holdTool = request.action === 'start-tool'
           await ctx.sessionController.prompt(
             {
               sessionId,
@@ -332,6 +369,8 @@ export async function apply(ctx: Context) {
               : null
           value = {
             browserGraph,
+            toolHeld,
+            toolAborted,
             defaultModel: ctx.get('agentDefaultModel')?.currentSelection(),
             modelRequests: [...adapter.requests, ...second.requests].map(
               (r) => ({

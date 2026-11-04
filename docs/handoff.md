@@ -6,7 +6,7 @@ ContextMesh transfers a live DeepSeek Harness session between folders on two dev
 
 ## Install the compatible runtime
 
-ContextMesh requires **Node.js 24.9+, pnpm 11.25.0 and the exact DSH 0.2.1-rc.3 dependency graph in this repository**. Use `pnpm install --frozen-lockfile` and `pnpm build`. The compatibility patches in `patches/` add lifecycle admission, owned disposal and local sandbox workspace binding. An ordinary global DSH installation does not include these extensions; the handoff plugin refuses incompatible runtimes. Review the patches when upgrading DSH. The upstream code remains MIT licensed.
+ContextMesh requires **Node.js 24.9+, pnpm 11.25.0 and the exact DSH 0.2.1-rc.3 dependency graph in this repository**. Use `pnpm install --frozen-lockfile` and `pnpm build`. The compatibility patches in `patches/` add lifecycle admission, owned disposal, durable continuation and local sandbox workspace binding. An ordinary global DSH installation does not include these extensions; the handoff plugin refuses incompatible runtimes. Review the patches when upgrading DSH. The upstream code remains MIT licensed.
 
 Run these commands from the repository root, on each device, with a **different private DSH home**:
 
@@ -42,13 +42,17 @@ The complete plugin keeps using the existing server sessions and device configur
 
 The source freezes new work, waits for admitted activities, validates both machines, flushes and awaits the actual Agent owner's disposal. Scope cleanup events enter the final log before the server fixes its cut. Only the designated target can atomically claim the new writer epoch. The target restores the native Agent, preset, model selection, local directory and sandbox policy before accepting input. The source keeps the session in its sidebar for read-only history. A remote-device indicator identifies its current location; hover over the row to see the device name.
 
-ContextMesh preserves the selected model and refuses a target whose configured sandbox policy is stricter. It supports root sessions with portable text/tool history. Finish background jobs, close persistent terminals, remove schedules and stop child Agents first. Native file attachments require [explicit transfer and target approval](files.md). Images, spill resources and Git submodules are rejected. Ignored files, credentials, external services and shell side effects are not portable; prepare required resources yourself. Avoid external workspace changes during a handoff.
+ContextMesh uses the receiving device’s selected model, validates it before releasing the source, and refuses a target whose configured sandbox policy is stricter. Cross-model handoff supports portable text and completed tool history; file attachments currently require the same model route on both devices. It supports root sessions with portable text/tool history. Finish background jobs, close persistent terminals, remove schedules and stop child Agents first. Native file attachments require [explicit transfer and target approval](files.md). Images, spill resources and Git submodules are rejected. Ignored files, credentials, external services and shell side effects are not portable; prepare required resources yourself. Avoid external workspace changes during a handoff.
 
 ## Take over from this device
 
-Sending a message in a remote session first asks whether to take it over here. After confirmation, the other device stops its current task, saves the final context, and releases execution ownership. Your original message is sent once after takeover completes. You do not need to click Hand off on the other device. Cancelling confirmation or a failed takeover keeps the draft without sending it.
+Sending a message in a remote session first asks whether to take it over here. After confirmation, this device first checks its model, context capacity, project and permissions while the source keeps working. Only after those checks pass does the source stop at a safe tool boundary, save its final context and release execution ownership. Your original message is sent once after takeover completes. You do not need to click Hand off on the other device. Cancelling confirmation or a failed takeover keeps the draft without sending it.
 
-You can also choose **Take over here** in the conversation dock or remote-session list to move the session without sending a message. This uses the same complete plugin.
+You can also choose **Take over here** in the conversation dock or remote-session list without typing a new message. If takeover interrupts a running task, this device automatically continues the original task using its selected model. Idle or already completed work does not trigger a new model request. This uses the same complete plugin.
+
+Already dispatched tools must finish before cancellation; no new tool bodies start during that wait. If the wait times out, or the workspace changes before cancellation, the takeover fails and the source keeps working. Completed tool results remain in the shared history. Background jobs, persistent terminals and child Agents must be stopped separately. ContextMesh does not migrate operating-system processes or guarantee that external side effects can be repeated safely.
+
+Automatic continuation is saved in DSH’s durable input queue before activation is confirmed. Repeated status checks and a lost completion response do not enqueue the instruction again. A consumed or discarded continuation is never silently retried. If a process crashes with uncertain ownership, use the explicit recovery flow below; do not restart uncertain tools blindly. Update the server and both devices together: automatic continuation requires the `handoff-continuation-v1` capability and the pinned DSH continuation bridge.
 
 Update the plugin on both devices and prepare their project directories. An offline or uncertain source, pending messages, or an unprepared workspace prevents takeover. The UI explains the reason and keeps your draft; retry or follow explicit recovery below when needed.
 
@@ -90,7 +94,7 @@ The current server uses database schema **6**. Back up PostgreSQL and stop old c
 
 Use HTTPS for network connections, or loopback addresses through an SSH tunnel. Plain HTTP on loopback is not encryption by itself. Devices sharing a namespace token belong to one trust domain; device IDs route work and are not separate authorization credentials. Native DSH Host/Origin and owner authentication protect the browser control endpoint. The local Unix socket is accessible only to its OS user.
 
-M1 coordinates the same Harness and model route. M2 adds [model relay](model-relay.md), through the native model selector; device handoff always keeps the current selection. Confirmed [workspace and file attachment transfer](files.md) is available. Heterogeneous agents and automatic crash takeover remain future work.
+Device handoff and [model relay](model-relay.md) work together through the native model selector. Each receiver uses its own selected model; no shared model configuration is required for portable text/tool conversations. Confirmed [workspace and file attachment transfer](files.md) is available. Heterogeneous agents and automatic crash takeover remain future work.
 
 On explicit resume, a valid working directory inside the local mapped project is retained. A persisted absolute path from another device is restored through the handoff record and local mapping instead. Stricter session file permissions remain in effect.
 
