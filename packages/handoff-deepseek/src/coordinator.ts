@@ -1162,6 +1162,9 @@ export class HandoffCoordinator {
             : undefined,
         )
       } catch (error) {
+        // A temporary outage is not a rejected preflight. Keep the reservation
+        // so the next poll can retry after the HTTP client's retries expire.
+        if (isMeshError(error) && error.status >= 500) throw error
         await this.client.fail(record, 'target-preflight', message(error))
         this.warn(record.sessionId, error)
       }
@@ -1273,7 +1276,7 @@ export class HandoffCoordinator {
         if (
           isMeshError(error) &&
           error.status >= 500 &&
-          local.phase === 'source-stopped'
+          (local.phase === 'source-live' || local.phase === 'source-stopped')
         )
           throw error
         const fresh = await this.client.get(record.id)

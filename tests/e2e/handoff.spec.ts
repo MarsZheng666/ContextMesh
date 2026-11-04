@@ -18,6 +18,7 @@ import { expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import { fixture, TOKEN } from '../fixture.js'
 import { buildServer } from '../../apps/server/src/app.js'
+import { MeshError } from '../../packages/protocol/src/index.js'
 import {
   callLocal,
   controlSocketPath,
@@ -612,6 +613,72 @@ it('includes scoped teardown events in the fixed final cut and shared title', as
     await f.close()
   }
 }, 40000)
+it.each(['target', 'source'] as const)(
+  'retries the same handoff after %s preflight exhausts HTTP retries',
+  async (side) => {
+    const f = await pair()
+    try {
+      let armed = false,
+        failures = 0
+      const faultNode = side === 'target' ? f.b.nodeId : f.a.nodeId
+      const mappings = f.store.mappings.bind(f.store)
+      vi.spyOn(f.store, 'mappings').mockImplementation(async (ns, nodeId) => {
+        if (armed && nodeId === faultNode && failures < 3) {
+          failures++
+          throw new MeshError('UNAVAILABLE', 'injected service outage', 503)
+        }
+        return mappings(ns, nodeId)
+      })
+      if (side === 'target') {
+        const request = f.store.requestHandoff.bind(f.store)
+        vi.spyOn(f.store, 'requestHandoff').mockImplementation(
+          async (...args) => {
+            const result = await request(...args)
+            armed = true
+            return result
+          },
+        )
+      } else {
+        const preflight = f.store.preflightHandoff.bind(f.store)
+        vi.spyOn(f.store, 'preflightHandoff').mockImplementation(
+          async (...args) => {
+            const result = await preflight(...args)
+            armed = true
+            return result
+          },
+        )
+      }
+      const record = z.object({ id: z.string() }).parse(
+        await f.a.rpc('m1', {
+          command: {
+            action: 'handoff',
+            sessionId: f.sessionId,
+            targetNodeId: f.b.nodeId,
+          },
+        }),
+      )
+      await expect
+        .poll(() => f.client.request(`/v1/handoffs/${record.id}`), {
+          timeout: 15000,
+        })
+        .toMatchObject({ id: record.id, state: 'completed', error: null })
+      expect(failures).toBe(3)
+      const records = await f.store.pool.query(
+        'SELECT id FROM cm_handoffs WHERE namespace=$1 AND session_id=$2',
+        [f.namespace, f.sessionId],
+      )
+      expect(records.rows).toEqual([{ id: record.id }])
+      const result = await f.b.rpc('prompt', {
+        sessionId: f.sessionId,
+        text: 'READ_WORKSPACE after preflight reconnect.',
+      })
+      expect(JSON.stringify(result)).toContain('fixture-sentinel')
+    } finally {
+      await f.close()
+    }
+  },
+  40000,
+)
 it('continues the same reserved handoff after the HTTP service restarts', async () => {
   const f = await pair()
   try {
@@ -637,14 +704,10 @@ it('continues the same reserved handoff after the HTTP service restarts', async 
       port: Number(new URL(f.endpoint).port),
     })
     await expect
-      .poll(
-        async () =>
-          z
-            .object({ state: z.string() })
-            .parse(await f.client.request(`/v1/handoffs/${record.id}`)).state,
-        { timeout: 15000 },
-      )
-      .toBe('completed')
+      .poll(() => f.client.request(`/v1/handoffs/${record.id}`), {
+        timeout: 15000,
+      })
+      .toMatchObject({ id: record.id, state: 'completed', error: null })
     await expect
       .poll(
         async () => {
