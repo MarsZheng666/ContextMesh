@@ -15,7 +15,9 @@ unset CONTEXTMESH_TOKEN CONTEXTMESH_ENDPOINT
 pnpm cli setup
 ```
 
-向导询问可访问的服务地址和配对码，自动保存私有配置。远程地址使用 HTTPS。回环地址表示新设备自己；使用 SSH 时，先建立新设备自己的通道并保持运行。配对不会安装 SSH 密钥，也不管理 SSH 登录。
+向导询问服务地址和配对码，自动保存私有配置。**默认使用 HTTPS 直连：**填写与所有者设备相同的服务地址，例如 `https://mesh.example.com`，各设备获得独立凭据，无需配置 SSH。
+
+选择[可选 SSH 部署](deployment.zh.md#可选-ssh-隧道)时，先建立本设备的隧道，再填写本机转发地址并保持隧道运行。回环地址表示本设备自身，配对不会安装 SSH 密钥，也不管理 SSH 登录。
 
 配置后重启 DSH。默认读取 `$DSH_HOME/contextmesh/connection.json`；未设置 `DSH_HOME` 时读取 `$HOME/.dsh/contextmesh/connection.json`，也可通过 `CONTEXTMESH_CONFIG` 指定路径。文件权限为 600，所在目录必须为 700，不会隐式覆盖已有配置。每台设备使用独立 DSH home，配对提供稳定的设备身份。
 

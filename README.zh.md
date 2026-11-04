@@ -43,7 +43,7 @@ Server 部署一次，各设备连接同一个服务，无需各自安装数据�
 
 ## 1. 部署 Server
 
-**在服务端机器执行。** 需要 Git 和 Docker Compose。这一步启动 API 与 PostgreSQL，宿主机无需安装 Node 或 DSH。
+**在服务端机器执行。** 需要 Git 和 Docker Compose；默认 HTTPS 连接还需准备服务域名和 TLS 反向代理。这一步启动 API 与 PostgreSQL，宿主机无需安装 Node 或 DSH。
 
 ```sh
 git clone https://github.com/MarsZheng666/ContextMesh.git contextmesh-server
@@ -68,17 +68,11 @@ docker compose --env-file .env -f deploy/compose.yml ps
 
 API 地址为**服务器本机**的 `http://127.0.0.1:8787`。PostgreSQL 仅在 Docker 网络内访问，数据保存在命名卷中。
 
-要让其他设备连接，可以为 API 配置 HTTPS，例如 `https://mesh.example.com`；也可以**在每台需要连接的设备上**建立 SSH 隧道：
+**设备默认通过 HTTPS 直连。** 配置服务域名，例如 `https://mesh.example.com`，将 DNS 指向服务器，并通过 TLS 反向代理转发到 `127.0.0.1:8787`。代理示例和证书要求见[HTTPS 服务端配置](docs/deployment.zh.md#https-直连默认)。各设备使用同一个 HTTPS 地址和各自的凭据连接。
 
-```sh
-ssh -N -o ExitOnForwardFailure=yes \
-  -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
-  -L 127.0.0.1:8788:127.0.0.1:8787 user@server
-```
+[SSH 隧道](docs/deployment.zh.md#可选-ssh-隧道)是可选方案，适用于希望 API 仅通过 SSH 访问的部署。同机本地开发可使用 `http://127.0.0.1:8787`。ContextMesh API 地址与 DSH 网页地址是两个不同入口。
 
-使用该隧道的设备填写 `http://127.0.0.1:8788`，并保持隧道运行。`127.0.0.1` 始终代表当前使用这个地址的机器。ContextMesh API 地址与 DSH 网页地址是两个不同入口。
-
-HTTPS、自行管理的 PostgreSQL、数据存放位置和升级步骤见[服务端安装与配置](docs/deployment.zh.md)。
+自行管理的 PostgreSQL、数据存放位置和升级步骤见[服务端安装与配置](docs/deployment.zh.md)。
 
 ## 2. 在每台设备上安装插件
 
@@ -107,13 +101,13 @@ pnpm exec dsh plugin --profile web add "link:$PWD/packages/handoff-deepseek"
 在客户端目录的同一终端中，配置本设备可访问的服务地址，以及服务端 `.env` 中的所有者 Token：
 
 ```sh
-export CONTEXTMESH_ENDPOINT='http://127.0.0.1:8788'
+export CONTEXTMESH_ENDPOINT='https://mesh.example.com'
 export CONTEXTMESH_TOKEN='your-server-owner-token'
 pnpm cli doctor
 pnpm exec dsh --profile web --host 127.0.0.1 --port 3080 --no-open
 ```
 
-示例使用前面的 SSH 隧道。直接连接时填写自己的 HTTPS 地址；DSH 与 Server 在同一台机器时，可以填写 `http://127.0.0.1:8787`。
+将 `https://mesh.example.com` 替换为前面配置的 HTTPS 服务地址。这是默认连接方式，无需建立 SSH 隧道。
 
 打开 DSH 打印的带认证信息的地址，再在 DSH 中配置模型提供方。这些环境变量只对当前终端生效，后续启动需要重新加载；希望长期保存配置时，使用[私有连接文件](docs/getting-started.zh.md#保存所有者连接)。
 
@@ -129,7 +123,7 @@ pnpm exec dsh --profile web --host 127.0.0.1 --port 3080 --no-open
    pnpm cli setup
    ```
 
-3. 选择 **pairing code**，输入本设备可访问的 Server 地址和配对码。向导会私密保存该设备独有的凭据与身份。
+3. 选择 **pairing code**，输入与所有者设备相同的 HTTPS 服务地址和配对码。向导会私密保存该设备独有的凭据与身份。
 4. 启动 DSH，并配置本机模型提供方：
 
    ```sh

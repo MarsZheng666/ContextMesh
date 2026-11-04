@@ -43,7 +43,7 @@ The instructions below use the available source installation path. Self-containe
 
 ## 1. Deploy the server
 
-**Run on the service host.** Requires Git and Docker Compose. This starts the API and PostgreSQL; Node and DSH do not need to be installed on the host.
+**Run on the service host.** Requires Git and Docker Compose. For the default HTTPS connection, also prepare a service domain and a TLS reverse proxy. This starts the API and PostgreSQL; Node and DSH do not need to be installed on the host.
 
 ```sh
 git clone https://github.com/MarsZheng666/ContextMesh.git contextmesh-server
@@ -68,17 +68,11 @@ docker compose --env-file .env -f deploy/compose.yml ps
 
 The API is available on the **server's** `http://127.0.0.1:8787`. PostgreSQL stays inside the Docker network and keeps its data in a named volume.
 
-For other devices, either put the API behind HTTPS, such as `https://mesh.example.com`, or open an SSH tunnel **on each connecting device**:
+**HTTPS direct connection is the default for devices.** Configure a service domain such as `https://mesh.example.com`, point its DNS to the server, and put a TLS reverse proxy in front of `127.0.0.1:8787`. See [HTTPS server configuration](docs/deployment.md#https-direct-connection-default) for the proxy example and certificate requirements. All devices then use this same HTTPS URL with their own credentials.
 
-```sh
-ssh -N -o ExitOnForwardFailure=yes \
-  -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
-  -L 127.0.0.1:8788:127.0.0.1:8787 user@server
-```
+[SSH tunneling](docs/deployment.md#optional-ssh-tunnel) is an optional alternative when you want to keep the API accessible only through SSH. Local development on the service host can use `http://127.0.0.1:8787`. The ContextMesh API URL is separate from the DSH Web UI URL.
 
-A device using this tunnel connects to `http://127.0.0.1:8788`. Keep the tunnel open. `127.0.0.1` always refers to the machine using it. The ContextMesh API URL is separate from the DSH Web UI URL.
-
-See [server installation and configuration](docs/deployment.md) for HTTPS, an existing PostgreSQL database, persistent data, and upgrades.
+See [server installation and configuration](docs/deployment.md) for an existing PostgreSQL database, persistent data, and upgrades.
 
 ## 2. Install the plugin on each device
 
@@ -107,13 +101,13 @@ Only the service host needs PostgreSQL. Device checkouts do not need a server `.
 In the client checkout and the same terminal, set the service URL reachable from this device and the owner token from the server's `.env`:
 
 ```sh
-export CONTEXTMESH_ENDPOINT='http://127.0.0.1:8788'
+export CONTEXTMESH_ENDPOINT='https://mesh.example.com'
 export CONTEXTMESH_TOKEN='your-server-owner-token'
 pnpm cli doctor
 pnpm exec dsh --profile web --host 127.0.0.1 --port 3080 --no-open
 ```
 
-The example URL uses the SSH tunnel above. Use your HTTPS URL for a direct connection, or `http://127.0.0.1:8787` when DSH runs on the service host.
+Replace `https://mesh.example.com` with the HTTPS service URL configured above. No SSH tunnel is needed for this default connection.
 
 Open the authenticated URL printed by DSH, then configure a model provider in DSH. These environment settings apply to the current terminal; load them again on later launches, or use the [private connection-file setup](docs/getting-started.md#save-the-owner-connection) for persistent configuration.
 
@@ -129,7 +123,7 @@ After installing the plugin on the new device:
    pnpm cli setup
    ```
 
-3. Choose **pairing code**, enter the server URL reachable from this device, then enter the code. The wizard saves this device's credential and identity privately.
+3. Choose **pairing code**, enter the same HTTPS service URL used by the owner device, then enter the code. The wizard saves this device's credential and identity privately.
 4. Start DSH and configure its local model provider:
 
    ```sh

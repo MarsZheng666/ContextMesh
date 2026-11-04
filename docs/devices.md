@@ -15,7 +15,9 @@ unset CONTEXTMESH_TOKEN CONTEXTMESH_ENDPOINT
 pnpm cli setup
 ```
 
-The wizard asks for the reachable service URL and the pairing code, then writes a private configuration automatically. Use HTTPS for a remote address. A loopback address refers to the new device itself: if using SSH, establish that device's tunnel first and keep it running. Pairing does not install SSH keys or manage an SSH login.
+The wizard asks for the service URL and the pairing code, then writes a private configuration automatically. **Use HTTPS direct connection by default:** enter the same service URL as the owner device, such as `https://mesh.example.com`. Each device receives its own credential; no SSH setup is needed.
+
+For the [optional SSH deployment](deployment.md#optional-ssh-tunnel), establish this device's tunnel first, then enter its local forwarded URL and keep the tunnel running. A loopback address refers to this device itself. Pairing does not install SSH keys or manage an SSH login.
 
 Restart DSH after setup. It reads `$DSH_HOME/contextmesh/connection.json` by default, or `$HOME/.dsh/contextmesh/connection.json` when `DSH_HOME` is unset. Set `CONTEXTMESH_CONFIG` to use another location. The file has mode 600 and its directory must have mode 700. Existing configuration is never replaced implicitly. Keep each device's DSH home separate; pairing supplies a stable node identity.
 

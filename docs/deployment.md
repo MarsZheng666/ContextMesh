@@ -6,7 +6,7 @@ Deploy **one ContextMesh Server** for your devices. It stores session history in
 
 ## Option A: Docker Compose from source
 
-Requires Git and Docker Compose on the service host. The [Dockerfile](../Dockerfile) builds the API inside Docker; a host Node, pnpm, or DSH installation is not required.
+Requires Git and Docker Compose on the service host. The default HTTPS deployment also needs a service domain and a TLS reverse proxy. The [Dockerfile](../Dockerfile) builds the API inside Docker; a host Node, pnpm, or DSH installation is not required.
 
 ```sh
 git clone https://github.com/MarsZheng666/ContextMesh.git contextmesh-server
@@ -36,15 +36,15 @@ PostgreSQL is accessible only inside the Compose network. Its data is stored in 
 
 ## Make the API reachable
 
-Choose one connection method and give each device the URL it can reach:
+**HTTPS direct connection is the default.** Set up the HTTPS entry point once on the server, then give every device the same service URL. Each device authenticates with its own credential; it does not need an SSH tunnel.
 
-| Connection                             | URL configured on the device                                 |
-| -------------------------------------- | ------------------------------------------------------------ |
-| DSH on the service host                | `http://127.0.0.1:8787`                                      |
-| DSH on another device through SSH      | The device's forwarded address, e.g. `http://127.0.0.1:8788` |
-| DSH connecting directly over a network | Your HTTPS origin, e.g. `https://mesh.example.com`           |
+| Connection                            | URL configured on the device                                 |
+| ------------------------------------- | ------------------------------------------------------------ |
+| **Default: HTTPS direct connection**  | Your HTTPS origin, e.g. `https://mesh.example.com`           |
+| Local development on the service host | `http://127.0.0.1:8787`                                      |
+| Optional SSH tunnel                   | The device's forwarded address, e.g. `http://127.0.0.1:8788` |
 
-### Through HTTPS
+### HTTPS direct connection (default)
 
 Put a TLS reverse proxy in front of the API. For example, a Caddy instance running directly on the same host can use:
 
@@ -58,7 +58,9 @@ Replace the domain, point its DNS at this host, and make ports 80/443 available 
 
 Devices then configure `https://mesh.example.com`. Keep PostgreSQL private. Model-provider credentials belong in the individual DSH instances, not in this proxy or the ContextMesh server.
 
-### Connect through SSH
+### Optional SSH tunnel
+
+Choose this alternative if you want to leave the API accessible only through SSH, such as a private deployment without a public HTTPS entry point. The default HTTPS connection does not use this setup.
 
 On **each connecting device**, establish its own tunnel:
 
@@ -68,13 +70,13 @@ ssh -N -o ExitOnForwardFailure=yes \
   -L 127.0.0.1:8788:127.0.0.1:8787 user@server
 ```
 
-Replace `user@server` with your SSH destination. This device uses `http://127.0.0.1:8788` as its ContextMesh URL while the tunnel stays open. Use a different local port if 8788 is occupied.
+Replace `user@server` with your SSH destination. For this alternative, replace the HTTPS endpoint in this device's connection settings with its local tunnel URL. This device uses `http://127.0.0.1:8788` as its ContextMesh URL while the tunnel stays open. Use a different local port if 8788 is occupied.
 
 The API does not serve the DSH Web UI. To view a remote DSH, forward its Web port separately and open the login URL printed by that DSH instance. When viewing two DSH instances together, use `127.0.0.1` for one and `localhost` for the other to avoid sharing their authentication Cookie host.
 
 ## Connect the first owner, then pair devices
 
-On the first owner device, install [the device plugin](getting-started.md) and configure the reachable API URL plus the server's `CONTEXTMESH_TOKEN`. For subsequent devices, create one-time pairing codes from the owner's DSH instead of sharing the owner token.
+On the first owner device, install [the device plugin](getting-started.md) and configure the service HTTPS URL plus the server's `CONTEXTMESH_TOKEN`. For subsequent devices, create one-time pairing codes from the owner's DSH instead of sharing the owner token.
 
 All paired devices share this server's configured conversation namespace. They receive independent, revocable credentials. DSH browser login and model-provider authentication do not grant ContextMesh access. See [device access](devices.md).
 
@@ -110,7 +112,7 @@ Set `DATABASE_URL` to your actual database and replace the example token, then s
 pnpm start
 ```
 
-For a service manager, run `node --env-file=.env dist/server.js` from the server checkout. Startup initializes the database schema and requires `fsync` and synchronous commit. Use the same HTTPS or SSH connection options above.
+For a service manager, run `node --env-file=.env dist/server.js` from the server checkout. Startup initializes the database schema and requires `fsync` and synchronous commit. Use the default HTTPS entry point described above; SSH tunneling remains an optional alternative.
 
 `pnpm db:local` is a development-only alternative: run it as a regular user in a separate terminal. It starts PostgreSQL on `127.0.0.1:55432`, matching `.env.example`, and stores data in `.contextmesh/postgres`. It is not needed on client devices or with Docker Compose.
 
