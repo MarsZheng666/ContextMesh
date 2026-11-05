@@ -2,46 +2,51 @@
 
 [English](README.md) | 中文
 
-**同一个会话，跨设备、跨模型继续。**
+**让上下文跨设备、跨模型、跨 Coding Agent 延续。**
 
-在笔记本上开始任务，到另一台机器上继续执行，切换模型时保留原始对话和工具历史。
+将对话和工具历史保存在共享 Server，在另一台设备继续 DSH 任务，或将已完成的快照带入 Codex CLI，使用接收端自己的模型和工作区继续。
 
-ContextMesh 由两部分组成：**每台设备上负责发送和读取会话事件的插件**，以及**将会话数据持久化到 PostgreSQL 的共享远端 Server**。首个支持的客户端是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)，后续将扩展至其他 Coding Agent。
+ContextMesh 由**一个共享远端 Server**和**执行任务设备上的集成组件**组成：唯一的 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 插件，以及内置于 ContextMesh CLI 的可选 Codex 适配器。
 
-[部署 Server](#1-部署-server) · [安装插件](#2-在每台设备上安装插件) · [连接设备](#3-配置设备连接) · [开始接续](#4-继续同一个会话)
+[部署 Server](#1-部署-server) · [安装设备客户端](#2-安装设备客户端) · [连接设备](#3-配置设备连接) · [DSH 会话交接](#4-在-dsh-中继续同一个会话) · [Codex CLI](#5-使用-codex-cli-接续快照)
 
 ## 项目如何组成
 
 ```mermaid
 flowchart LR
-  A["设备 A · DSH + ContextMesh 插件"] <-->|"发送 / 读取会话事件"| S["远端 ContextMesh Server"]
-  B["设备 B · DSH + ContextMesh 插件"] <-->|"发送 / 读取会话事件"| S
-  S -->|"持久化会话历史"| DB[(PostgreSQL)]
+  A["设备 A · DSH + ContextMesh 插件"] <-->|"原生会话事件"| S["远端 ContextMesh Server"]
+  B["设备 B · DSH + ContextMesh 插件"] <-->|"原生会话事件"| S
+  C["设备 C · Codex CLI + ContextMesh CLI"] <-->|"导入上下文 / 归档快照"| S
+  S -->|"持久化共享历史"| DB[(PostgreSQL)]
 ```
 
-| 组件       | 安装在哪里                    | 需要配置什么                    | 负责什么                                                               |
-| ---------- | ----------------------------- | ------------------------------- | ---------------------------------------------------------------------- |
-| **Server** | 一台各设备可访问的机器        | PostgreSQL、服务鉴权凭据        | 将会话历史持久化到 PostgreSQL、验证设备身份、协调会话归属与交接        |
-| **插件**   | 每台参与任务的设备上的 DSH 中 | Server 地址、设备凭据、本机模型 | 向 Server 发送原生会话事件、读取历史以恢复会话、提供共享会话与交接操作 |
+| 组件             | 运行在哪里                        | 需要配置                                      | 负责什么                                                 |
+| ---------------- | --------------------------------- | --------------------------------------------- | -------------------------------------------------------- |
+| **Server**       | 一台各设备可访问的主机            | PostgreSQL、服务凭据、HTTPS 地址              | 持久化共享上下文、验证设备身份、协调会话归属和交接       |
+| **DSH 插件**     | 每台参与任务的设备上的 DSH 中     | Server 连接、本机模型                         | 发送和恢复原生事件，提供共享会话、交接和接管入口         |
+| **Codex 适配器** | Codex 设备上的 ContextMesh CLI 中 | 同一 Server 连接、本机 Codex 登录、模型和目录 | 导入已完成快照、运行原生 Codex 线程、将结果归档到 Server |
 
-Server 部署一次，各设备连接同一个服务，无需各自安装数据库。如果服务器机器本身也要运行 DSH 执行任务，就在它的 DSH 中同样安装插件。模型调用和工具执行发生在当前执行任务的设备上，模型 API Key 留在该设备。
+Server 部署一次。各设备使用同一个 HTTPS 地址和独立凭据连接，无需本机 PostgreSQL。服务端主机只有同时执行任务时才需要设备集成。模型调用和工具执行发生在执行任务的设备上，模型凭据留在该设备。
 
-共享会话的完整历史以服务端 PostgreSQL 数据库为准。本机文件保留连接配置、设备身份、模型凭据、缓存和交接状态。
+**共享上下文由远端 PostgreSQL 持久化。** DSH 插件负责传输会话事件；Codex 适配器在确认运行结果后归档原生线程、轮次和事件快照，Codex 自身也保留原生本地历史。设备本地文件用于配置、凭据、缓存和恢复记录；其他 Codex 操作不会被自动同步。
 
-## 可以做什么
+## 当前支持范围
 
-- **保留原生上下文：** 插件将消息、工具调用、工具结果和执行事件发送到远端 Server，由 Server 持久化到 PostgreSQL。
-- **换台设备继续：** 主动交接或确认接管。对于未完成任务，先预检接收端，再安全停止原设备，随后自动继续执行。
-- **使用接收端的模型：** 只配置 Sol 的设备也能接续 Flash 的任务。直接使用 DSH 原生模型选择器，无需两端配置相同模型。
-- **带上选定文件：** 预览并确认工作区改动及受支持的文件附件，再在接收端应用。
+| 使用场景                   | 当前行为                                                                           |
+| -------------------------- | ---------------------------------------------------------------------------------- |
+| **跨设备 DSH → DSH**       | 主动交接或确认接管同一会话。执行中的任务先预检接收端，再停止源端，随后自动继续。   |
+| **在 DSH 中切换模型**      | 使用接收端原生模型选择；只配置 Sol 的设备也可继续 Flash 的任务，两端模型无需一致。 |
+| **DSH → Codex CLI**        | 将已完成的文本和工具历史快照导入为新 Codex 线程，再发送新指令继续。                |
+| **托管 Codex → Codex CLI** | 将已归档快照导入另一本机 Codex 线程，使用接收端模型和目录。                        |
+| **DSH 选定文件传输**       | 在接收端应用前，预览并确认受支持的工作区改动和原生文件附件。                       |
 
-可选的 [Codex CLI 适配器](docs/codex.zh.md)可导入已完成的 DSH 或托管 Codex 快照，使用本机选择的模型和工作区继续。跨 Agent 运行中任务的自动接管尚未提供；集成开发者也可使用[按适配器区分的原生存储](docs/native-agents.zh.md)。
+Codex 快照导入会创建独立会话并保留来源。**不同 Agent 之间执行中任务的自动接管，以及 Codex → DSH 导入尚未提供。** 详见 [DSH 交接](docs/handoff.zh.md)、[Codex 使用指南](docs/codex.zh.md)和[原生存储](docs/native-agents.zh.md)。
 
 ## 安装前了解
 
-**0.8.0-dev.2 为尚未发布的源码预览版。** 插件依赖本仓库锁定的 **DSH 0.2.1-rc.3 和兼容补丁**。请使用下方构建的运行时，不支持直接装入任意全局 DSH。
+**0.8.0-dev.2 为尚未发布的源码预览版。** 插件依赖本仓库锁定的 **DSH 0.2.1-rc.3 和兼容补丁**。请使用下方锁定版本的源码构建，不支持直接装入任意全局 DSH。
 
-以下采用当前可用的源码安装方式。CI 也会构建包含运行环境的 macOS Apple Silicon 和 Linux x64 安装包，但目前它们是**候选产物，尚未作为正式 Release 发布**。候选包的安装与升级方式见[运行包指南](docs/runtime.zh.md)。
+Server 与设备客户端请使用同一经审核的源码版本。以下采用源码安装方式。CI 也会构建包含运行环境的 macOS Apple Silicon 和 Linux x64 安装包，但目前它们是**候选产物，尚未作为正式 Release 发布**。候选包的安装与升级方式见[运行包指南](docs/runtime.zh.md)。
 
 ## 1. 部署 Server
 
@@ -76,9 +81,9 @@ API 地址为**服务器本机**的 `http://127.0.0.1:8787`。PostgreSQL 仅在 
 
 自行管理的 PostgreSQL、数据存放位置和升级步骤见[服务端安装与配置](docs/deployment.zh.md)。
 
-## 2. 在每台设备上安装插件
+## 2. 安装设备客户端
 
-**在每台要执行任务的机器上执行。** 需要 Git、**Node.js 24.9+** 和 **pnpm 11.25.0**。即使 Server 与 DSH 在同一台机器，也使用独立的客户端目录，避免服务端 `.env` 覆盖设备凭据。
+**在每台要执行任务的设备上执行。** 源码 CLI 需要 Git、**Node.js 24.9+** 和 **pnpm 11.25.0**。即使 Server 与 DSH 在同一台机器，也使用独立的客户端目录，避免服务端 `.env` 覆盖设备凭据。
 
 ```sh
 git clone https://github.com/MarsZheng666/ContextMesh.git contextmesh-client
@@ -86,7 +91,15 @@ cd contextmesh-client
 corepack enable
 pnpm install --frozen-lockfile
 pnpm build
+```
 
+**只使用 Codex 的设备：** ContextMesh CLI 到这里已构建完成。跳过 DSH 插件安装，按第 3 步配置连接，再进入[第 5 步](#5-使用-codex-cli-接续快照)。Codex CLI 需要单独安装和配置，ContextMesh 不捆绑它。
+
+### DSH：安装唯一的插件
+
+在同一终端中执行：
+
+```sh
 export DSH_HOME="$HOME/.dsh-contextmesh"
 export CONTEXTMESH_NODE_NAME='My laptop'
 pnpm exec dsh plugin --profile web add "link:$PWD/packages/handoff-deepseek"
@@ -106,19 +119,24 @@ pnpm exec dsh plugin --profile web add "link:$PWD/packages/handoff-deepseek"
 export CONTEXTMESH_ENDPOINT='https://mesh.example.com'
 export CONTEXTMESH_TOKEN='your-server-owner-token'
 pnpm cli doctor
+```
+
+DSH 设备再启动网页界面：
+
+```sh
 pnpm exec dsh --profile web --host 127.0.0.1 --port 3080 --no-open
 ```
 
 将 `https://mesh.example.com` 替换为前面配置的 HTTPS 服务地址。这是默认连接方式，无需建立 SSH 隧道。
 
-打开 DSH 打印的带认证信息的地址，再在 DSH 中配置模型提供方。这些环境变量只对当前终端生效，后续启动需要重新加载；希望长期保存配置时，使用[私有连接文件](docs/getting-started.zh.md#保存所有者连接)。
+DSH 用户打开它打印的带认证信息的地址，再配置模型提供方；Codex 用户在本机配置其登录和模型服务，随后进入第 5 步。这些环境变量只对当前终端生效，后续启动需要重新加载；希望长期保存配置时，使用[私有连接文件](docs/getting-started.zh.md#保存所有者连接)。
 
 ### 其他设备：通过配对加入
 
-在新设备安装插件后：
+在新设备构建 CLI，并按需安装 DSH 插件后：
 
-1. 在所有者设备打开 **Remote sessions → Service connection → Add or revoke a device**，填写新设备名称，生成一次性配对码。
-2. 在新设备的客户端目录中，设置好它自己的 `DSH_HOME`，然后执行：
+1. 在所有者的 DSH 设备打开 **Remote sessions → Service connection → Add or revoke a device**，填写新设备名称，生成一次性配对码。
+2. 在新设备的客户端目录运行设置向导；DSH 设备保持自己的 `DSH_HOME`：
 
    ```sh
    unset CONTEXTMESH_TOKEN CONTEXTMESH_ENDPOINT
@@ -126,18 +144,18 @@ pnpm exec dsh --profile web --host 127.0.0.1 --port 3080 --no-open
    ```
 
 3. 选择 **pairing code**，输入与所有者设备相同的 HTTPS 服务地址和配对码。向导会私密保存该设备独有的凭据与身份。
-4. 启动 DSH，并配置本机模型提供方：
+4. DSH 设备启动网页界面并配置本机模型；只使用 Codex 的设备在本机配置 Codex 后进入第 5 步：
 
    ```sh
    pnpm cli doctor
    pnpm exec dsh --profile web --host 127.0.0.1 --port 3080 --no-open
    ```
 
-打开该 DSH 打印的地址。不同机器上的 DSH 可以使用相同网页端口。
+DSH 用户打开该实例打印的地址。不同机器上的 DSH 可以使用相同网页端口。
 
 不要把所有者的 `.env`、DSH 主目录或模型密钥复制给其他设备。配对设备会获得独立、可撤销的凭据；同一 Server 下的配对设备共享其会话命名空间。**ContextMesh 设备配对、DSH 网页登录、模型提供方鉴权是三件不同的事。** 详见[设备权限与撤销](docs/devices.zh.md)。
 
-## 4. 继续同一个会话
+## 4. 在 DSH 中继续同一个会话
 
 打开 **Remote sessions** 查看设备和共享会话。需要工作目录时，按提示为项目选择每台设备上的本地目录，两端路径可以不同。
 
@@ -149,12 +167,37 @@ pnpm exec dsh --profile web --host 127.0.0.1 --port 3080 --no-open
 
 支持范围和恢复方式见[会话交接](docs/handoff.zh.md)、[模型接力](docs/model-relay.zh.md)及[文件传输](docs/files.zh.md)。模型接力目前支持文本和已完成的工具历史；文件传输支持原生文件附件，图片、spill 资源和运行中的进程暂不支持。
 
+## 5. 使用 Codex CLI 接续快照
+
+使用第 2–3 步构建的客户端目录和 Server 连接。在接收端单独安装并配置 Codex CLI；适配器已使用 **Codex CLI 0.154.0** 验证。模型凭据由其本机登录和模型服务配置提供。
+
+先结束源端当前轮次及工具调用，再执行：
+
+```sh
+pnpm cli list
+pnpm cli codex import SOURCE_SESSION_ID \
+  --cwd /absolute/path/to/local/project \
+  --model YOUR_LOCAL_CODEX_MODEL
+```
+
+目录和模型选择本机可用的值。导入会创建新线程，返回以 `codex:` 开头的 `sessionId`，不会启动模型轮次。使用返回的 ID 继续：
+
+```sh
+pnpm cli codex run CODEX_SESSION_ID --message "根据之前的结果继续。"
+pnpm cli codex status CODEX_SESSION_ID
+```
+
+导入托管 Codex 快照时增加 `--from codex`；通过 `pnpm cli list --adapter codex` 查看其远程归档。使用托管运行包时，将 `pnpm cli` 换成 `contextmesh`。
+
+默认原生运行权限为**只读**；需要编辑时在导入命令中选择 `--workspace-write`。源端工具历史作为引用文本传入，不复制工作区文件，也不自动采集已有非托管 Codex 线程。当前支持文本和已确认的工具历史；不支持的附件和不确定的工具结果会阻止导入。运行中断后，先检查 `status`，按文档确认旧进程停止并核对归档，再考虑重发指令。配置、限制和恢复步骤见 [Codex 使用指南](docs/codex.zh.md)。
+
 ## 升级与排查
 
 | 需要维护的部分                     | 对应指南                               |
 | ---------------------------------- | -------------------------------------- |
 | Server、PostgreSQL、网络访问和备份 | [服务端部署](docs/deployment.zh.md)    |
-| 插件安装、持久连接配置和模型登录   | [设备配置](docs/getting-started.zh.md) |
+| DSH 插件、持久连接配置和模型登录   | [设备配置](docs/getting-started.zh.md) |
+| Codex 导入、原生执行和中断恢复     | [Codex 适配器](docs/codex.zh.md)       |
 | 独立运行包、连接诊断和受控升级     | [运行环境管理](docs/runtime.zh.md)     |
 | 配对码、设备凭据和撤销             | [设备权限](docs/devices.zh.md)         |
 
