@@ -1,3 +1,4 @@
+import { runCodex } from './codex.js'
 import { runRuntime } from './runtime.js'
 import { setup } from './setup.js'
 import { readConnection } from '../../../packages/client/src/config.js'
@@ -7,6 +8,7 @@ import { MeshError } from '../../../packages/protocol/src/index.js'
 import { runLocal } from './local.js'
 const input = process.argv.slice(2)
 const handled = await (async () =>
+  (await runCodex(input)) ||
   (await runRuntime(input)) ||
   (await setup(input)) ||
   (await runLocal(input)))().catch((error) => {

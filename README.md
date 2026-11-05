@@ -35,11 +35,11 @@ The server's PostgreSQL database is the authoritative store for shared session h
 - **Use the receiver's model:** a device configured only with Sol can continue a Flash task. Select models through DSH's native selector; devices do not need identical model configurations.
 - **Bring selected files:** preview and confirm workspace changes and supported file attachments before applying them on the receiver.
 
-Native storage also accepts adapter-scoped logs for integrators. This does not yet provide a Codex/Claude plugin or automatic cross-Agent continuation; see [the native storage contract](docs/native-agents.md).
+The optional [Codex CLI bridge](docs/codex.md) imports completed DSH or managed Codex snapshots and continues with a locally selected model and workspace. Automatic running-task takeover across Agents is not available yet. Integrators can also use [adapter-scoped native storage](docs/native-agents.md).
 
 ## Before you install
 
-**0.8.0-dev.1 is an unreleased source preview.** The plugin requires this repository's pinned **DSH 0.2.1-rc.3 and compatibility patches**. Use the runtime built below; installing the plugin into an arbitrary global DSH is not supported.
+**0.8.0-dev.2 is an unreleased source preview.** The plugin requires this repository's pinned **DSH 0.2.1-rc.3 and compatibility patches**. Use the runtime built below; installing the plugin into an arbitrary global DSH is not supported.
 
 The instructions below use the available source installation path. Self-contained macOS Apple Silicon and Linux x64 packages are also built by CI, but are currently **candidate artifacts, not published releases**. Their installation and upgrade commands are covered in the [runtime guide](docs/runtime.md).
 

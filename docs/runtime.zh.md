@@ -2,7 +2,7 @@
 
 [English](runtime.md)
 
-0.8.0-dev.1 运行包包含 Node、固定版本的 DeepSeek Harness 和唯一的 `dsh-contextmesh-handoff` 插件，面向 macOS Apple Silicon 与 Linux x64。Linux 包会在清单中记录并检查最低 glibc 版本，发布 CI 使用 Ubuntu 22.04（glibc 2.35）。暂不支持 Windows 和其他架构。普通对话无需全局 Node、pnpm 或 Git；代码项目使用 Git 时仍需安装 Git。
+0.8.0-dev.2 运行包包含 Node、固定版本的 DeepSeek Harness 和唯一的 `dsh-contextmesh-handoff` 插件，面向 macOS Apple Silicon 与 Linux x64。Linux 包会在清单中记录并检查最低 glibc 版本，发布 CI 使用 Ubuntu 22.04（glibc 2.35）。暂不支持 Windows 和其他架构。普通对话无需全局 Node、pnpm 或 Git；代码项目使用 Git 时仍需安装 Git。
 
 运行包由 **Release packages** 工作流构建。工作流产物属于候选包，发布仍是维护者单独执行的步骤。从可信发布获取对应平台压缩包和校验值，核对 SHA-256 后解压。保留校验值与 `manifest.json`；其中记录平台、Node/DSH 版本、协议与数据库兼容范围、源码提交、锁文件和补丁哈希、文件校验值及第三方许可证信息。
 

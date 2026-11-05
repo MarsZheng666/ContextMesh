@@ -2,7 +2,7 @@
 
 [中文](runtime.zh.md)
 
-The 0.8.0-dev.1 runtime packages contain Node, the pinned DeepSeek Harness runtime and the **single** `dsh-contextmesh-handoff` plugin. They are built for macOS Apple Silicon and Linux x64. Linux packages record and check their minimum glibc version in the manifest; release CI builds against Ubuntu 22.04 (glibc 2.35). Windows and additional architectures are not supported yet. A global Node, pnpm or Git installation is unnecessary for ordinary conversations; Git is needed when working with Git projects.
+The 0.8.0-dev.2 runtime packages contain Node, the pinned DeepSeek Harness runtime and the **single** `dsh-contextmesh-handoff` plugin. They are built for macOS Apple Silicon and Linux x64. Linux packages record and check their minimum glibc version in the manifest; release CI builds against Ubuntu 22.04 (glibc 2.35). Windows and additional architectures are not supported yet. A global Node, pnpm or Git installation is unnecessary for ordinary conversations; Git is needed when working with Git projects.
 
 Packages are produced by the **Release packages** workflow. Publication is a separate maintainer action: a workflow artifact is a candidate, not a published release. Obtain a platform archive and its checksum from the same trusted release, verify the SHA-256 value, then unpack it. Keep the original checksum and `manifest.json`. The manifest records platform, Node/DSH versions, protocol and schema compatibility, source commit, lockfile/patch hashes, file checksums and bundled third-party license information.
 

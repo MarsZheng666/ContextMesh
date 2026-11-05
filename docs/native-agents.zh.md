@@ -2,7 +2,7 @@
 
 [English](native-agents.md) · [部署 Server](deployment.zh.md) · [DSH 会话交接](handoff.zh.md)
 
-ContextMesh Server 可以保存独立的原生 Agent 日志。目前已安装可用的 Agent 集成仍只有 DSH。在 SDK 中选择 `adapter: 'codex'` 只是指定存储格式，不会安装 Codex，也不会让 Codex 直接执行 DSH 会话。跨 Agent 转换、工具兼容与自动任务接力需要专用适配器，目前尚未提供。
+ContextMesh Server 可以保存独立的原生 Agent 日志。DSH 仍使用唯一的 ContextMesh 插件；可选 [Codex CLI 适配器](codex.zh.md)可导入已完成的快照并归档原生续跑结果。单独在 SDK 中选择 `adapter: 'codex'` 仍只是指定存储格式，不会安装 Codex 或转换 DSH 日志。跨 Agent 执行中任务的自动接管尚未提供。
 
 ## 存储约定
 

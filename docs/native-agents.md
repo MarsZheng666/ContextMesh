@@ -2,7 +2,7 @@
 
 [中文](native-agents.zh.md) · [Server deployment](deployment.md) · [DSH handoff](handoff.md)
 
-ContextMesh Server can persist independent native Agent logs. DSH remains the only installed Agent integration. Selecting `adapter: 'codex'` in the SDK names a storage format; it does not install Codex or make a DSH session executable by Codex. Cross-Agent conversion, tool compatibility and automatic task relay require a dedicated adapter and are not available yet.
+ContextMesh Server persists independent native Agent logs. DSH uses the single installed ContextMesh plugin; the optional [Codex CLI bridge](codex.md) imports completed snapshots and archives its native continuation. Selecting `adapter: 'codex'` in the SDK alone still only names a storage format; it does not install Codex or convert a DSH log. Automatic cross-Agent takeover of running work is not available yet.
 
 ## Storage contract
 
