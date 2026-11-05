@@ -491,7 +491,8 @@ export function RemotePanelView({
     )
   const selectedProject = project || data.projects[0]?.id || ''
   const targets = data.nodes.filter(
-    (node) => node.online && node.id !== data.nodeId,
+    (node) =>
+      node.online && node.id !== data.nodeId && node.adapter !== 'codex',
   )
   const selectedTarget = target || targets[0]?.id || ''
   const groups = [...new Set(data.sessions.map((session) => session.projectId))]
@@ -634,6 +635,12 @@ export function RemotePanelView({
                         ? ` · ${stateLabel(session.handoffState, t)}`
                         : ''}
                     </span>
+                    {session.successorSessionId && (
+                      <p role="status">
+                        {t('continuedInCodex')}:{' '}
+                        <code>{session.successorSessionId}</code>
+                      </p>
+                    )}
                     {session.recoveryRequired && (
                       <p className="cm-error">{t('recover')}</p>
                     )}
@@ -686,7 +693,8 @@ export function RemotePanelView({
                         {t('handoff')}
                       </button>
                     )}
-                    {!session.activeNodeId &&
+                    {!session.successorSessionId &&
+                      !session.activeNodeId &&
                       !session.handoffId &&
                       last &&
                       ((last.targetNodeId === data.nodeId &&
@@ -774,6 +782,29 @@ export function RemotePanelView({
               {data.sessions.find((s) => s.id === h.sessionId)?.title ||
                 h.sessionId.slice(0, 8)}{' '}
               · {stateLabel(h.state, t)}
+              {h.executionState && h.executionState !== 'none' && (
+                <>
+                  {' '}
+                  ·{' '}
+                  {t(
+                    (
+                      {
+                        pending: 'executionPending',
+                        dispatching: 'executionDispatching',
+                        completed: 'executionCompleted',
+                        failed: 'executionFailed',
+                        uncertain: 'executionUncertain',
+                      } as const
+                    )[h.executionState],
+                  )}
+                </>
+              )}
+              {h.targetSessionId && (
+                <>
+                  {' '}
+                  · <code>{h.targetSessionId}</code>
+                </>
+              )}
             </p>
           ))}
         </section>
@@ -831,7 +862,19 @@ export function HandoffDock({
   const data = state.data,
     session = data?.sessions.find((s) => s.id === sessionId)
   if (!data || !session) return null
-  const options = data.nodes.filter((n) => n.online && n.id !== data.nodeId)
+  if (session.successorSessionId)
+    return (
+      <div className="cm-dock">
+        <style>{style}</style>
+        <span role="status">
+          {t('continuedInCodex')}: <code>{session.successorSessionId}</code>.{' '}
+          {t('readonly')}
+        </span>
+      </div>
+    )
+  const options = data.nodes.filter(
+    (n) => n.online && n.id !== data.nodeId && n.adapter !== 'codex',
+  )
   const destination = target || options[0]?.id || ''
   const takingOver = state.takingOver?.includes(sessionId) ?? false
   const local = session.activeNodeId === data.nodeId
@@ -949,7 +992,18 @@ export function SessionDeviceView({
   t,
 }: Locale & { data?: Snapshot; sessionId: string; detail?: boolean }) {
   const session = data?.sessions.find((s) => s.id === sessionId)
-  if (!data || !session?.activeNodeName) return null
+  if (!data || !session) return null
+  if (session.successorSessionId) {
+    const label = `${t('continuedInCodex')}: ${session.successorSessionId}`
+    return detail ? (
+      <span style={{ fontSize: 12, opacity: 0.75 }}>{label}</span>
+    ) : (
+      <span role="img" aria-label={label} title={label}>
+        ↗
+      </span>
+    )
+  }
+  if (!session.activeNodeName) return null
   const remote = session.activeNodeId !== data.nodeId
   if (!remote && !detail) return null
   const label = `${remote ? t('remote') : t('local')}: ${session.activeNodeName}`

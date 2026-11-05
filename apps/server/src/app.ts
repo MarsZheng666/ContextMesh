@@ -85,10 +85,30 @@ export function buildServer(options: ServerOptions) {
       req.body && typeof req.body === 'object' && 'nodeId' in req.body
         ? req.body.nodeId
         : undefined
-    if (
-      (node && decodeURIComponent(node) !== device.nodeId) ||
-      (bodyNode && bodyNode !== device.nodeId)
-    )
+    const caller = node
+      ? decodeURIComponent(node)
+      : typeof bodyNode === 'string'
+        ? bodyNode
+        : undefined
+    const registration =
+      req.url === '/v1/nodes/register' && req.method === 'POST'
+        ? z
+            .object({
+              deviceId: z.literal(device.nodeId),
+              capabilities: z.object({ adapter: z.literal('codex') }),
+            })
+            .safeParse(req.body).success
+        : false
+    const child =
+      caller && caller !== device.nodeId
+        ? (
+            await options.store.pool.query(
+              'SELECT 1 FROM cm_nodes WHERE namespace=$1 AND id=$2 AND device_id=$3',
+              [ns, z.uuid().parse(caller), device.nodeId],
+            )
+          ).rowCount !== 0
+        : false
+    if (caller && caller !== device.nodeId && !registration && !child)
       return reply.code(403).send({
         code: 'WRONG_DEVICE',
         message: 'credential belongs to another device',
@@ -176,6 +196,7 @@ export function buildServer(options: ServerOptions) {
       leaseMs: options.store.leaseMs,
       features: [
         'native-agent-storage-v1',
+        'cross-agent-takeover-v1',
         'maintenance-v1',
         'handoff-v1',
         'takeover-v1',

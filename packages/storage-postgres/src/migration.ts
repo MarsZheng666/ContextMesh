@@ -109,6 +109,17 @@ const v7 = `
 CREATE INDEX cm_sessions_adapter ON cm_sessions(namespace,adapter,id COLLATE "C");
 INSERT INTO cm_schema(version) VALUES(7);
 `
+const v8 = `
+ALTER TABLE cm_sessions ADD COLUMN IF NOT EXISTS successor_session text;
+ALTER TABLE cm_nodes ADD COLUMN IF NOT EXISTS device_id uuid;
+UPDATE cm_nodes SET device_id=id WHERE device_id IS NULL;
+ALTER TABLE cm_handoffs ADD COLUMN IF NOT EXISTS target_session text;
+ALTER TABLE cm_handoffs ADD COLUMN IF NOT EXISTS execution text NOT NULL DEFAULT 'none';
+ALTER TABLE cm_handoffs ADD COLUMN IF NOT EXISTS execution_operation uuid;
+ALTER TABLE cm_handoffs ADD COLUMN IF NOT EXISTS execution_turn text;
+ALTER TABLE cm_handoffs ADD COLUMN IF NOT EXISTS source_stop_claimed boolean NOT NULL DEFAULT false;
+INSERT INTO cm_schema(version) VALUES(8);
+`
 export async function migrate(pool: Pool): Promise<void> {
   const client = await pool.connect()
   try {
@@ -143,7 +154,11 @@ export async function migrate(pool: Pool): Promise<void> {
       await client.query(v6)
       version = 6
     }
-    if (version === 6) await client.query(v7)
+    if (version === 6) {
+      await client.query(v7)
+      version = 7
+    }
+    if (version === 7) await client.query(v8)
     await client.query('COMMIT')
   } catch (error) {
     await client.query('ROLLBACK')

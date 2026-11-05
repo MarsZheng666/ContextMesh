@@ -153,3 +153,51 @@ for (const owner of ['A', 'B'])
       vi.unstubAllGlobals()
     }
   })
+
+it('shows the Codex successor, retains history access and excludes Codex from DSH target selection', () => {
+  const data = structuredClone(snapshot)
+  data.nodes.push({
+    id: 'CodexEndpoint',
+    name: 'Codex receiver should not be a DSH option',
+    online: true,
+    adapter: 'codex',
+  })
+  Object.assign(data.sessions[0]!, {
+    activeNodeId: null,
+    successorSessionId: 'codex:next',
+  })
+  data.handoffs = [
+    {
+      id: 'h',
+      sessionId: 'session',
+      sourceNodeId: 'A',
+      targetNodeId: 'A',
+      state: 'completed',
+      error: null,
+    },
+  ]
+  const html = renderToStaticMarkup(
+    <RemotePanelView
+      data={data}
+      t={(key) => new Map<string, string>(Object.entries(en)).get(key) ?? key}
+      request={async () => null}
+      refresh={async () => {}}
+      open={() => {}}
+    />,
+  )
+  expect(
+    renderToStaticMarkup(
+      <SessionDeviceView
+        data={data}
+        sessionId="session"
+        detail
+        t={(key) => new Map<string, string>(Object.entries(en)).get(key) ?? key}
+      />,
+    ),
+  ).toContain('codex:next')
+  expect(html).toContain(en.continuedInCodex)
+  expect(html).toContain('codex:next')
+  expect(html).toContain(en.history)
+  expect(html).not.toContain(en.resume)
+  expect(html).not.toContain('Codex receiver should not be a DSH option')
+})

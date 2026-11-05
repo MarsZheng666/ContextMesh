@@ -2,7 +2,7 @@
 
 [English](native-agents.md) · [部署 Server](deployment.zh.md) · [DSH 会话交接](handoff.zh.md)
 
-ContextMesh Server 可以保存独立的原生 Agent 日志。DSH 仍使用唯一的 ContextMesh 插件；可选 [Codex CLI 适配器](codex.zh.md)可导入已完成的快照并归档原生续跑结果。单独在 SDK 中选择 `adapter: 'codex'` 仍只是指定存储格式，不会安装 Codex 或转换 DSH 日志。跨 Agent 执行中任务的自动接管尚未提供。
+ContextMesh Server 可以保存独立的原生 Agent 日志。DSH 仍使用唯一的 ContextMesh 插件；可选 [Codex CLI 适配器](codex.zh.md)可导入快照、确认接管未完成的 DSH 任务，并归档原生续跑结果。单独在 SDK 中选择 `adapter: 'codex'` 仍只是指定存储格式，不会安装 Codex 或转换 DSH 日志。DSH → Codex 的确认式接管见[接管指南](confirmed-takeover.zh.md)。
 
 ## 存储约定
 
@@ -57,4 +57,4 @@ contextmesh recover codex-thread-id --confirm-stopped --adapter codex
 
 ## 版本兼容
 
-带认证的 `/health/ready` 声明 `native-agent-storage-v1`，数据库版本为 **7**。旧 Server 不接受其他原生格式。schema 7 保留已有 DSH header 和事件，增加目录查询索引，并阻止旧程序打开包含其他原生日志的数据库。请按[结构迁移流程](runtime.zh.md#从-schema-6-迁移到-7)升级。对外仍只安装一个 DSH ContextMesh 插件。
+带认证的 `/health/ready` 声明 `native-agent-storage-v1`，数据库版本为 **8**。旧 Server 不接受其他原生格式。schema 8 保留原生格式边界和已有 DSH header、事件，增加后继会话关联、独立 Agent 端点身份和一次性续跑记录。已转移的 DSH 历史可读，申请写者或恢复写者返回 `SESSION_MOVED`。请按[结构迁移流程](runtime.zh.md#从-schema-6-或-7-迁移到-8)升级。对外仍只安装一个 DSH ContextMesh 插件。

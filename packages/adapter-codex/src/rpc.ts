@@ -15,7 +15,12 @@ export class CodexRpc extends EventEmitter {
   private dead = false
   private readonly pending = new Map<
     number,
-    { resolve(v: unknown): void; reject(e: Error): void; timer: NodeJS.Timeout }
+    {
+      resolve(v: unknown): void
+      reject(e: Error): void
+      timer: NodeJS.Timeout
+      method: string
+    }
   >()
   constructor(readonly options: CodexOptions = {}) {
     super()
@@ -94,7 +99,7 @@ export class CodexRpc extends EventEmitter {
     if (v.error !== undefined)
       pending.reject(
         new Error(
-          'Codex request was rejected; check its local configuration and supported CLI version',
+          `Codex ${pending.method} was rejected; check its local configuration and supported CLI version`,
         ),
       )
     else pending.resolve(v.result)
@@ -126,7 +131,7 @@ export class CodexRpc extends EventEmitter {
           ),
         )
       }, this.options.timeoutMs ?? 30000)
-      this.pending.set(id, { resolve, reject, timer })
+      this.pending.set(id, { resolve, reject, timer, method })
       try {
         this.write({ id, method, params })
       } catch (error) {
@@ -138,7 +143,7 @@ export class CodexRpc extends EventEmitter {
   }
   async initialize() {
     await this.request('initialize', {
-      clientInfo: { name: 'contextmesh', version: '0.8.0-dev.2' },
+      clientInfo: { name: 'contextmesh', version: '0.8.0-dev.3' },
       capabilities: { experimentalApi: true, requestAttestation: false },
     })
     this.write({ method: 'initialized' })

@@ -23,6 +23,10 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   if (!initialized) return send({ id: r.id, error: { code: -32000 } })
   const t = state.threads[p.threadId]
   switch (r.method) {
+    case 'config/read':
+      return reply({
+        config: { mcp_servers: { fixture_mcp: { enabled: true } } },
+      })
     case 'thread/start': {
       const id = 'native-' + Object.keys(state.threads).length
       const thread = {
@@ -30,6 +34,7 @@ createInterface({ input: process.stdin }).on('line', (line) => {
         cwd: p.cwd,
         cliVersion: '0.154.0',
         status: { type: 'idle' },
+        modelProvider: 'fixture',
         model: p.model,
       }
       state.threads[id] = {
@@ -44,6 +49,7 @@ createInterface({ input: process.stdin }).on('line', (line) => {
         thread,
         cwd: p.cwd,
         model: p.model,
+        modelProvider: 'fixture',
         sandbox: {
           type: p.sandbox === 'read-only' ? 'readOnly' : 'workspaceWrite',
         },
@@ -61,6 +67,7 @@ createInterface({ input: process.stdin }).on('line', (line) => {
         thread: t.thread,
         cwd: t.thread.cwd,
         model: t.thread.model,
+        modelProvider: 'fixture',
         sandbox: {
           type: t.sandbox === 'read-only' ? 'readOnly' : 'workspaceWrite',
         },
@@ -76,13 +83,23 @@ createInterface({ input: process.stdin }).on('line', (line) => {
         nextCursor: fail === 'cursor-loop' ? 'same' : null,
       })
     case 'turn/start': {
+      if (fail === 'probe-fail' && !p.clientUserMessageId)
+        return send({
+          id: r.id,
+          error: { code: -32000, message: 'provider rejected preflight' },
+        })
       const id = 'turn-' + t.turns.length
       const turn = { id, status: 'completed' }
       t.turns.push(turn)
       t.items.push(
         {
           turnId: id,
-          item: { type: 'userMessage', id: id + '-u', content: p.input },
+          item: {
+            type: 'userMessage',
+            id: id + '-u',
+            clientId: p.clientUserMessageId ?? null,
+            content: p.input,
+          },
         },
         {
           turnId: id,
@@ -96,7 +113,11 @@ createInterface({ input: process.stdin }).on('line', (line) => {
       )
       save()
       reply({ turn })
-      if (fail === 'turn-drop') return process.exit(1)
+      if (
+        fail === 'turn-drop' ||
+        (fail === 'continuation-drop' && p.clientUserMessageId)
+      )
+        return process.exit(1)
       if (fail === 'turn-slow')
         return setTimeout(
           () =>

@@ -7,17 +7,20 @@ import type { PortableContext } from '../../protocol/src/portable.js'
 export interface Target {
   cwd: string
   model: string
+  provider?: string
   sandbox: 'read-only' | 'workspace-write'
 }
 export const targetSchema = z
   .object({
     cwd: z.string().min(1),
     model: z.string().trim().min(1).max(256),
+    provider: z.string().min(1).max(256).optional(),
     sandbox: z.enum(['read-only', 'workspace-write']),
   })
   .strict()
 export class NativeCodex {
   readonly rpc: CodexRpc
+  selectedProvider?: string
   constructor(options: CodexOptions = {}) {
     this.rpc = new CodexRpc(options)
   }
@@ -31,7 +34,11 @@ export class NativeCodex {
       throw new Error('Choose an existing project directory on this device')
     return { ...target, cwd }
   }
-  async start(target: Target) {
+  async start(
+    target: Target,
+    config?: Record<string, unknown>,
+    developerInstructions?: string,
+  ) {
     const r = z
       .object({
         thread: nativeSnapshot.shape.thread,
@@ -44,12 +51,16 @@ export class NativeCodex {
       .parse(
         await this.rpc.request('thread/start', {
           ...target,
+          ...(target.provider ? { modelProvider: target.provider } : {}),
+          ...(config ? { config } : {}),
+          ...(developerInstructions ? { developerInstructions } : {}),
           approvalPolicy: 'never',
         }),
       )
     if (
       r.sandbox.type !==
         (target.sandbox === 'read-only' ? 'readOnly' : 'workspaceWrite') ||
+      (target.provider !== undefined && r.modelProvider !== target.provider) ||
       r.model !== target.model ||
       (await realpath(r.cwd)) !== target.cwd
     )
@@ -58,6 +69,10 @@ export class NativeCodex {
       )
     if (!/^0\.(15[4-9]|1[6-9]\d|[2-9]\d\d)\./.test(r.thread.cliVersion))
       throw new Error('Use Codex CLI 0.154.x or a compatible newer 0.x CLI')
+    this.selectedProvider = z
+      .string()
+      .min(1)
+      .parse(r.modelProvider ?? r.thread.modelProvider)
     return r.thread.id
   }
   async inject(threadId: string, context: PortableContext) {
@@ -80,6 +95,7 @@ export class NativeCodex {
         await this.rpc.request('thread/resume', {
           threadId,
           ...target,
+          ...(target.provider ? { modelProvider: target.provider } : {}),
           approvalPolicy: 'never',
           excludeTurns: true,
         }),
@@ -88,6 +104,7 @@ export class NativeCodex {
       r.sandbox.type !==
         (target.sandbox === 'read-only' ? 'readOnly' : 'workspaceWrite') ||
       r.thread.id !== threadId ||
+      (target.provider !== undefined && r.modelProvider !== target.provider) ||
       r.model !== target.model ||
       (await realpath(r.cwd)) !== target.cwd
     )
@@ -168,7 +185,12 @@ export class NativeCodex {
       throw new Error('Native snapshot exceeds the archive limit')
     return result
   }
-  async execute(threadId: string, message: string, timeoutMs = 30 * 60 * 1000) {
+  async execute(
+    threadId: string,
+    message: string,
+    timeoutMs = 30 * 60 * 1000,
+    clientMessageId?: string,
+  ) {
     if (!message.trim())
       throw new Error('Provide a new instruction to continue the task')
     let completed: { id: string; status: string } | undefined
@@ -216,6 +238,7 @@ export class NativeCodex {
       const response = z.object({ turn: z.object({ id: z.string() }) }).parse(
         await this.rpc.request('turn/start', {
           threadId,
+          ...(clientMessageId ? { clientUserMessageId: clientMessageId } : {}),
           input: [{ type: 'text', text: message, text_elements: [] }],
         }),
       )

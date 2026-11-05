@@ -6,12 +6,13 @@ import {
   type TakeoverRecord,
   handoffManifest,
   handoffState,
+  codexExecutionState,
   type HandoffRecord,
   type HandoffManifest,
 } from '../../protocol/src/handoff.js'
 import { handleSchema } from '../../protocol/src/index.js'
 
-const recordSchema = z.object({
+export const recordSchema = z.object({
   id: z.uuid(),
   sessionId: z.string(),
   incarnation: z.uuid(),
@@ -26,6 +27,11 @@ const recordSchema = z.object({
   finalGeneration: z.number().int().nonnegative().nullable(),
   targetHandleId: z.uuid().nullable(),
   error: z.string().nullable(),
+  targetSessionId: z.string().nullable().optional(),
+  sourceStopClaimed: z.boolean().optional(),
+  executionState: codexExecutionState.optional(),
+  executionOperationId: z.uuid().nullable().optional(),
+  executionTurnId: z.string().nullable().optional(),
 })
 const mappingSchema = z.object({
   projectId: z.uuid(),
@@ -47,6 +53,7 @@ export const remoteSessionSchema = z.object({
   handoffId: z.uuid().nullable(),
   handoffState: handoffState.nullable(),
   recoveryRequired: z.boolean(),
+  successorSessionId: z.string().nullable().optional(),
 })
 export class HandoffClient {
   constructor(
@@ -62,11 +69,13 @@ export class HandoffClient {
   async register(
     name: string,
     models: Array<{ provider: string; model: string; name: string }> = [],
+    agent?: { adapter: 'codex'; harness: string; deviceId?: string },
   ) {
     return this.mesh.request('/v1/nodes/register', {
       ...this.identity,
       operationId: randomUUID(),
       name,
+      ...(agent?.deviceId ? { deviceId: agent.deviceId } : {}),
       capabilities: {
         controlVersion: 1,
         takeoverVersion: 1,
@@ -76,9 +85,11 @@ export class HandoffClient {
         receiverModelVersion: 1,
         continuationVersion: 1,
         workspaceTransferVersion: 1,
+        crossAgentVersion: 1,
         models,
         harness: '0.2.1-rc.3',
         adapter: 'deepseek',
+        ...(agent ? { adapter: agent.adapter, harness: agent.harness } : {}),
       },
     })
   }
@@ -100,6 +111,7 @@ export class HandoffClient {
           name: z.string(),
           instanceId: z.uuid(),
           online: z.boolean(),
+          adapter: z.enum(['deepseek', 'codex']).default('deepseek'),
           lastSeen: z.string(),
           models: z
             .array(
@@ -236,6 +248,14 @@ export class HandoffClient {
         code,
         message: message.slice(0, 1000),
       }),
+    )
+  }
+  async claimSourceStop(record: HandoffRecord) {
+    return recordSchema.parse(
+      await this.mesh.request(
+        `/v1/handoffs/${record.id}/codex/source-stop`,
+        this.update(record),
+      ),
     )
   }
   async preflight(

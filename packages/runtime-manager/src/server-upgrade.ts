@@ -10,7 +10,7 @@ import { privateDirectory, atomicJson, optionalJson } from './files.js'
 import { readConnection } from '../../client/src/config.js'
 import { MeshClient } from '../../client/src/index.js'
 const exec = promisify(execFile)
-const supportedSchema = z.union([z.literal(6), z.literal(7)])
+const supportedSchema = z.union([z.literal(6), z.literal(7), z.literal(8)])
 const deployment = z.object({
   version: z.literal(1),
   image: z.string(),

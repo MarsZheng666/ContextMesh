@@ -56,4 +56,4 @@ pnpm cli workspace-rollback TRANSFER_ID --confirm
 
 ## Upgrade
 
-The current server uses schema **7**. Migration preserves existing native Session headers and events, adds an adapter-scoped catalog index and establishes a compatibility boundary for native formats. Back up PostgreSQL and stop writers before following the [migration guide](runtime.md#migrate-schema-6-to-7). Older servers refuse schema 7; rollback requires the backup. The DSH Session format is unchanged.
+The current server uses schema **8**. Migration preserves existing native Session headers and events, retains the native-format boundary and adds linked cross-Agent ownership and execution records. Back up PostgreSQL and stop writers before following the [migration guide](runtime.md#migrate-schema-6-or-7-to-8). Older servers refuse schema 8; rollback requires the backup. The DSH Session format is unchanged.

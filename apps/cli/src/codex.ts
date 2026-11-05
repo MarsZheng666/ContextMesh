@@ -2,6 +2,7 @@ import { resolve, join } from 'node:path'
 import { z } from 'zod'
 import { resolveConnection } from '../../../packages/client/src/config.js'
 import { runtimeHome } from '../../../packages/runtime-manager/src/install.js'
+import { ConfirmedCodexTakeover } from '../../../packages/adapter-codex/src/takeover.js'
 import { CodexBridge } from '../../../packages/adapter-codex/src/bridge.js'
 
 export async function runCodex(args: string[]) {
@@ -9,17 +10,34 @@ export async function runCodex(args: string[]) {
   const [_, command, id, ...flags] = args
   if (!command || command === '--help' || command === 'help') {
     console.log(
-      'ContextMesh Codex\n  codex import <source-session-id> --cwd <directory> --model <local-model> [--from deepseek|codex] [--workspace-write] [--operation <uuid>]\n  codex run <codex-session-id> --message <new-instruction> [--timeout-seconds <10..3600>]\n  codex status <import-operation-id|codex-session-id>\n  codex reconcile <codex-session-id> --confirm-stopped\nOptions: --state-dir <private-directory>, --codex-home <Codex-directory>, --codex-bin <executable>\nImport creates a separate Codex conversation from a completed snapshot. It does not stop or take over the source.',
+      'ContextMesh Codex\n  codex takeover <DSH-session-id> --cwd <directory> --model <local-model> --confirm [--workspace-write] [--operation <uuid>]\n  codex takeover-status <handoff-id>\n  codex takeover-recover <handoff-id> --confirm-stopped\n  codex import <source-session-id> --cwd <directory> --model <local-model> [--from deepseek|codex] [--workspace-write] [--operation <uuid>]\n  codex run <codex-session-id> --message <new-instruction> [--timeout-seconds <10..3600>]\n  codex status <import-operation-id|codex-session-id>\n  codex reconcile <codex-session-id> --confirm-stopped\nOptions: --state-dir <private-directory>, --codex-home <Codex-directory>, --codex-bin <executable>\nTakeover preflights Codex, then safely stops DSH and continues unfinished work once. --confirm authorizes sending context to the selected provider. Keep this command running until it finishes.\nImport creates a separate Codex conversation from a completed snapshot. It does not stop or take over the source.',
     )
     return true
   }
-  if (!id || !['import', 'run', 'status', 'reconcile'].includes(command))
+  if (
+    !id ||
+    ![
+      'import',
+      'run',
+      'status',
+      'reconcile',
+      'takeover',
+      'takeover-status',
+      'takeover-recover',
+    ].includes(command)
+  )
     throw new Error('Use contextmesh codex --help')
   const values = new Map<string, string>()
   let write = false
   let confirmStopped = false
+  let confirm = false
   for (let i = 0; i < flags.length; i++) {
     const name = flags[i]!
+    if (name === '--confirm') {
+      if (confirm) throw new Error('Repeated option')
+      confirm = true
+      continue
+    }
     if (name === '--confirm-stopped') {
       if (confirmStopped) throw new Error('Repeated option')
       confirmStopped = true
@@ -56,7 +74,7 @@ export async function runCodex(args: string[]) {
   const env = { ...process.env }
   if (values.has('--codex-home'))
     env.CODEX_HOME = resolve(values.get('--codex-home')!)
-  const bridge = new CodexBridge({
+  const options = {
     connection: {
       endpoint: connection.endpoint ?? 'https://unconfigured.invalid',
       token: connection.token ?? '',
@@ -69,10 +87,76 @@ export async function runCodex(args: string[]) {
         values.get('--codex-bin') ?? process.env.CONTEXTMESH_CODEX_BIN,
       env,
     },
-  })
-  if (command !== 'reconcile' && confirmStopped)
+  }
+  const bridge = new CodexBridge(options)
+  if (command !== 'takeover' && confirm)
+    throw new Error('--confirm is only for takeover')
+  if (
+    command !== 'reconcile' &&
+    command !== 'takeover-recover' &&
+    confirmStopped
+  )
     throw new Error('--confirm-stopped is only for reconcile')
-  if (command === 'status' || command === 'reconcile') {
+  if (command.startsWith('takeover')) {
+    const worker = new ConfirmedCodexTakeover({
+      ...options,
+      deviceId: connection.nodeId,
+      progress: (message) => console.error(message),
+    })
+    if (command === 'takeover') {
+      if (!confirm)
+        throw new Error(
+          'Review the receiver model, provider and directory, then authorize takeover with --confirm',
+        )
+      if (!values.get('--cwd') || !values.get('--model'))
+        throw new Error('Choose the receiving --cwd and --model')
+      if (
+        confirmStopped ||
+        ['--from', '--message', '--timeout-seconds'].some((key) =>
+          values.has(key),
+        )
+      )
+        throw new Error('Unsupported takeover option')
+      const result = await worker.takeover({
+        sourceId: id,
+        confirmed: true,
+        operationId: values.get('--operation'),
+        target: {
+          cwd: resolve(values.get('--cwd')!),
+          model: values.get('--model')!,
+          sandbox: write ? 'workspace-write' : 'read-only',
+        },
+      })
+      console.log(JSON.stringify(result, null, 2))
+      if (result.handoff.executionState === 'failed') process.exitCode = 1
+    } else {
+      if (
+        write ||
+        [
+          '--cwd',
+          '--model',
+          '--from',
+          '--message',
+          '--operation',
+          '--timeout-seconds',
+        ].some((key) => values.has(key))
+      )
+        throw new Error('Status and recovery use the saved receiver binding')
+      if (command === 'takeover-recover' && !confirmStopped)
+        throw new Error(
+          'Verify the previous Codex process and tools stopped, then pass --confirm-stopped',
+        )
+      console.log(
+        JSON.stringify(
+          command === 'takeover-status'
+            ? await worker.status(id)
+            : await worker.recover(id, true),
+          null,
+          2,
+        ),
+      )
+    }
+  } else if (command === 'status' || command === 'reconcile') {
     if (
       write ||
       [...values.keys()].some((k) =>

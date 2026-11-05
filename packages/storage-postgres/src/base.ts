@@ -13,6 +13,7 @@ import { migrate, assertDurability } from './migration.js'
 
 export interface Row {
   id: string
+  successor_session: string | null
   adapter: NativeAdapterId
   header: string
   incarnation: string
@@ -115,6 +116,7 @@ export class BasePostgresStore {
         nextSeq: Number(row.next_seq),
         generation: Number(row.generation),
         materialized: row.materialized,
+        successorSessionId: row.successor_session ?? null,
       })
     } catch (error) {
       throw new MeshError(
@@ -357,6 +359,29 @@ export class BasePostgresStore {
         if (!row.materialized && row.creator_instance !== request.instanceId)
           throw new MeshError('NOT_FOUND', `session "${id}" not found`, 404)
         if (request.access === 'write') {
+          const header = this.decode(row.header) as { handoffId?: string }
+          if (row.adapter === 'codex' && header.handoffId) {
+            const link = (
+              await db.query(
+                'SELECT state,target_session FROM cm_handoffs WHERE namespace=$1 AND id=$2',
+                [ns, header.handoffId],
+              )
+            ).rows[0]
+            if (
+              !link ||
+              link.state !== 'completed' ||
+              link.target_session !== row.id
+            )
+              throw new MeshError(
+                'HANDOFF_IN_PROGRESS',
+                'Finish the confirmed takeover before acquiring its Codex writer',
+              )
+          }
+          if (row.successor_session)
+            throw new MeshError(
+              'SESSION_MOVED',
+              'Continue this task in Codex session ' + row.successor_session,
+            )
           if (row.active_model_relay)
             throw new MeshError(
               'MODEL_RELAY_BUSY',
@@ -593,6 +618,11 @@ export class BasePostgresStore {
       adapter === 'deepseek' ? ['recover', id] : ['recover', id, adapter]
     return this.operation(ns, operationId, intent, async (db) => {
       const s = await this.session(db, ns, id)
+      if (s.successor_session)
+        throw new MeshError(
+          'SESSION_MOVED',
+          'Continue this task in Codex session ' + s.successor_session,
+        )
       if (s.adapter !== adapter)
         throw new MeshError(
           'ADAPTER_MISMATCH',

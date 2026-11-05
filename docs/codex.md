@@ -2,13 +2,13 @@
 
 [中文](codex.zh.md) · [Device setup](getting-started.md) · [Native storage](native-agents.md)
 
-The optional Codex bridge is included in the existing ContextMesh CLI. It imports a completed DSH or ContextMesh-managed Codex snapshot into a **new local Codex thread**, then lets you send new instructions through Codex's native app-server. The source conversation keeps its history and ownership. This is an explicit snapshot copy, not automatic takeover of a running task.
+The optional Codex bridge is included in the existing ContextMesh CLI. It imports a completed DSH or ContextMesh-managed Codex snapshot into a **new local Codex thread**, then lets you send new instructions through Codex's native app-server. The source conversation keeps its history and ownership. This `import` flow copies a snapshot. To stop a running DSH task and continue it after confirmation, use [confirmed takeover](confirmed-takeover.md).
 
 ## Before starting
 
 - Install the supported official Codex CLI separately and make `codex` available on PATH. The adapter was validated with **0.154.0**; a compatible newer 0.x version must provide the same app-server methods. ContextMesh does not bundle Codex or install a second DSH plugin.
 - Configure the receiving machine's Codex login and model provider locally. ContextMesh uses that configuration through Codex, without uploading its authentication files or copying source model credentials.
-- Connect ContextMesh with `contextmesh setup` and use a schema-7 Server. Keep the HTTPS connection described in the [server guide](deployment.md).
+- Connect ContextMesh with `contextmesh setup` and use a schema-8 Server. Keep the HTTPS connection described in the [server guide](deployment.md).
 - Finish the source turn, including tool calls. This preview supports text and historical tool references. Unsupported attachments, unresolved tool outcomes, unsupported projections and oversized contexts are rejected before import; nothing is silently truncated.
 
 ## Import and continue

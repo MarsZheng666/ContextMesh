@@ -1,4 +1,12 @@
 export const en = {
+  continuedInCodex: 'Continued in Codex',
+  executionPending: 'Continuation waiting',
+  executionDispatching: 'Codex is running',
+  executionCompleted: 'Continuation turn completed',
+  executionFailed: 'Continuation turn failed or stopped',
+  executionUncertain: 'Execution result needs review; do not resend',
+  SESSION_MOVED:
+    'This conversation was transferred to Codex. Continue in the linked Codex session; this DSH history is read-only.',
   connectionSetup: 'Connection setup',
   connectionReady: 'Connected',
   connectionOffline:
@@ -285,6 +293,14 @@ export const en = {
 } as const
 export type Key = keyof typeof en
 export const zh: Record<Key, string> = {
+  continuedInCodex: '已在 Codex 中接续',
+  executionPending: '等待续跑',
+  executionDispatching: 'Codex 正在执行',
+  executionCompleted: '续跑轮次已完成',
+  executionFailed: '续跑轮次失败或已停止',
+  executionUncertain: '执行结果待核对，请勿重发任务',
+  SESSION_MOVED:
+    '该会话已转移到 Codex，请在关联的 Codex 会话中继续。这里保留 DSH 的只读历史。',
   connectionSetup: '连接设置',
   connectionReady: '已连接',
   connectionOffline:

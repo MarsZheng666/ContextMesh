@@ -17,6 +17,7 @@ import { z } from 'zod'
 export function deepSeekContext(
   snapshot: SessionSnapshot,
   events: StoredEvent[],
+  phase: 'final' | 'preflight' = 'final',
 ): PortableContext {
   if (
     snapshot.adapter !== 'deepseek' ||
@@ -35,7 +36,7 @@ export function deepSeekContext(
     if (e.type === 'turn/start') busy = true
     if (e.type === 'turn/end') busy = false
   }
-  if (busy)
+  if (busy && phase === 'final')
     throw new Error(
       'Finish or explicitly stop the source task before importing its snapshot',
     )
@@ -85,7 +86,7 @@ export function deepSeekContext(
       )
     if (text.length) messages.push({ role, text: text.join('\n') })
   }
-  if (pendingCalls.size)
+  if (pendingCalls.size && phase === 'final')
     throw new Error('Resolve pending source tool calls before importing')
   return validatePortable({
     version: 1,

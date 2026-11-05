@@ -40,7 +40,7 @@ test('rejects a schema-changing image before maintenance or stopping the service
     ).rejects.toThrow('Schema-changing upgrades')
     expect(await f.client.request('/v1/admin/maintenance')).toMatchObject({
       enabled: false,
-      schema: 7,
+      schema: 8,
     })
     expect(await readFile(join(root, 'compose.yaml'), 'utf8')).toBe(original)
     const calls = (await readFile(log, 'utf8'))
@@ -82,7 +82,7 @@ test('records the actual database schema in a verified backup', async () => {
     const result = await backupServer(root)
     expect(
       JSON.parse(await readFile(join(result.directory, 'backup.json'), 'utf8')),
-    ).toMatchObject({ verified: true, schema: 7 })
+    ).toMatchObject({ verified: true, schema: 8 })
   } finally {
     vi.unstubAllEnvs()
     await rm(root, { recursive: true, force: true })

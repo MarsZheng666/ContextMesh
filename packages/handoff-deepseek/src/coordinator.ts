@@ -1229,6 +1229,11 @@ export class HandoffCoordinator {
               'WORKSPACE_MISMATCH',
               'source project changed during preflight',
             )
+          if (
+            record.manifest.targetAgent === 'codex' &&
+            !record.sourceStopClaimed
+          )
+            record = await this.client.claimSourceStop(record)
           if (record.manifest.resumePolicy === 'interrupted') {
             if (agent.status === 'running')
               agent.cancel(

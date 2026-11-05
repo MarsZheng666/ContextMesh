@@ -20,6 +20,10 @@ const run = async (args) =>
   exec(cli, args, { env: base, timeout: 300000, maxBuffer: 1024 * 1024 })
 try {
   await run(['--help'])
+  assert.match(
+    (await run(['codex', '--help'])).stdout,
+    /codex takeover .*--confirm/,
+  )
   await run(['install', bundle])
   await writeFile(
     join(home, 'settings.json'),
@@ -59,6 +63,7 @@ try {
       installed: true,
       offlineUi: true,
       singlePlugin: true,
+      codexTakeoverCommand: true,
       noGlobalNodeOrPackageManager: true,
       stopped: true,
     }),
