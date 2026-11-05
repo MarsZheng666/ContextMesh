@@ -1,3 +1,4 @@
+import { writeConnection } from '../../packages/client/src/config.js'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { pathToFileURL } from 'node:url'
@@ -363,4 +364,69 @@ it('does not let a resumed import overwrite the pending state of an executing lo
   expect(
     (await f.state()).requests.filter((r: any) => r.method === 'turn/start'),
   ).toHaveLength(1)
+})
+
+it('uses the installed runtime connection without requiring endpoint or token environment variables', async () => {
+  const f = await setup(),
+    managed = join(f.root, 'managed'),
+    executable = join(f.root, 'installed-fixture-codex.mjs')
+  await mkdir(managed, { mode: 0o700 })
+  await writeFile(
+    join(managed, 'current.json'),
+    JSON.stringify({ version: '0.8.0-dev.2' }),
+  )
+  await writeConnection(
+    {
+      version: 1,
+      endpoint: f.endpoint,
+      token: TOKEN,
+      nodeId: randomUUID(),
+      name: 'managed fixture',
+    },
+    join(managed, 'data/dsh/contextmesh/connection.json'),
+  )
+  await writeFile(
+    executable,
+    '#!' +
+      process.execPath +
+      '\nimport ' +
+      JSON.stringify(
+        pathToFileURL(resolve('tests/helpers/codex-rpc-fixture.mjs')).href,
+      ) +
+      '\n',
+    { mode: 0o700 },
+  )
+  const env = {
+    ...process.env,
+    CONTEXTMESH_HOME: managed,
+    CONTEXTMESH_ENDPOINT: undefined,
+    CONTEXTMESH_TOKEN: undefined,
+    CONTEXTMESH_CONFIG: undefined,
+    DSH_HOME: join(f.root, 'unconfigured-dsh'),
+    CODEX_HOME: join(f.root, 'home'),
+    CODEX_FIXTURE_FAULT: '',
+  }
+  const result = await promisify(execFile)(
+    process.execPath,
+    [
+      '--import',
+      'tsx',
+      'apps/cli/src/main.ts',
+      'codex',
+      'import',
+      f.id,
+      '--cwd',
+      f.target.cwd,
+      '--model',
+      f.target.model,
+      '--state-dir',
+      join(f.root, 'managed-state'),
+      '--codex-bin',
+      executable,
+    ],
+    { env },
+  )
+  expect(JSON.parse(result.stdout)).toMatchObject({
+    sessionId: expect.stringMatching(/^codex:/),
+  })
 })

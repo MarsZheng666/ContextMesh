@@ -8,8 +8,8 @@ import { MeshError } from '../../../packages/protocol/src/index.js'
 import { runLocal } from './local.js'
 const input = process.argv.slice(2)
 const handled = await (async () =>
-  (await runCodex(input)) ||
   (await runRuntime(input)) ||
+  (await runCodex(input)) ||
   (await setup(input)) ||
   (await runLocal(input)))().catch((error) => {
   console.error(error instanceof Error ? error.message : String(error))
