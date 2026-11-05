@@ -1,3 +1,4 @@
+import { completeImportSql } from './base.js'
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import type { PoolClient } from 'pg'
@@ -1203,7 +1204,7 @@ export class HandoffPostgresStore extends TransferPostgresStore {
   async listSummaries(ns: string) {
     return (
       await this.pool.query(
-        `SELECT s.id,s.incarnation,s.next_seq::int AS "nextSeq",m.title,m.project_id AS "projectId",m.last_activity::float8 AS "lastActivity",n.id AS "activeNodeId",n.name AS "activeNodeName",s.successor_session AS "successorSessionId",s.active_handoff AS "handoffId",h.state AS "handoffState",(s.recovery_required OR COALESCE(h.state='recovery_required',false) OR (s.active_handle IS NOT NULL AND COALESCE(s.lease_until<=clock_timestamp(),true))) AS "recoveryRequired" FROM cm_sessions s LEFT JOIN cm_session_summaries m ON m.namespace=s.namespace AND m.session_id=s.id AND m.incarnation=s.incarnation LEFT JOIN cm_handles w ON w.namespace=s.namespace AND w.id=s.active_handle LEFT JOIN cm_nodes n ON n.namespace=s.namespace AND n.instance_id=w.instance_id LEFT JOIN cm_handoffs h ON h.namespace=s.namespace AND h.id=s.active_handoff WHERE s.namespace=$1 AND s.materialized AND s.adapter='deepseek' ORDER BY COALESCE(m.last_activity,0) DESC,s.id LIMIT 100`,
+        `SELECT s.id,s.incarnation,s.next_seq::int AS "nextSeq",m.title,m.project_id AS "projectId",m.last_activity::float8 AS "lastActivity",n.id AS "activeNodeId",n.name AS "activeNodeName",s.successor_session AS "successorSessionId",s.active_handoff AS "handoffId",h.state AS "handoffState",(s.recovery_required OR COALESCE(h.state='recovery_required',false) OR (s.active_handle IS NOT NULL AND COALESCE(s.lease_until<=clock_timestamp(),true))) AS "recoveryRequired" FROM cm_sessions s LEFT JOIN cm_session_summaries m ON m.namespace=s.namespace AND m.session_id=s.id AND m.incarnation=s.incarnation LEFT JOIN cm_handles w ON w.namespace=s.namespace AND w.id=s.active_handle LEFT JOIN cm_nodes n ON n.namespace=s.namespace AND n.instance_id=w.instance_id LEFT JOIN cm_handoffs h ON h.namespace=s.namespace AND h.id=s.active_handoff WHERE s.namespace=$1 AND s.materialized AND s.adapter='deepseek' AND ${completeImportSql('s.')} ORDER BY COALESCE(m.last_activity,0) DESC,s.id LIMIT 100`,
         [ns],
       )
     ).rows

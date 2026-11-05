@@ -4,6 +4,8 @@
 
 Use this flow to move an unfinished DSH task to Codex CLI after **you confirm on the receiver**. ContextMesh checks B before asking A to stop, saves A's final history, transfers ownership, and starts one continuation in B. It does not schedule transfers without your confirmation. The supported direction is DSH → Codex; each Agent retains its own native history.
 
+To return a settled Codex archive to a new DSH conversation, use [archive return](codex-return.md). That separate flow copies context without taking over a live Codex task.
+
 ## Prepare the receiver
 
 - Use the same reviewed ContextMesh source version on the Server and participating devices. This flow requires schema **8** and the `cross-agent-takeover-v1` feature; follow the stopped-service migration before upgrading an existing database.

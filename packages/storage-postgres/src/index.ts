@@ -7,6 +7,18 @@ export type { StoreOptions } from './base.js'
 
 /** Native logs keep their own formats; handoff records link the transferred task. */
 export class PostgresStore extends HandoffPostgresStore {
+  async codexArchives(ns: string, id?: string) {
+    const result = await this.pool.query(
+      `SELECT s.id,s.incarnation,s.next_seq::int AS "nextSeq",(s.header::jsonb->>'createdAt')::double precision AS "createdAt",s.active_handle IS NOT NULL AS busy,
+      (s.recovery_required OR s.active_handoff IS NOT NULL OR
+       EXISTS(SELECT 1 FROM cm_handoffs h WHERE h.namespace=s.namespace AND h.target_session=s.id AND h.execution IN ('pending','dispatching','uncertain')) OR
+       (s.header::jsonb ? 'handoffId' AND NOT EXISTS(SELECT 1 FROM cm_handoffs h WHERE h.namespace=s.namespace AND h.id::text=s.header::jsonb->>'handoffId' AND h.state='completed' AND h.target_session=s.id))) AS "recoveryRequired"
+      FROM cm_sessions s WHERE s.namespace=$1 AND s.adapter='codex' AND s.materialized AND ($2::text IS NULL OR s.id=$2) ORDER BY "createdAt" DESC,s.id LIMIT 100`,
+      [ns, id ?? null],
+    )
+    return result.rows
+  }
+
   async claimCodexSourceStop(ns: string, id: string, r: Update) {
     return this.operation(
       ns,

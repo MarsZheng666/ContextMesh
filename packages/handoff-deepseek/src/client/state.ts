@@ -29,6 +29,17 @@ export const snapshotSchema = z.object({
       nodeId: z.string().nullable(),
     })
     .optional(),
+  codexArchives: z
+    .array(
+      z.object({
+        id: z.string(),
+        nextSeq: z.number(),
+        createdAt: z.number(),
+        busy: z.boolean(),
+        recoveryRequired: z.boolean(),
+      }),
+    )
+    .optional(),
   nodeId: z.string(),
   name: z.string(),
   models: z.array(modelChoice).optional(),

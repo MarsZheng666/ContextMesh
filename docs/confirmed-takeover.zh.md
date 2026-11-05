@@ -4,6 +4,8 @@
 
 用于将未完成的 DSH 任务转移到 Codex CLI。**你在接收端确认后**，ContextMesh 先检查 B，再让 A 安全停止，保存最终历史并转移所有权，随后在 B 启动一次续跑。当前方向为 DSH → Codex，两种 Agent 保留各自的原生历史，不进行无人确认的自动调度。
 
+需要将稳定的 Codex 归档带回新 DSH 会话时，使用[归档返回](codex-return.zh.md)。该独立流程复制上下文，不接管运行中的 Codex 任务。
+
 ## 准备接收端
 
 - Server 和参与设备使用同一经审核的 ContextMesh 源码版本。本流程需要数据库结构 **8** 和 `cross-agent-takeover-v1`；已有数据库升级前按停机迁移流程处理。

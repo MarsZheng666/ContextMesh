@@ -19,7 +19,7 @@ const cli = join(bundle, 'bin/contextmesh')
 const run = async (args) =>
   exec(cli, args, { env: base, timeout: 300000, maxBuffer: 1024 * 1024 })
 try {
-  await run(['--help'])
+  assert.match((await run(['--help'])).stdout, /import-codex/)
   assert.match(
     (await run(['codex', '--help'])).stdout,
     /codex takeover .*--confirm/,
@@ -48,6 +48,10 @@ try {
   assert.equal(r.ok, true)
   assert.equal(r.value.connectivity.state, 'unconfigured')
   assert.deepEqual(r.value.sessions, [])
+  await assert.rejects(
+    run(['import-codex-status', '00000000-0000-4000-8000-000000000001']),
+    (error) => /ContextMesh is offline/.test(error.stderr),
+  )
   const profile = JSON.parse(
     await readFile(join(home, 'data/dsh/profiles/web/package.json'), 'utf8'),
   )
@@ -64,6 +68,8 @@ try {
       offlineUi: true,
       singlePlugin: true,
       codexTakeoverCommand: true,
+      codexReturnCommand: true,
+      managedLocalControl: true,
       noGlobalNodeOrPackageManager: true,
       stopped: true,
     }),

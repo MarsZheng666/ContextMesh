@@ -51,6 +51,7 @@ export const openSchema = z.object({
   instanceId: z.uuid(),
   access: z.enum(['read', 'write']),
   adapter: nativeAdapterId.optional(),
+  importOperationId: z.uuid().optional(),
 })
 export const handleSchema = z.object({
   handleId: z.uuid(),

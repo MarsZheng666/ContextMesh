@@ -1,3 +1,4 @@
+import { readCodexContext } from '../../client/src/codex-context.js'
 import { randomUUID, createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { z } from 'zod'
@@ -16,11 +17,7 @@ import {
 import { listenLocal } from '../../handoff-deepseek/src/local-control.js'
 import { NativeCodex, targetSchema, type Target } from './native.js'
 import type { CodexOptions } from './rpc.js'
-import {
-  deepSeekContext,
-  extendCodexContext,
-  nativeSnapshot,
-} from './context.js'
+import { deepSeekContext, nativeSnapshot } from './context.js'
 
 const bindingSchema = z
   .object({
@@ -99,34 +96,16 @@ export class CodexBridge {
       )
   }
   private async source(adapter: 'deepseek' | 'codex', id: string) {
-    const source = new MeshClient({ ...this.options.connection, adapter })
-    const handle = await source.open(id, 'read')
+    if (adapter === 'codex')
+      return (await readCodexContext(this.client, id)).context
+    const source = new MeshClient({ ...this.options.connection, adapter }),
+      handle = await source.open(id, 'read')
     try {
       const read = await source.read(handle, 0, Number.MAX_SAFE_INTEGER)
-      const snapshot = { ...read.snapshot, nextSeq: read.end }
-      if (adapter === 'deepseek') return deepSeekContext(snapshot, read.events)
-      if (snapshot.header.version !== 1)
-        throw new Error('Unsupported Codex storage envelope')
-      const base = validatePortable(snapshot.header.portable)
-      if (snapshot.header.sourceDigest !== contextDigest(base))
-        throw new Error('Portable source digest does not match')
-      const last = read.events.findLast((e) => e.type === 'codex/snapshot')
-      if (!last) throw new Error('The Codex session has no complete snapshot')
-      const native = nativeSnapshot.parse(last.snapshot)
-      if (native.thread.id !== snapshot.header.nativeThreadId)
-        throw new Error(
-          'Native snapshot thread identity does not match its archive',
-        )
-      const context = extendCodexContext(base, native)
-      return validatePortable({
-        ...context,
-        source: {
-          adapter,
-          id: snapshot.id,
-          incarnation: snapshot.incarnation,
-          eventCount: read.end,
-        },
-      })
+      return deepSeekContext(
+        { ...read.snapshot, nextSeq: read.end },
+        read.events,
+      )
     } finally {
       await source.close(handle, randomUUID())
     }

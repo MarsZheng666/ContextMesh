@@ -1,9 +1,13 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { z } from 'zod'
+import { runtimeHome } from '../../../packages/runtime-manager/src/install.js'
 import { callLocal } from '../../../packages/handoff-deepseek/src/local-control.js'
 
 const names = new Set([
+  'import-codex',
+  'import-codex-status',
+  'import-codex-recover',
   'workspace-plan',
   'workspace-export',
   'workspace-list',
@@ -31,7 +35,11 @@ export async function runLocal(input: string[]): Promise<boolean> {
     index = args.indexOf('--state-dir')
   let stateDir =
     process.env.CONTEXTMESH_STATE_DIR ??
-    join(process.env.DSH_HOME ?? join(homedir(), '.dsh'), 'contextmesh')
+    (process.env.DSH_HOME
+      ? join(process.env.DSH_HOME, 'contextmesh')
+      : process.env.CONTEXTMESH_BUNDLE
+        ? join(runtimeHome(), 'data', 'dsh', 'contextmesh')
+        : join(homedir(), '.dsh', 'contextmesh'))
   if (index >= 0) {
     if (!args[index + 1]) throw new Error('--state-dir needs a directory')
     stateDir = args[index + 1]!
@@ -46,6 +54,7 @@ export async function runLocal(input: string[]): Promise<boolean> {
     args.splice(index, 2)
     return value
   }
+  const cwd = option('--cwd')
   const provider = option('--provider'),
     chosen = option('--model'),
     reasoningEffort = option('--reasoning-effort'),
@@ -53,12 +62,18 @@ export async function runLocal(input: string[]): Promise<boolean> {
     previewId = option('--preview-id')
   const allowEstimate = args.includes('--allow-estimate')
   if (allowEstimate) args.splice(args.indexOf('--allow-estimate'), 1)
+  const confirmStopped = args.includes('--confirm-stopped')
+  if (confirmStopped) args.splice(args.indexOf('--confirm-stopped'), 1)
   const confirm = args.includes('--confirm')
   if (confirm) args.splice(args.indexOf('--confirm'), 1)
   if ((provider && !chosen) || (!provider && chosen))
     throw new Error('--provider and --model must be supplied together')
   const [name, id, value, modelId] = args
   if (!name || !names.has(name)) return false
+  if (confirmStopped && name !== 'import-codex-recover')
+    throw new Error('--confirm-stopped is only for import-codex-recover')
+  if (cwd && name !== 'import-codex')
+    throw new Error('--cwd is only for import-codex')
   if (allowEstimate && name !== 'model-select')
     throw new Error('--allow-estimate applies only to a local model selection')
   if (previewId && name !== 'workspace-apply')
@@ -72,6 +87,40 @@ export async function runLocal(input: string[]): Promise<boolean> {
     )
   let command: unknown
   switch (name) {
+    case 'import-codex':
+      if (!id || !cwd || !confirm)
+        throw new Error(
+          'Usage: import-codex SOURCE_SESSION_ID --cwd LOCAL_DIRECTORY --confirm [--operation-id UUID]',
+        )
+      if (provider || chosen || reasoningEffort)
+        throw new Error(
+          'Use the receiving DSH model selection before importing',
+        )
+      const reference = operationId ?? crypto.randomUUID()
+      console.error('Import reference: ' + reference)
+      command = {
+        action: 'import-codex',
+        sourceId: id,
+        cwd,
+        confirmed: true,
+        operationId: reference,
+      }
+      break
+    case 'import-codex-recover':
+      if (!id || !confirmStopped)
+        throw new Error(
+          'Usage: import-codex-recover OPERATION_ID --confirm-stopped',
+        )
+      command = {
+        action: 'import-codex-recover',
+        operationId: id,
+        confirmStopped: true,
+      }
+      break
+    case 'import-codex-status':
+      if (!id) throw new Error('Usage: import-codex-status OPERATION_ID')
+      command = { action: 'import-codex-status', operationId: id }
+      break
     case 'workspace-plan':
       if (!id || !value)
         throw new Error('Usage: workspace-plan SESSION_ID TARGET_NODE_ID')

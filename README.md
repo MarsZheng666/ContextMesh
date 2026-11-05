@@ -37,14 +37,15 @@ Deploy the Server once. Devices share its HTTPS URL and use separate credentials
 | **DSH → DSH, across devices**       | Hand off or confirm takeover of the same session. For running work, check the receiver before stopping the source, then continue automatically. |
 | **Switch models in DSH**            | Use the receiver's native model selection; a device with only Sol can continue a Flash task. Models need not match across devices.              |
 | **DSH → Codex CLI**                 | Confirm on the receiver, preflight it before stopping DSH, then automatically continue unfinished work in a new Codex thread.                   |
+| **Managed Codex → DSH**             | Copy a settled archive into a new DSH conversation with the receiver's model and chosen folder; send the next instruction when ready.           |
 | **Managed Codex → Codex CLI**       | Import an archived snapshot into another local Codex thread with that receiver's model and directory.                                           |
 | **Selected workspace files in DSH** | Preview and confirm supported changes and native file attachments before applying them on the receiver.                                         |
 
-Codex snapshot imports create a separate conversation and retain source provenance. **DSH → Codex takeover requires explicit receiver confirmation. Codex → DSH and autonomous scheduling are not provided.** See [DSH handoff](docs/handoff.md), [Codex usage](docs/codex.md), and [native storage](docs/native-agents.md).
+Codex snapshot imports create a separate conversation and retain source provenance. **DSH → Codex takeover requires explicit receiver confirmation. Codex → DSH copies a settled archive and waits for your next instruction; it does not take over live Codex execution.** See [DSH handoff](docs/handoff.md), [Codex usage](docs/codex.md), [return to DSH](docs/codex-return.md), and [native storage](docs/native-agents.md).
 
 ## Before you install
 
-**0.8.0-dev.3 is an unreleased source preview.** The plugin requires this repository's pinned **DSH 0.2.1-rc.3 and compatibility patches**. Use the pinned source build below; installing the plugin into an arbitrary global DSH is not supported.
+**0.8.0-dev.4 is an unreleased source preview.** The plugin requires this repository's pinned **DSH 0.2.1-rc.3 and compatibility patches**. Use the pinned source build below; installing the plugin into an arbitrary global DSH is not supported.
 
 Use the same reviewed source version for the Server and device clients. The instructions below use the source installation path. Self-contained macOS Apple Silicon and Linux x64 packages are also built by CI, but are currently **candidate artifacts, not published releases**. Their installation and upgrade commands are covered in the [runtime guide](docs/runtime.md).
 
@@ -201,12 +202,17 @@ Add `--from codex` to import a managed Codex snapshot. Use `pnpm cli list --adap
 
 The default native sandbox is **read-only**; select `--workspace-write` on import when edits are intended. Source tool history becomes reference text, and files are not copied. Existing unmanaged Codex threads are not automatically collected. Text and settled tool history are supported; unsupported attachments and uncertain tool outcomes block import. After an interrupted run, inspect `status` and use the documented stopped-process reconciliation flow before resending work. See [the Codex guide](docs/codex.md) for configuration, limits and recovery.
 
+### Bring a Codex archive back to DSH
+
+In the receiving DSH's ContextMesh panel, select **Continue a Codex archive**, choose a local folder and confirm. The existing plugin creates a separate conversation using DSH's local model. Import starts no model work; send your next instruction there. The receiver needs no Codex installation. CLI users can run `pnpm cli import-codex CODEX_SESSION_ID --cwd /local/directory --confirm` while that DSH instance is running. See [archive return and recovery](docs/codex-return.md).
+
 ## Upgrades and troubleshooting
 
 | What you are maintaining                                           | Guide                                   |
 | ------------------------------------------------------------------ | --------------------------------------- |
 | Server, PostgreSQL, network access, and backups                    | [Server deployment](docs/deployment.md) |
 | DSH plugin, persistent connection settings, and model login        | [Device setup](docs/getting-started.md) |
+| Return a Codex archive to DSH                                      | [Codex → DSH](docs/codex-return.md)     |
 | Codex import, native execution, and interrupted-run recovery       | [Codex bridge](docs/codex.md)           |
 | Packaged runtimes, connection diagnostics, and controlled upgrades | [Runtime management](docs/runtime.md)   |
 | Pairing codes, device credentials, and revocation                  | [Device access](docs/devices.md)        |

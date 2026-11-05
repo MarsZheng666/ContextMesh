@@ -37,14 +37,15 @@ Server 部署一次。各设备使用同一个 HTTPS 地址和独立凭据连接
 | **跨设备 DSH → DSH**       | 主动交接或确认接管同一会话。执行中的任务先预检接收端，再停止源端，随后自动继续。   |
 | **在 DSH 中切换模型**      | 使用接收端原生模型选择；只配置 Sol 的设备也可继续 Flash 的任务，两端模型无需一致。 |
 | **DSH → Codex CLI**        | 接收端确认后先预检，再安全停止 DSH，将未完成任务带入新 Codex 线程自动续跑。        |
+| **托管 Codex → DSH**       | 将稳定归档复制成新的 DSH 会话，使用接收端模型和所选目录，等待你发送下一条指令。    |
 | **托管 Codex → Codex CLI** | 将已归档快照导入另一本机 Codex 线程，使用接收端模型和目录。                        |
 | **DSH 选定文件传输**       | 在接收端应用前，预览并确认受支持的工作区改动和原生文件附件。                       |
 
-Codex 快照导入会创建独立会话并保留来源。**DSH → Codex 接管必须由接收端明确确认；Codex → DSH 和无人确认的自动调度尚未提供。** 详见 [DSH 交接](docs/handoff.zh.md)、[Codex 使用指南](docs/codex.zh.md)和[原生存储](docs/native-agents.zh.md)。
+Codex 快照导入会创建独立会话并保留来源。**DSH → Codex 接管必须由接收端明确确认；Codex → DSH 复制稳定归档后等待你的下一条指令，不接管运行中的 Codex。** 详见 [DSH 交接](docs/handoff.zh.md)、[Codex 使用指南](docs/codex.zh.md)、[返回 DSH](docs/codex-return.zh.md)和[原生存储](docs/native-agents.zh.md)。
 
 ## 安装前了解
 
-**0.8.0-dev.3 为尚未发布的源码预览版。** 插件依赖本仓库锁定的 **DSH 0.2.1-rc.3 和兼容补丁**。请使用下方锁定版本的源码构建，不支持直接装入任意全局 DSH。
+**0.8.0-dev.4 为尚未发布的源码预览版。** 插件依赖本仓库锁定的 **DSH 0.2.1-rc.3 和兼容补丁**。请使用下方锁定版本的源码构建，不支持直接装入任意全局 DSH。
 
 Server 与设备客户端请使用同一经审核的源码版本。以下采用源码安装方式。CI 也会构建包含运行环境的 macOS Apple Silicon 和 Linux x64 安装包，但目前它们是**候选产物，尚未作为正式 Release 发布**。候选包的安装与升级方式见[运行包指南](docs/runtime.zh.md)。
 
@@ -201,12 +202,17 @@ pnpm cli codex status CODEX_SESSION_ID
 
 默认原生运行权限为**只读**；需要编辑时在导入命令中选择 `--workspace-write`。源端工具历史作为引用文本传入，不复制工作区文件，也不自动采集已有非托管 Codex 线程。当前支持文本和已确认的工具历史；不支持的附件和不确定的工具结果会阻止导入。运行中断后，先检查 `status`，按文档确认旧进程停止并核对归档，再考虑重发指令。配置、限制和恢复步骤见 [Codex 使用指南](docs/codex.zh.md)。
 
+### 将 Codex 归档带回 DSH
+
+在接收端 DSH 的 ContextMesh 面板选择 **Continue a Codex archive / 继续 Codex 归档**，选择本机文件夹并确认。现有插件使用 DSH 本机模型创建独立会话，导入不启动模型工作；发送下一条指令即可继续。接收端无需安装 Codex。CLI 用户在该 DSH 实例运行时执行 `pnpm cli import-codex CODEX_SESSION_ID --cwd /local/directory --confirm`。详见[归档返回与恢复](docs/codex-return.zh.md)。
+
 ## 升级与排查
 
 | 需要维护的部分                     | 对应指南                               |
 | ---------------------------------- | -------------------------------------- |
 | Server、PostgreSQL、网络访问和备份 | [服务端部署](docs/deployment.zh.md)    |
 | DSH 插件、持久连接配置和模型登录   | [设备配置](docs/getting-started.zh.md) |
+| 将 Codex 归档返回 DSH              | [Codex → DSH](docs/codex-return.zh.md) |
 | Codex 导入、原生执行和中断恢复     | [Codex 适配器](docs/codex.zh.md)       |
 | 独立运行包、连接诊断和受控升级     | [运行环境管理](docs/runtime.zh.md)     |
 | 配对码、设备凭据和撤销             | [设备权限](docs/devices.zh.md)         |

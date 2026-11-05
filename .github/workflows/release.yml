@@ -51,7 +51,7 @@ jobs:
       - run: pnpm exec tsx scripts/release/build-runtime.ts "$RUNNER_TEMP/runtime"
       - run: node scripts/release/smoke.mjs "$RUNNER_TEMP/runtime"
       - name: Exercise paired devices using the packaged DSH
-        run: CONTEXTMESH_TEST_RUNTIME="$RUNNER_TEMP/runtime" node --import tsx scripts/test.ts tests/e2e/devices.spec.ts tests/e2e/model-relay.spec.ts tests/e2e/continuation.spec.ts tests/e2e/confirmed-takeover.spec.ts tests/e2e/upgrade.spec.ts
+        run: CONTEXTMESH_TEST_RUNTIME="$RUNNER_TEMP/runtime" node --import tsx scripts/test.ts tests/e2e/devices.spec.ts tests/e2e/model-relay.spec.ts tests/e2e/continuation.spec.ts tests/e2e/confirmed-takeover.spec.ts tests/e2e/codex-return.spec.ts tests/e2e/upgrade.spec.ts
       - name: Archive verified runtime
         run: |
           mkdir -p artifacts

@@ -55,6 +55,12 @@ contextmesh recover codex-thread-id --confirm-stopped --adapter codex
 
 导出包含适配器名称、原 header、继承数量和事件。恢复仅能在确认原进程及其工具停止后明确执行；选择适配器不代表可以停止正在运行的 Agent。
 
+## Codex 归档返回
+
+带认证的 `GET /v1/codex-archives` 和 `GET /v1/codex-archives/:id` 返回本命名空间内归档元信息：身份、会话实例、序号数量、创建时间、忙碌及待恢复标记，不返回上下文正文或凭据。`/health/ready` 声明 `codex-context-return-v1`，该增量能力沿用 schema 8。
+
+接收端 DSH 插件通过[明确的归档导入](codex-return.zh.md)校验固定 Codex 快照并转换为新的 DSH 日志，不通过原生恢复接口解释其他格式。目标 header 的 `contextmeshImport` 记录来源截点、摘要、操作编号和预期导入事件数量。不完整导入会在普通列表分页及摘要查询前被筛除；导入历史完整前，普通写入申请返回 `IMPORT_INCOMPLETE`，仅明确的导入恢复请求携带相符的可选 `importOperationId`，补齐保存的历史前缀。这是现有可信命名空间内的导入阶段保护，不是新增的鉴权边界。
+
 ## 版本兼容
 
 带认证的 `/health/ready` 声明 `native-agent-storage-v1`，数据库版本为 **8**。旧 Server 不接受其他原生格式。schema 8 保留原生格式边界和已有 DSH header、事件，增加后继会话关联、独立 Agent 端点身份和一次性续跑记录。已转移的 DSH 历史可读，申请写者或恢复写者返回 `SESSION_MOVED`。请按[结构迁移流程](runtime.zh.md#从-schema-6-或-7-迁移到-8)升级。对外仍只安装一个 DSH ContextMesh 插件。

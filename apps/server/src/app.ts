@@ -186,6 +186,13 @@ export function buildServer(options: ServerOptions) {
   registerHandoffRoutes(app, options.store, ns)
   registerModelRelayRoutes(app, options.store, ns)
   registerTransferRoutes(app, options.store, ns)
+  app.get('/v1/codex-archives', () => options.store.codexArchives(ns))
+  app.get('/v1/codex-archives/:id', async (req) => {
+    const row = (await options.store.codexArchives(ns, id(req.params)))[0]
+    if (!row)
+      throw new MeshError('NOT_FOUND', 'No published Codex archive exists', 404)
+    return row
+  })
   app.get('/health/live', async () => ({ ok: true }))
   app.get('/health/ready', async () => {
     await options.store.pool.query('SELECT 1')
@@ -197,6 +204,7 @@ export function buildServer(options: ServerOptions) {
       features: [
         'native-agent-storage-v1',
         'cross-agent-takeover-v1',
+        'codex-context-return-v1',
         'maintenance-v1',
         'handoff-v1',
         'takeover-v1',

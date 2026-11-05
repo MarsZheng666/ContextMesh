@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { Pool, type PoolClient } from 'pg'
+import { z } from 'zod'
 import {
   MeshError,
   sessionSchema,
@@ -11,6 +12,10 @@ import {
 } from '../../protocol/src/index.js'
 import { migrate, assertDurability } from './migration.js'
 
+/** Incomplete imported context must not enter ordinary native restore catalogs. */
+export function completeImportSql(prefix = '') {
+  return `(${prefix}adapter<>'deepseek' OR NOT (${prefix}header::jsonb ? 'contextmeshImport') OR (${prefix}header::jsonb#>'{contextmeshImport,version}'='1'::jsonb AND jsonb_typeof(${prefix}header::jsonb#>'{contextmeshImport,eventCount}')='number' AND ${prefix}header::jsonb#>'{contextmeshImport,eventCount}'<=to_jsonb(${prefix}next_seq)))`
+}
 export interface Row {
   id: string
   successor_session: string | null
@@ -343,6 +348,7 @@ export class BasePostgresStore {
       instanceId: string
       access: 'read' | 'write'
       adapter?: NativeAdapterId
+      importOperationId?: string
     },
   ): Promise<RemoteHandle> {
     return this.operation(
@@ -359,6 +365,30 @@ export class BasePostgresStore {
         if (!row.materialized && row.creator_instance !== request.instanceId)
           throw new MeshError('NOT_FOUND', `session "${id}" not found`, 404)
         if (request.access === 'write') {
+          const value = this.decode(row.header) as {
+            contextmeshImport?: unknown
+          }
+          if (
+            row.adapter === 'deepseek' &&
+            value.contextmeshImport !== undefined
+          ) {
+            const metadata = z
+              .object({
+                version: z.literal(1),
+                operationId: z.uuid(),
+                eventCount: z.number().int().min(1).max(10002),
+              })
+              .safeParse(value.contextmeshImport)
+            if (
+              !metadata.success ||
+              (Number(row.next_seq) < metadata.data.eventCount &&
+                request.importOperationId !== metadata.data.operationId)
+            )
+              throw new MeshError(
+                'IMPORT_INCOMPLETE',
+                'Finish or explicitly recover the context import before opening its DSH writer',
+              )
+          }
           const header = this.decode(row.header) as { handoffId?: string }
           if (row.adapter === 'codex' && header.handoffId) {
             const link = (
@@ -437,7 +467,7 @@ export class BasePostgresStore {
   ): Promise<{ sessions: SessionSnapshot[]; cursor: string | null }> {
     const rows = (
       await this.pool.query(
-        'SELECT * FROM cm_sessions WHERE namespace=$1 AND (materialized OR creator_instance=$2) AND id COLLATE "C" > $3 COLLATE "C" AND adapter=$5 ORDER BY id COLLATE "C" LIMIT $4',
+        `SELECT * FROM cm_sessions WHERE namespace=$1 AND (materialized OR creator_instance=$2) AND id COLLATE "C" > $3 COLLATE "C" AND adapter=$5 AND ${completeImportSql()} ORDER BY id COLLATE "C" LIMIT $4`,
         [ns, instance, after, limit + 1, adapter],
       )
     ).rows

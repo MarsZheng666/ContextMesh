@@ -6,6 +6,8 @@
 
 运行中的 DSH 任务可通过[确认接管后自动续跑](confirmed-takeover.zh.md)转移；下方 `import` 命令仍只是快照复制，保留来源所有权。
 
+需要在 DSH 继续稳定归档时，使用 [Codex → DSH 导入](codex-return.zh.md)。它创建新的 DSH 会话并等待你的下一条指令，不停止或转移运行中的 Codex；接收端仅需自己的模型和现有 ContextMesh 插件。
+
 ## 使用前
 
 - 单独安装受支持的官方 Codex CLI，确保 PATH 中可以执行 `codex`。目前使用 **0.154.0** 验证；兼容的新 0.x 版本需要提供相同 app-server 接口。ContextMesh 不捆绑 Codex，也不增加第二个 DSH 插件。
