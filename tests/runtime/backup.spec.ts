@@ -62,6 +62,27 @@ test.runIf(!!process.env.CONTEXTMESH_TEST_PG_BIN)(
       ]
       await client.append(h, events, randomUUID())
       await client.flush(h, randomUUID())
+      const native = new MeshClient({ endpoint, token, adapter: 'codex' })
+      const nativeId = 'codex:' + randomUUID()
+      const nativeHeader = {
+        id: nativeId,
+        version: 1,
+        createdAt: 1,
+        isSeeded: false,
+        nativeThreadId: 'fixture-thread',
+      }
+      const nativeEvents = [
+        {
+          seq: 0,
+          type: 'native/item',
+          time: 1,
+          item: { role: 'assistant', content: '归档后保留原生日志' },
+        },
+      ]
+      const nativeHandle = await native.create(nativeHeader, 0)
+      await native.append(nativeHandle, nativeEvents, randomUUID())
+      await native.flush(nativeHandle, randomUUID())
+      await native.close(nativeHandle, randomUUID())
       await client.request('/v1/admin/maintenance', { enabled: true })
       await expect(backupServer(deployment)).rejects.toThrow('stop all clients')
       await client.close(h, randomUUID())
@@ -88,13 +109,35 @@ test.runIf(!!process.env.CONTEXTMESH_TEST_PG_BIN)(
       })
       const check = new pg.Pool({ connectionString: connection.href })
       try {
-        expect((await check.query('SELECT id FROM cm_sessions')).rows).toEqual([
-          { id },
-        ])
+        expect(
+          new Set(
+            (await check.query('SELECT id FROM cm_sessions')).rows.map(
+              (row) => row.id,
+            ),
+          ),
+        ).toEqual(new Set([id, nativeId]))
+        const restoredNative = (
+          await check.query(
+            'SELECT adapter,header FROM cm_sessions WHERE id=$1',
+            [nativeId],
+          )
+        ).rows[0]
+        expect(restoredNative.adapter).toBe('codex')
+        expect(JSON.parse(restoredNative.header)).toEqual(nativeHeader)
+        expect(
+          JSON.parse(
+            (
+              await check.query(
+                'SELECT event FROM cm_events WHERE session_id=$1',
+                [nativeId],
+              )
+            ).rows[0].event,
+          ),
+        ).toEqual(nativeEvents[0])
         expect(
           (await check.query('SELECT count(*)::int AS count FROM cm_events'))
             .rows[0].count,
-        ).toBe(1)
+        ).toBe(2)
         expect(
           (await check.query('SELECT enabled FROM cm_maintenance')).rows[0]
             .enabled,

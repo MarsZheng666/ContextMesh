@@ -1,0 +1,115 @@
+import { createInterface } from 'node:readline'
+import { readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { join } from 'node:path'
+const file = join(process.env.CODEX_HOME, 'fixture.json')
+let state = existsSync(file)
+  ? JSON.parse(readFileSync(file, 'utf8'))
+  : { threads: {}, requests: [] }
+const send = (v) => process.stdout.write(JSON.stringify(v) + '\n')
+const save = () => writeFileSync(file, JSON.stringify(state))
+const fail = process.env.CODEX_FIXTURE_FAULT
+let initialized = false
+createInterface({ input: process.stdin }).on('line', (line) => {
+  const r = JSON.parse(line),
+    p = r.params ?? {}
+  state.requests.push(r)
+  save()
+  if (!('id' in r) || !r.method) return
+  const reply = (result) => send({ id: r.id, result })
+  if (r.method === 'initialize') {
+    initialized = true
+    return reply({ userAgent: 'fixture' })
+  }
+  if (!initialized) return send({ id: r.id, error: { code: -32000 } })
+  const t = state.threads[p.threadId]
+  switch (r.method) {
+    case 'thread/start': {
+      const id = 'native-' + Object.keys(state.threads).length
+      const thread = {
+        id,
+        cwd: p.cwd,
+        cliVersion: '0.154.0',
+        status: { type: 'idle' },
+        model: p.model,
+      }
+      state.threads[id] = {
+        thread,
+        items: [],
+        turns: [],
+        injected: [],
+        sandbox: p.sandbox,
+      }
+      save()
+      return reply({
+        thread,
+        cwd: p.cwd,
+        model: p.model,
+        sandbox: {
+          type: p.sandbox === 'read-only' ? 'readOnly' : 'workspaceWrite',
+        },
+        approvalPolicy: 'never',
+      })
+    }
+    case 'thread/inject_items':
+      t.injected.push(...p.items)
+      save()
+      if (fail === 'inject-drop') return process.exit(1)
+      return reply({})
+    case 'thread/resume':
+      if (!t) return send({ id: r.id, error: { code: -32600 } })
+      return reply({
+        thread: t.thread,
+        cwd: t.thread.cwd,
+        model: t.thread.model,
+        sandbox: {
+          type: t.sandbox === 'read-only' ? 'readOnly' : 'workspaceWrite',
+        },
+        approvalPolicy: 'never',
+      })
+    case 'thread/read':
+      return reply({ thread: t.thread })
+    case 'thread/turns/list':
+      return reply({ data: t.turns, nextCursor: null })
+    case 'thread/items/list':
+      return reply({
+        data: t.items,
+        nextCursor: fail === 'cursor-loop' ? 'same' : null,
+      })
+    case 'turn/start': {
+      const id = 'turn-' + t.turns.length
+      const turn = { id, status: 'completed' }
+      t.turns.push(turn)
+      t.items.push(
+        {
+          turnId: id,
+          item: { type: 'userMessage', id: id + '-u', content: p.input },
+        },
+        {
+          turnId: id,
+          item: {
+            type: 'agentMessage',
+            id: id + '-a',
+            text: 'fixture continuation',
+            phase: 'final_answer',
+          },
+        },
+      )
+      save()
+      reply({ turn })
+      if (fail === 'turn-drop') return process.exit(1)
+      if (fail === 'turn-slow')
+        return setTimeout(
+          () =>
+            send({
+              method: 'turn/completed',
+              params: { threadId: p.threadId, turn },
+            }),
+          1000,
+        )
+      send({ method: 'turn/completed', params: { threadId: p.threadId, turn } })
+      return
+    }
+    default:
+      return send({ id: r.id, error: { code: -32601 } })
+  }
+})

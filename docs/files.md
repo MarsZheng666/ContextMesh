@@ -56,4 +56,4 @@ pnpm cli workspace-rollback TRANSFER_ID --confirm
 
 ## Upgrade
 
-The server uses database schema **6**. Back up PostgreSQL and stop older writers before upgrading the server and participating devices together. Migration from schemas 1–5 preserves Session headers and events and adds expiring workspace-transfer records. Older server binaries reject schema 6; rollback requires the backup. The native DSH Session format is unchanged.
+The current server uses schema **7**. Migration preserves existing native Session headers and events, adds an adapter-scoped catalog index and establishes a compatibility boundary for native formats. Back up PostgreSQL and stop writers before following the [migration guide](runtime.md#migrate-schema-6-to-7). Older servers refuse schema 7; rollback requires the backup. The DSH Session format is unchanged.

@@ -2,7 +2,7 @@
 
 [中文](runtime.zh.md)
 
-The 0.7.0 runtime packages contain Node, the pinned DeepSeek Harness runtime and the **single** `dsh-contextmesh-handoff` plugin. They are built for macOS Apple Silicon and Linux x64. Linux packages record and check their minimum glibc version in the manifest; release CI builds against Ubuntu 22.04 (glibc 2.35). Windows and additional architectures are not supported yet. A global Node, pnpm or Git installation is unnecessary for ordinary conversations; Git is needed when working with Git projects.
+The 0.8.0-dev.2 runtime packages contain Node, the pinned DeepSeek Harness runtime and the **single** `dsh-contextmesh-handoff` plugin. They are built for macOS Apple Silicon and Linux x64. Linux packages record and check their minimum glibc version in the manifest; release CI builds against Ubuntu 22.04 (glibc 2.35). Windows and additional architectures are not supported yet. A global Node, pnpm or Git installation is unnecessary for ordinary conversations; Git is needed when working with Git projects.
 
 Packages are produced by the **Release packages** workflow. Publication is a separate maintainer action: a workflow artifact is a candidate, not a published release. Obtain a platform archive and its checksum from the same trusted release, verify the SHA-256 value, then unpack it. Keep the original checksum and `manifest.json`. The manifest records platform, Node/DSH versions, protocol and schema compatibility, source commit, lockfile/patch hashes, file checksums and bundled third-party license information.
 
@@ -110,9 +110,9 @@ contextmesh server resume-upgrade
 contextmesh server maintenance off
 ```
 
-Maintenance blocks new mutations/writers at the API and database admission boundary; existing writers can append, flush and close. An expired lease does not prove a writer stopped. Backups require no active or unresolved writers, are private, and are validated with PostgreSQL's archive reader. Server upgrades preserve PostgreSQL major version 18 and schema 6. A recorded interruption keeps maintenance enabled; `resume-upgrade` continues that exact image after validating its backup and drain state.
+Maintenance blocks new mutations/writers at the API and database admission boundary; existing writers can append, flush and close. An expired lease does not prove a writer stopped. Backups require no active or unresolved writers, are private, and are validated with PostgreSQL's archive reader. Managed server upgrades preserve PostgreSQL major version 18 and require the target image to have the same schema as the running server. Schema-changing images are rejected before maintenance or downtime. Backups record the actual schema (6 or 7); restoration also supports verified schema-6 archives. A recorded interruption keeps maintenance enabled; `resume-upgrade` continues that exact image after validating its backup and drain state.
 
-The old 0.6.1 service has no maintenance API. For that first server upgrade, stop **all old clients, tools and the API**, verify the processes are gone, and take a PostgreSQL backup before replacing the API. Do not use lease expiry as evidence. The managed client can adopt the stopped 0.6.1 home; the server upgrade command deliberately refuses an old server without maintenance support. Earlier incompatible schemas require an explicit migration procedure; this release does not automate schema-changing or PostgreSQL-major upgrades.
+The old 0.6.1 service has no maintenance API. For that first server upgrade, stop **all old clients, tools and the API**, verify the processes are gone, and take a PostgreSQL backup before replacing the API. Do not use lease expiry as evidence. The managed client can adopt the stopped 0.6.1 home; the server upgrade command deliberately refuses an old server without maintenance support. For schema 6 → 7, follow the stopped-service migration below. PostgreSQL-major upgrades remain separate administrator operations.
 
 Disaster restoration is deliberately separate. Stop all clients and the API, keep PostgreSQL running, then:
 
@@ -121,3 +121,15 @@ contextmesh server restore --backup /path/to/verified-backup --confirm-stopped -
 ```
 
 This replaces the database with the selected backup in a single transaction and restores its deployment settings. Other database connections block restoration. The API stays stopped and maintenance stays enabled. Review the restored data before restarting and admitting writers. Never restore an old backup automatically over new writes.
+
+## Migrate schema 6 to 7
+
+This source preview uses schema **7**. The native DSH Session format is unchanged; the new boundary prevents older servers from reading other Agents' native formats incorrectly.
+
+1. Build the reviewed target version or obtain its verified image/package before maintenance.
+2. Enable maintenance on the schema-6 service, stop every client and tool, and explicitly resolve pending handoffs, model switches and failed writers. Do not use lease expiry as proof of shutdown.
+3. Take and verify a PostgreSQL 18 archive with the old deployment and retain its private configuration and image. The old server can still run against this backup.
+4. Stop the API, retain the existing database volume, and replace only the API image/binary with the reviewed schema-7 version. Start that API alone; startup applies the transactional migration. Do not run both server versions together.
+5. Check authenticated `/health/ready` reports `schemaVersion: 7`, maintenance remains on, and existing session headers and event counts are intact. Update managed clients to a package whose manifest allows schema 7, then turn maintenance off and resume devices.
+
+Older servers reject schema 7. If rollback is required, stop all devices and the API and explicitly restore the verified schema-6 archive with its corresponding deployment. This discards writes made after that backup; replacing the binary alone is insufficient. `server upgrade` and `resume-upgrade` deliberately do not perform this migration.

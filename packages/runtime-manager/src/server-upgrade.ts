@@ -10,6 +10,7 @@ import { privateDirectory, atomicJson, optionalJson } from './files.js'
 import { readConnection } from '../../client/src/config.js'
 import { MeshClient } from '../../client/src/index.js'
 const exec = promisify(execFile)
+const supportedSchema = z.union([z.literal(6), z.literal(7)])
 const deployment = z.object({
   version: z.literal(1),
   image: z.string(),
@@ -34,11 +35,13 @@ async function backupAction(directory: string) {
     writers: number
     unresolved: number
     takeovers: number
+    schema: number
   }
   if (!state.enabled || state.writers || state.unresolved || state.takeovers)
     throw new Error(
       'Enable maintenance and stop all clients; unresolved or expired writers must be explicitly recovered first',
     )
+  const schemaVersion = supportedSchema.parse(state.schema)
   const target = join(root, 'backups', randomUUID())
   await privateDirectory(target)
   for (const file of [
@@ -106,7 +109,7 @@ async function backupAction(directory: string) {
     postgresMajor: config.postgresMajor,
     image: config.image,
     createdAt: new Date().toISOString(),
-    schema: 6,
+    schema: schemaVersion,
     sha256: sha256(bytes),
   })
   return { directory: target, verified: true }
@@ -147,11 +150,22 @@ async function upgradeAction(directory: string, image: string) {
     ],
     { timeout: 30000 },
   )
-  z.object({
-    schema: z.literal(6),
-    protocol: z.literal(1),
-    postgresMajor: z.literal(18),
-  }).parse(JSON.parse(metadata.stdout))
+  const targetMetadata = z
+    .object({
+      schema: supportedSchema,
+      protocol: z.literal(1),
+      postgresMajor: z.literal(18),
+    })
+    .parse(JSON.parse(metadata.stdout))
+  const credential = await readConnection(join(root, 'owner-connection.json'))
+  if (!credential) throw new Error('Owner connection missing')
+  const current = (await new MeshClient({ ...credential, retries: 0 }).request(
+    '/health/ready',
+  )) as { schemaVersion: number }
+  if (current.schemaVersion !== targetMetadata.schema)
+    throw new Error(
+      'Schema-changing upgrades require a stopped-service migration and a verified backup; maintenance has not been changed',
+    )
   const prior = (await optionalJson(join(root, 'upgrade.json'))) as
     { phase?: string } | undefined
   if (prior && !['verified', 'rolled-back'].includes(prior.phase ?? ''))
@@ -191,7 +205,7 @@ async function upgradeAction(directory: string, image: string) {
       ...credential!,
       retries: 0,
     }).request('/health/ready')) as { schemaVersion: number }
-    if (health.schemaVersion !== 6)
+    if (health.schemaVersion !== targetMetadata.schema)
       throw new Error(
         'Schema changed; keep maintenance enabled and review the backup before any restoration',
       )
@@ -215,7 +229,7 @@ async function restoreAction(directory: string, backupDirectory: string) {
     .object({
       verified: z.literal(true),
       postgresMajor: z.literal(18),
-      schema: z.literal(6),
+      schema: supportedSchema,
       sha256: z.string().regex(/^[a-f0-9]{64}$/),
     })
     .parse(await optionalJson(join(backup, 'backup.json')))
@@ -336,14 +350,24 @@ async function resumeAction(directory: string) {
     ],
     { timeout: 30000 },
   )
-  z.object({
-    schema: z.literal(6),
-    protocol: z.literal(1),
-    postgresMajor: z.literal(18),
-  }).parse(JSON.parse(metadata.stdout))
+  const targetMetadata = z
+    .object({
+      schema: supportedSchema,
+      protocol: z.literal(1),
+      postgresMajor: z.literal(18),
+    })
+    .parse(JSON.parse(metadata.stdout))
   const backup = z
-    .object({ verified: z.literal(true), sha256: z.string() })
+    .object({
+      verified: z.literal(true),
+      sha256: z.string(),
+      schema: supportedSchema,
+    })
     .parse(await optionalJson(join(journal.backup, 'backup.json')))
+  if (backup.schema !== targetMetadata.schema)
+    throw new Error(
+      'The recorded backup and target image use different schemas',
+    )
   if (
     sha256(await readFile(join(journal.backup, 'database.dump'))) !==
     backup.sha256
@@ -360,11 +384,11 @@ async function resumeAction(directory: string) {
     '-d',
     'contextmesh',
     '-Atc',
-    'SELECT (SELECT max(version) FROM cm_schema)=6 AND COALESCE((SELECT bool_and(enabled) FROM cm_maintenance),false) AND NOT EXISTS(SELECT 1 FROM cm_sessions WHERE active_handle IS NOT NULL)',
+    `SELECT (SELECT max(version) FROM cm_schema)=${targetMetadata.schema} AND COALESCE((SELECT bool_and(enabled) FROM cm_maintenance),false) AND NOT EXISTS(SELECT 1 FROM cm_sessions WHERE active_handle IS NOT NULL)`,
   ])
   if (state.stdout.trim() !== 't')
     throw new Error(
-      'Resume requires schema 6, maintenance enabled, and no writers',
+      'Resume requires the target schema, maintenance enabled, and no writers',
     )
   await compose(root, ['stop', 'api'])
   const text = await readFile(join(root, 'compose.yaml'), 'utf8')

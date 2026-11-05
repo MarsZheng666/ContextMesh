@@ -1,4 +1,5 @@
 import type { Pool } from 'pg'
+import { STORAGE_SCHEMA_VERSION } from '../../protocol/src/index.js'
 
 const sql = `
 CREATE TABLE IF NOT EXISTS cm_maintenance (namespace text PRIMARY KEY, enabled boolean NOT NULL DEFAULT false, updated_at timestamptz NOT NULL DEFAULT clock_timestamp());
@@ -104,6 +105,10 @@ CREATE TABLE cm_workspace_transfers (
 );
 INSERT INTO cm_schema(version) VALUES(6);
 `
+const v7 = `
+CREATE INDEX cm_sessions_adapter ON cm_sessions(namespace,adapter,id COLLATE "C");
+INSERT INTO cm_schema(version) VALUES(7);
+`
 export async function migrate(pool: Pool): Promise<void> {
   const client = await pool.connect()
   try {
@@ -116,7 +121,7 @@ export async function migrate(pool: Pool): Promise<void> {
       'SELECT max(version) AS version FROM cm_schema',
     )
     let version = Number(result.rows[0].version)
-    if (version < 1 || version > 6)
+    if (version < 1 || version > STORAGE_SCHEMA_VERSION)
       throw new Error('unsupported ContextMesh database schema')
     if (version === 1) {
       await client.query(v2)
@@ -134,7 +139,11 @@ export async function migrate(pool: Pool): Promise<void> {
       await client.query(v5)
       version = 5
     }
-    if (version === 5) await client.query(v6)
+    if (version === 5) {
+      await client.query(v6)
+      version = 6
+    }
+    if (version === 6) await client.query(v7)
     await client.query('COMMIT')
   } catch (error) {
     await client.query('ROLLBACK')

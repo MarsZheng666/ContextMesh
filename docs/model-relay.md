@@ -81,6 +81,6 @@ Keep the device running and restore its connection. On restart, a persisted sele
 
 ## Database upgrade
 
-The server uses schema **6**. Back up PostgreSQL and stop older writers before upgrade. Migration from schemas 1–5 preserves existing headers and events, adds model-relay records and optional target-model takeover data. The prior server rejects schema 6; rollback requires the backup. The native DSH Session format remains unchanged.
+The current server uses schema **7**. Migration preserves existing native Session headers and events, adds an adapter-scoped catalog index and establishes a compatibility boundary for native formats. Back up PostgreSQL and stop writers before following the [migration guide](runtime.md#migrate-schema-6-to-7). Older servers refuse schema 7; rollback requires the backup. The DSH Session format is unchanged.
 
 [Device pairing](devices.md) is available with the same plugin.

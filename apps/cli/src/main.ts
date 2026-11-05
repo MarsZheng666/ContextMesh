@@ -1,3 +1,4 @@
+import { runCodex } from './codex.js'
 import { runRuntime } from './runtime.js'
 import { setup } from './setup.js'
 import { readConnection } from '../../../packages/client/src/config.js'
@@ -8,6 +9,7 @@ import { runLocal } from './local.js'
 const input = process.argv.slice(2)
 const handled = await (async () =>
   (await runRuntime(input)) ||
+  (await runCodex(input)) ||
   (await setup(input)) ||
   (await runLocal(input)))().catch((error) => {
   console.error(error instanceof Error ? error.message : String(error))
@@ -15,6 +17,15 @@ const handled = await (async () =>
   return true
 })
 if (!handled) {
+  const args = [...input]
+  const adapterIndex = args.indexOf('--adapter')
+  let adapter: string | undefined
+  if (adapterIndex !== -1) {
+    adapter = args[adapterIndex + 1]
+    if (!adapter || adapter.startsWith('--'))
+      throw new Error('--adapter requires a native adapter name')
+    args.splice(adapterIndex, 2)
+  }
   const saved = process.env.CONTEXTMESH_TOKEN
     ? undefined
     : await readConnection()
@@ -26,8 +37,9 @@ if (!handled) {
       saved?.endpoint ??
       'http://127.0.0.1:8787',
     token,
+    adapter,
   })
-  const [command, id, confirmation] = process.argv.slice(2)
+  const [command, id, confirmation] = args
   try {
     if (command === 'list')
       console.log(JSON.stringify(await client.list(), null, 2))
@@ -39,6 +51,7 @@ if (!handled) {
         console.log(
           JSON.stringify(
             {
+              adapter: handle.session.adapter,
               header: handle.session.header,
               inheritedEventCount: handle.session.inheritedEventCount,
               events: (await client.read(handle, 0, Number.MAX_SAFE_INTEGER))
@@ -63,6 +76,9 @@ if (!handled) {
             {
               operationId: randomUUID(),
               confirmStopped: true,
+              ...(client.adapter === 'deepseek'
+                ? {}
+                : { adapter: client.adapter }),
             },
           ),
         ),
@@ -106,7 +122,7 @@ if (!handled) {
       )
     } else {
       console.error(
-        'Usage: contextmesh devices | projects | project-add <name> | map <project-id> <root> | remote-list | handoff <session-id> <target-node-id> | handoff-status [id] | handoff-cancel <id> | resume <session-id> | history <session-id> [--state-dir <dir>]\nRemote: list | stat <id> | export <id> | operation <operationId> | recover <id> --confirm-stopped\nRecover only after confirming the previous process and its tools have stopped.',
+        'Usage: contextmesh devices | projects | project-add <name> | map <project-id> <root> | remote-list | handoff <session-id> <target-node-id> | handoff-status [id] | handoff-cancel <id> | resume <session-id> | history <session-id> [--state-dir <dir>]\nRemote (optional --adapter <name>, default deepseek): list | stat <id> | export <id> | operation <operationId> | recover <id> --confirm-stopped\nRecover only after confirming the previous process and its tools have stopped.',
       )
       process.exitCode = 1
     }

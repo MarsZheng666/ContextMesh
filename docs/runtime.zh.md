@@ -2,7 +2,7 @@
 
 [English](runtime.md)
 
-0.7.0 运行包包含 Node、固定版本的 DeepSeek Harness 和唯一的 `dsh-contextmesh-handoff` 插件，面向 macOS Apple Silicon 与 Linux x64。Linux 包会在清单中记录并检查最低 glibc 版本，发布 CI 使用 Ubuntu 22.04（glibc 2.35）。暂不支持 Windows 和其他架构。普通对话无需全局 Node、pnpm 或 Git；代码项目使用 Git 时仍需安装 Git。
+0.8.0-dev.2 运行包包含 Node、固定版本的 DeepSeek Harness 和唯一的 `dsh-contextmesh-handoff` 插件，面向 macOS Apple Silicon 与 Linux x64。Linux 包会在清单中记录并检查最低 glibc 版本，发布 CI 使用 Ubuntu 22.04（glibc 2.35）。暂不支持 Windows 和其他架构。普通对话无需全局 Node、pnpm 或 Git；代码项目使用 Git 时仍需安装 Git。
 
 运行包由 **Release packages** 工作流构建。工作流产物属于候选包，发布仍是维护者单独执行的步骤。从可信发布获取对应平台压缩包和校验值，核对 SHA-256 后解压。保留校验值与 `manifest.json`；其中记录平台、Node/DSH 版本、协议与数据库兼容范围、源码提交、锁文件和补丁哈希、文件校验值及第三方许可证信息。
 
@@ -110,9 +110,9 @@ contextmesh server resume-upgrade
 contextmesh server maintenance off
 ```
 
-维护模式在 API 和数据库写入申请处阻止新写者，已有写者仍可 append、flush 和 close。租约过期不能证明原进程已停止。备份要求没有活动或未解决的写者，以私有文件保存并通过 PostgreSQL 归档读取器校验。服务升级保持 PostgreSQL 18 和数据库结构 6；中断后维持维护状态，`resume-upgrade` 核对备份及写者状态后继续原来记录的镜像。
+维护模式在 API 和数据库写入申请处阻止新写者，已有写者仍可 append、flush 和 close。租约过期不能证明原进程已停止。备份要求没有活动或未解决的写者，以私有文件保存并通过 PostgreSQL 归档读取器校验。托管服务升级保持 PostgreSQL 18，并要求目标镜像与当前服务的数据库结构版本相同；结构变化会在开启维护或停机前被拒绝。备份记录实际结构版本（6 或 7），仍支持恢复已校验的 schema 6 备份；中断后维持维护状态，`resume-upgrade` 核对备份及写者状态后继续原来记录的镜像。
 
-0.6.1 服务没有维护 API。首次升级它时，先停止并确认所有旧客户端、工具和 API 进程退出，再备份 PostgreSQL、替换 API。不能将租约过期视作停机证明。客户端可以导入已停止的 0.6.1 配置；服务升级命令会拒绝不具备维护接口的旧服务。更早且不兼容的结构需要明确迁移方案；本版不自动执行数据库结构变更或 PostgreSQL 大版本升级。
+0.6.1 服务没有维护 API。首次升级它时，先停止并确认所有旧客户端、工具和 API 进程退出，再备份 PostgreSQL、替换 API。不能将租约过期视作停机证明。客户端可以导入已停止的 0.6.1 配置；服务升级命令会拒绝不具备维护接口的旧服务。schema 6 → 7 按下方停机迁移流程执行；PostgreSQL 大版本升级仍是独立的管理操作。
 
 灾难恢复是单独操作。停止所有客户端和 API，保持 PostgreSQL 运行，然后执行：
 
@@ -121,3 +121,15 @@ contextmesh server restore --backup /path/to/verified-backup --confirm-stopped -
 ```
 
 该命令以选定备份替换数据库，使用单个事务恢复，并恢复对应部署设置。有其他数据库连接时拒绝操作。恢复后 API 保持停止、维护模式保持开启，检查数据后再启动和开放写入。不能在新数据已经写入后自动恢复旧备份。
+
+## 从 schema 6 迁移到 7
+
+本源码预览使用数据库结构 **7**。DSH 原生 Session 格式不变；新的版本边界防止旧 Server 将其他 Agent 的原生日志当成 DSH 数据读取。
+
+1. 开启维护前，先构建已审核的目标版本或准备校验过的镜像与运行包。
+2. 在 schema 6 服务上开启维护，停止所有客户端和工具，明确处理未完成的交接、模型切换与异常写者。租约过期不能证明进程停止。
+3. 使用旧部署创建并校验 PostgreSQL 18 备份，保留私有配置和旧镜像。旧服务仍能使用这份备份。
+4. 停止 API，保留现有数据库卷，仅将 API 镜像或程序替换为已审核的 schema 7 版本，再单独启动 API；启动时在事务内迁移。不能同时运行两个版本的 Server。
+5. 确认带认证的 `/health/ready` 返回 `schemaVersion: 7`，维护仍开启，已有会话 header 和事件数量完整。将托管客户端更新为清单允许 schema 7 的运行包，再关闭维护、恢复设备。
+
+旧 Server 会拒绝 schema 7。需要回退时，停止所有设备和 API，明确恢复校验过的 schema 6 备份及对应部署；这会丢弃备份之后的新写入，仅替换程序不够。`server upgrade` 和 `resume-upgrade` 不自动执行这次迁移。

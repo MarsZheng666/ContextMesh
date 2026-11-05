@@ -73,6 +73,7 @@ export class TransferPostgresStore extends ModelRelayPostgresStore {
             403,
           )
         const session = await this.session(db, ns, bundle.sessionId)
+        this.assertDeepSeek(session)
         const writer = (
           await db.query(
             'SELECT instance_id FROM cm_handles WHERE namespace=$1 AND id=$2 AND NOT closed',

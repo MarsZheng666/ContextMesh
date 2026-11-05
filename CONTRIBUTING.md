@@ -52,7 +52,7 @@ Preserve native Session data, contiguous event ordering, single-writer ownership
 
 The adapted upstream fixtures in `tests/upstream/` retain their original license and source metadata. Preserve those files and update their recorded hashes only when intentionally updating the fixtures.
 
-Release validation also runs `scripts/release/smoke.mjs <bundle>` with only system tools on `PATH`. Set `CONTEXTMESH_TEST_RUNTIME` to an unpacked bundle to run native device/handoff tests against its bundled Node and DSH. Set `CONTEXTMESH_TEST_PG_BIN` to PostgreSQL 18's client-tool directory to enable the archive recovery test; this test substitutes Docker command transport while using real `pg_dump`, `pg_restore`, and `psql` against a disposable database. Linux release CI enables it. Neither test uses production data.
+Release validation also runs `scripts/release/smoke.mjs <bundle>` with only system tools on `PATH`. Set `CONTEXTMESH_TEST_RUNTIME` to an unpacked bundle to run native device/handoff tests against its bundled Node and DSH. Set `CONTEXTMESH_TEST_PG_BIN` to PostgreSQL 18's client-tool directory to enable the archive recovery test; this test substitutes Docker command transport while using real `pg_dump`, `pg_restore`, and `psql` against a disposable database. Linux release CI enables it. Neither test uses production data. Set `CONTEXTMESH_TEST_CODEX_BIN` to an installed compatible Codex CLI to run its isolated native adapter test against a local scripted Responses provider; no user history or paid model credentials are used.
 
 ## Private data
 
