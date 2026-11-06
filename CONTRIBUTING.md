@@ -14,6 +14,8 @@ ContextMesh is a public project. Design installation, upgrades, configuration, d
 - Handoff and takeover use the receiving device’s selected provider, model and reasoning settings. Devices need not configure the same models. Use the native model selector; never add a separate handoff model picker. Remember explicit local choices independently from incoming session history, and use the local DSH default until a choice is made. Validate and persist the receiving model before releasing the source; never silently choose an arbitrary available model.
 - For running-task takeover, preflight the receiver before cancelling the source. Wait for dispatched tools to settle; if preparation fails before cancellation, leave the source running. Persist one continuation in the native inbox before target activation; never requeue consumed work or blindly retry uncertain tool side effects. Idle/completed tasks must not start new work.
 
+- Cross-Agent takeover requires explicit receiver confirmation. Preserve separate native logs and a durable successor link. Record a one-time continuation claim before native dispatch; never reopen a transferred source or retry uncertain task effects. Ownership transfer and native execution have separate statuses.
+
 ## Development setup
 
 Use Node.js 24.9+ and the pinned pnpm version from `package.json`.

@@ -4,11 +4,15 @@
 
 可选的 Codex 适配器已包含在现有 ContextMesh CLI 中。它将已完成的 DSH 或 ContextMesh 管理的 Codex 快照导入为**本机新的 Codex 线程**，再通过 Codex 原生 app-server 发送新指令。源会话保留原历史和写入权。这是明确的快照复制，不会自动抢占执行中的任务。
 
+运行中的 DSH 任务可通过[确认接管后自动续跑](confirmed-takeover.zh.md)转移；下方 `import` 命令仍只是快照复制，保留来源所有权。
+
+需要在 DSH 继续稳定归档时，使用 [Codex → DSH 导入](codex-return.zh.md)。它创建新的 DSH 会话并等待你的下一条指令，不停止或转移运行中的 Codex；接收端仅需自己的模型和现有 ContextMesh 插件。
+
 ## 使用前
 
 - 单独安装受支持的官方 Codex CLI，确保 PATH 中可以执行 `codex`。目前使用 **0.154.0** 验证；兼容的新 0.x 版本需要提供相同 app-server 接口。ContextMesh 不捆绑 Codex，也不增加第二个 DSH 插件。
 - 在接收端配置 Codex 登录和模型服务。ContextMesh 通过 Codex 使用本机配置，不上传认证文件，也不复制源端模型密钥。
-- 通过 `contextmesh setup` 连接 schema 7 Server，沿用[服务端指南](deployment.zh.md)中的 HTTPS 连接。
+- 通过 `contextmesh setup` 连接 schema 8 Server，沿用[服务端指南](deployment.zh.md)中的 HTTPS 连接。
 - 先结束源端当前轮次及工具调用。本预览支持文本和历史工具引用；附件、未确认的工具执行结果、无法解释的投影及过大上下文会在导入前被拒绝，不会静默删减。
 
 ## 导入与继续

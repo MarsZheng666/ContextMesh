@@ -1,3 +1,4 @@
+import { readCodexContext } from '../../client/src/codex-context.js'
 import { randomUUID, createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { z } from 'zod'
@@ -16,11 +17,7 @@ import {
 import { listenLocal } from '../../handoff-deepseek/src/local-control.js'
 import { NativeCodex, targetSchema, type Target } from './native.js'
 import type { CodexOptions } from './rpc.js'
-import {
-  deepSeekContext,
-  extendCodexContext,
-  nativeSnapshot,
-} from './context.js'
+import { deepSeekContext, nativeSnapshot } from './context.js'
 
 const bindingSchema = z
   .object({
@@ -31,11 +28,13 @@ const bindingSchema = z
     target: targetSchema,
     codexHome: z.string().optional(),
     pending: z.uuid().optional(),
+    handoffId: z.uuid().optional(),
   })
   .strict()
 const journalSchema = z.object({
   version: z.literal(1),
   operationId: z.uuid(),
+  handoffId: z.uuid().optional(),
   sourceId: z.string(),
   sourceAdapter: z.enum(['deepseek', 'codex']),
   target: targetSchema,
@@ -97,34 +96,16 @@ export class CodexBridge {
       )
   }
   private async source(adapter: 'deepseek' | 'codex', id: string) {
-    const source = new MeshClient({ ...this.options.connection, adapter })
-    const handle = await source.open(id, 'read')
+    if (adapter === 'codex')
+      return (await readCodexContext(this.client, id)).context
+    const source = new MeshClient({ ...this.options.connection, adapter }),
+      handle = await source.open(id, 'read')
     try {
       const read = await source.read(handle, 0, Number.MAX_SAFE_INTEGER)
-      const snapshot = { ...read.snapshot, nextSeq: read.end }
-      if (adapter === 'deepseek') return deepSeekContext(snapshot, read.events)
-      if (snapshot.header.version !== 1)
-        throw new Error('Unsupported Codex storage envelope')
-      const base = validatePortable(snapshot.header.portable)
-      if (snapshot.header.sourceDigest !== contextDigest(base))
-        throw new Error('Portable source digest does not match')
-      const last = read.events.findLast((e) => e.type === 'codex/snapshot')
-      if (!last) throw new Error('The Codex session has no complete snapshot')
-      const native = nativeSnapshot.parse(last.snapshot)
-      if (native.thread.id !== snapshot.header.nativeThreadId)
-        throw new Error(
-          'Native snapshot thread identity does not match its archive',
-        )
-      const context = extendCodexContext(base, native)
-      return validatePortable({
-        ...context,
-        source: {
-          adapter,
-          id: snapshot.id,
-          incarnation: snapshot.incarnation,
-          eventCount: read.end,
-        },
-      })
+      return deepSeekContext(
+        { ...read.snapshot, nextSeq: read.end },
+        read.events,
+      )
     } finally {
       await source.close(handle, randomUUID())
     }
@@ -134,11 +115,17 @@ export class CodexBridge {
     sourceAdapter?: 'deepseek' | 'codex'
     target: Target
     operationId?: string
+    handoffId?: string
   }) {
     const operationId = z
       .uuid()
       .parse(input.operationId ?? randomUUID())
       .toLowerCase()
+    if (
+      input.handoffId &&
+      z.uuid().parse(input.handoffId).toLowerCase() !== operationId
+    )
+      throw new Error('Handoff import must use its stable operation identity')
     return this.locked('import:' + operationId, () =>
       this.locked('run:codex:' + operationId, async () => {
         await this.ready()
@@ -151,7 +138,8 @@ export class CodexBridge {
         const target = await this.validateTarget(input.target)
         if (
           journal &&
-          (journal.sourceId !== input.sourceId ||
+          (journal.handoffId !== input.handoffId ||
+            journal.sourceId !== input.sourceId ||
             journal.sourceAdapter !== (input.sourceAdapter ?? 'deepseek') ||
             JSON.stringify(journal.target) !== JSON.stringify(target) ||
             journal.codexHome !== this.home())
@@ -190,6 +178,7 @@ export class CodexBridge {
             )
             journal = {
               version: 1,
+              handoffId: input.handoffId,
               operationId,
               sourceId: input.sourceId,
               sourceAdapter: input.sourceAdapter ?? 'deepseek',
@@ -229,6 +218,7 @@ export class CodexBridge {
                 portable: context,
                 sourceDigest: contextDigest(context),
                 nativeThreadId: journal.threadId!,
+                ...(journal.handoffId ? { handoffId: journal.handoffId } : {}),
                 target: z.json().parse(target),
               },
               0,
@@ -259,6 +249,7 @@ export class CodexBridge {
             threadId: journal.threadId!,
             target,
             codexHome: journal.codexHome,
+            handoffId: journal.handoffId,
           })
           journal.phase = 'done'
           await atomicJson(file, journal)
@@ -359,11 +350,11 @@ export class CodexBridge {
         const prior = cut.events.findLast((e) => e.type === 'codex/snapshot')
         const current = { turns: snapshot.turns, items: snapshot.items }
         const old = prior && nativeSnapshot.parse(prior.snapshot)
-        if (
+        const changed =
           !old ||
           JSON.stringify({ turns: old.turns, items: old.items }) !==
             JSON.stringify(current)
-        )
+        if (changed)
           await this.client.append(
             handle,
             [
@@ -382,7 +373,7 @@ export class CodexBridge {
         handle = undefined
         delete binding.pending
         await atomicJson(file, binding)
-        return { sessionId: id, reconciled: true, replayed: false }
+        return { sessionId: id, reconciled: true, replayed: false, changed }
       } catch (error) {
         if (handle)
           await this.client.close(handle, randomUUID(), true).catch(() => {})
@@ -392,7 +383,14 @@ export class CodexBridge {
       }
     })
   }
-  async run(id: string, message: string, timeoutMs?: number) {
+  async run(
+    id: string,
+    message: string,
+    timeoutMs?: number,
+    control?: {
+      beforeDispatch(handle: RemoteHandle, operationId: string): Promise<void>
+    },
+  ) {
     if (!message.trim() || Buffer.byteLength(message) > 1024 * 1024)
       throw new Error(
         'Provide a nonempty instruction within the message size limit',
@@ -411,6 +409,21 @@ export class CodexBridge {
         throw new Error(
           `Previous Codex operation ${binding.pending} needs review; do not resend uncertain work`,
         )
+      if (binding.handoffId && !control) {
+        const h = z
+          .object({
+            state: z.literal('completed'),
+            targetSessionId: z.literal(id),
+            executionState: z.enum(['none', 'completed', 'failed']),
+          })
+          .safeParse(
+            await this.client.request('/v1/handoffs/' + binding.handoffId),
+          )
+        if (!h.success)
+          throw new Error(
+            'This confirmed takeover still needs its one-time continuation or explicit reconciliation',
+          )
+      }
       const native = new NativeCodex(this.options.native)
       let handle: RemoteHandle | undefined,
         renewal: NodeJS.Timeout | undefined,
@@ -469,13 +482,20 @@ export class CodexBridge {
         )
         binding.pending = randomUUID()
         await atomicJson(file, binding)
+        await control?.beforeDispatch(handle, binding.pending)
         dispatched = true
-        const turn = await native.execute(binding.threadId, message, timeoutMs)
+        const turn = await native.execute(
+          binding.threadId,
+          message,
+          timeoutMs,
+          binding.pending,
+        )
         if (lost)
           throw new Error('ContextMesh writer ownership could not be renewed')
         const snapshot = await native.snapshot(binding.threadId)
         const event: StoredEvent = {
           seq: old.end,
+          runOperationId: binding.pending,
           type: 'codex/snapshot',
           time: Date.now(),
           snapshot: z.json().parse(snapshot),

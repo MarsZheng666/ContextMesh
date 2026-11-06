@@ -1,7 +1,7 @@
 import { z } from 'zod'
 
 export const PROTOCOL_VERSION = 1
-export const STORAGE_SCHEMA_VERSION = 7
+export const STORAGE_SCHEMA_VERSION = 8
 export const nativeAdapterId = z
   .string()
   .min(1)
@@ -36,6 +36,7 @@ export const sessionSchema = z.object({
   nextSeq: integer,
   generation: integer,
   materialized: z.boolean(),
+  successorSessionId: nativeId.nullable().optional(),
 })
 export type SessionSnapshot = z.infer<typeof sessionSchema>
 export const createSchema = z.object({
@@ -50,6 +51,7 @@ export const openSchema = z.object({
   instanceId: z.uuid(),
   access: z.enum(['read', 'write']),
   adapter: nativeAdapterId.optional(),
+  importOperationId: z.uuid().optional(),
 })
 export const handleSchema = z.object({
   handleId: z.uuid(),

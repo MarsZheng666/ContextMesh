@@ -184,3 +184,46 @@ it('publishes credentials without clobbering or following a target symlink', asy
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+it('shares a paired hardware credential across separate DSH and Codex endpoints and revokes both', async () => {
+  const f = await fixture(),
+    owner = new DeviceClient(f.client),
+    pair = invitation(await owner.create('Combined device'))
+  const config = await DeviceClient.claim(f.endpoint, pair.code, randomUUID())
+  const dsh = new MeshClient(config),
+    codex = new MeshClient({ ...config, adapter: 'codex' })
+  const { HandoffClient } = await import('../../packages/client/src/handoff.js')
+  const dshEndpoint = new HandoffClient(dsh, config.nodeId),
+    codexEndpoint = new HandoffClient(codex, randomUUID())
+  await dshEndpoint.register('DSH')
+  await codexEndpoint.register('Codex', [], {
+    adapter: 'codex',
+    harness: '0.154.0',
+    deviceId: config.nodeId,
+  })
+  expect(
+    (await codexEndpoint.nodes()).filter((node) => node.online),
+  ).toHaveLength(2)
+  await codexEndpoint.heartbeat()
+  const stranger = new HandoffClient(codex, randomUUID())
+  await expect(
+    stranger.register('Wrong device', [], {
+      adapter: 'codex',
+      harness: '0.154.0',
+      deviceId: randomUUID(),
+    }),
+  ).rejects.toMatchObject({ code: 'WRONG_DEVICE' })
+  await expect(
+    dsh.request(`/v1/nodes/${stranger.nodeId}/offline`, {
+      instanceId: dsh.instanceId,
+    }),
+  ).rejects.toMatchObject({ code: 'WRONG_DEVICE' })
+  const credentials = (await owner.list()) as Array<{ id: string }>
+  await owner.revoke(credentials[0]!.id)
+  await expect(dshEndpoint.heartbeat()).rejects.toMatchObject({
+    code: 'UNAUTHORIZED',
+  })
+  await expect(codexEndpoint.heartbeat()).rejects.toMatchObject({
+    code: 'UNAUTHORIZED',
+  })
+})

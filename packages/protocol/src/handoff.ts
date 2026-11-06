@@ -4,27 +4,38 @@ import { digest } from './transfers.js'
 export const operation = z.object({ operationId: z.uuid() })
 export const nodeIdentity = z.object({ nodeId: z.uuid(), instanceId: z.uuid() })
 export const nodeRegistration = operation.extend({
+  deviceId: z.uuid().optional(),
   nodeId: z.uuid(),
   instanceId: z.uuid(),
   name: z.string().trim().min(1).max(100),
-  capabilities: z.object({
-    controlVersion: z.literal(1),
-    takeoverVersion: z.literal(1).optional(),
-    projectSetupVersion: z.literal(1).optional(),
-    directoryHandoffVersion: z.literal(1).optional(),
-    modelRelayVersion: z.literal(1).optional(),
-    receiverModelVersion: z.literal(1).optional(),
-    continuationVersion: z.literal(1).optional(),
-    workspaceTransferVersion: z.literal(1).optional(),
-    models: z
-      .array(
-        z.object({ provider: z.string(), model: z.string(), name: z.string() }),
-      )
-      .max(500)
-      .optional(),
-    harness: z.literal('0.2.1-rc.3'),
-    adapter: z.literal('deepseek'),
-  }),
+  capabilities: z
+    .object({
+      controlVersion: z.literal(1),
+      takeoverVersion: z.literal(1).optional(),
+      projectSetupVersion: z.literal(1).optional(),
+      directoryHandoffVersion: z.literal(1).optional(),
+      modelRelayVersion: z.literal(1).optional(),
+      receiverModelVersion: z.literal(1).optional(),
+      continuationVersion: z.literal(1).optional(),
+      workspaceTransferVersion: z.literal(1).optional(),
+      models: z
+        .array(
+          z.object({
+            provider: z.string(),
+            model: z.string(),
+            name: z.string(),
+          }),
+        )
+        .max(500)
+        .optional(),
+      harness: z.string().min(1).max(100),
+      adapter: z.enum(['deepseek', 'codex']),
+      crossAgentVersion: z.literal(1).optional(),
+    })
+    .refine(
+      (c) => c.adapter === 'codex' || c.harness === '0.2.1-rc.3',
+      'unsupported DSH harness',
+    ),
 })
 export const projectRegistration = operation.extend({
   projectId: z.uuid(),
@@ -69,6 +80,7 @@ export const workspaceProof = z
 export const handoffManifest = z.object({
   version: z.literal(1),
   transferId: z.uuid().optional(),
+  targetAgent: z.literal('codex').optional(),
   sandbox: z.object({
     mode: z.enum(['read-only', 'workspace-write', 'danger-full-access']),
     relativeRoot: workspaceProof.shape.relativeCwd,
@@ -144,6 +156,12 @@ export interface HandoffRecord {
   finalGeneration: number | null
   targetHandleId: string | null
   error: string | null
+  sourceStopClaimed?: boolean
+  targetSessionId?: string | null
+  executionState?:
+    'none' | 'pending' | 'dispatching' | 'completed' | 'failed' | 'uncertain'
+  executionOperationId?: string | null
+  executionTurnId?: string | null
 }
 
 export const takeoverRequest = operation.extend({
@@ -179,4 +197,27 @@ export const projectAssignment = operation.extend({
   incarnation: z.uuid(),
   expectedSourceNodeId: z.uuid(),
   projectId: z.uuid(),
+})
+
+export const codexExecutionState = z.enum([
+  'none',
+  'pending',
+  'dispatching',
+  'completed',
+  'failed',
+  'uncertain',
+])
+export const codexHandoffAccept = handoffUpdate.extend({
+  targetSessionId: z.string().min(1).max(256),
+  proof: workspaceProof,
+})
+export const codexDispatch = handoffUpdate.extend({
+  handleId: z.uuid(),
+  epoch: z.number().int().positive(),
+  runOperationId: z.uuid(),
+})
+export const codexExecutionFinish = handoffUpdate.extend({
+  runOperationId: z.uuid(),
+  turnId: z.string().min(1).max(256).optional(),
+  confirmStopped: z.literal(true).optional(),
 })

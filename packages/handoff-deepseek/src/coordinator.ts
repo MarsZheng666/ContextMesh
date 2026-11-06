@@ -3,6 +3,8 @@ import {
   stageContinuation,
   wakeContinuation,
 } from './continuation.js'
+import { CodexContextImport } from './codex-import.js'
+import { codexArchives } from '../../client/src/codex-context.js'
 import { WorkspaceTransfers } from './workspace-transfer.js'
 import { fileReferences } from './file-attachments.js'
 import type { TransferRecord } from '../../protocol/src/transfers.js'
@@ -122,6 +124,19 @@ const commandSchema = z.discriminatedUnion('action', [
     action: z.literal('revoke-device'),
     credentialId: z.uuid(),
     confirmed: z.literal(true),
+  }),
+  z.object({
+    action: z.literal('import-codex'),
+    sourceId: z.string().min(1).max(256),
+    cwd: z.string().min(1).max(4096),
+    operationId: z.uuid(),
+    confirmed: z.literal(true),
+  }),
+  z.object({ action: z.literal('import-codex-status'), operationId: z.uuid() }),
+  z.object({
+    action: z.literal('import-codex-recover'),
+    operationId: z.uuid(),
+    confirmStopped: z.literal(true),
   }),
   z.object({ action: z.literal('models') }),
   modelRoute.extend({
@@ -1229,6 +1244,11 @@ export class HandoffCoordinator {
               'WORKSPACE_MISMATCH',
               'source project changed during preflight',
             )
+          if (
+            record.manifest.targetAgent === 'codex' &&
+            !record.sourceStopClaimed
+          )
+            record = await this.client.claimSourceStop(record)
           if (record.manifest.resumePolicy === 'interrupted') {
             if (agent.status === 'running')
               agent.cancel(
@@ -1838,6 +1858,109 @@ export class HandoffCoordinator {
       handoffError: handoff?.error,
     }
   }
+  private codexImporter() {
+    return new CodexContextImport({
+      mesh: this.client.mesh,
+      stateDir: this.config.stateDir,
+      prepareLocal: async (target) => {
+        await this.prepareCodexImport(target)
+      },
+      preflight: async (session, route) => {
+        await inspectModel(
+          this.ctx.llm,
+          session,
+          route,
+          this.abort.signal,
+          undefined,
+          { profile: this.profile(route) },
+        )
+      },
+    })
+  }
+  async importCodex(command: {
+    sourceId: string
+    cwd: string
+    operationId: string
+    confirmed: true
+  }) {
+    const model = this.receiverModel(),
+      importer = this.codexImporter()
+    const result = await importer.import({ ...command, model })
+    return this.publishCodexImport(result)
+  }
+  private async prepareCodexImport(target: {
+    sessionId: string
+    operationId: string
+    cwd: string
+    incarnation: string
+  }) {
+    await this.client.project('Codex import', target.operationId)
+    const mapping = await this.client.mapping(
+      target.operationId,
+      target.cwd,
+      true,
+    )
+    const workspace = await inspectWorkspace(
+      mapping,
+      '',
+      this.abort.signal,
+      'directory',
+    )
+    this.state.bindings[target.sessionId] = {
+      incarnation: target.incarnation,
+      projectId: mapping.projectId,
+      policyRelativeRoot: '',
+    }
+    await this.save()
+    return { mapping, workspace }
+  }
+  private async publishCodexImport(
+    result: Awaited<ReturnType<CodexContextImport['import']>>,
+  ) {
+    const importer = this.codexImporter(),
+      model = result.model
+    if (result.phase === 'published') return result
+    const { mapping, workspace } = await this.prepareCodexImport({
+      ...result,
+      incarnation: result.incarnation!,
+    })
+    const manifest: HandoffManifest = {
+      version: 1,
+      harness: '0.2.1-rc.3',
+      adapter: 'deepseek',
+      workspace: workspace.proof,
+      sandbox: { mode: this.policy(this.ctx).defaultMode, relativeRoot: '' },
+      model,
+    }
+    const existing = this.ctx.agents.get(SessionId(result.sessionId))
+    if (!existing) {
+      const control = this.freeze(result.sessionId)
+      try {
+        await control.run(() =>
+          this.resumeAgent(
+            result.sessionId,
+            manifest,
+            mapping,
+            result.incarnation!,
+          ),
+        )
+        this.release(result.sessionId)
+      } catch (error) {
+        this.warn(result.sessionId, error)
+        throw error
+      }
+    }
+    const agent = this.ctx.agents.get(SessionId(result.sessionId))
+    if (!agent)
+      throw new MeshError(
+        'TARGET_NOT_READY',
+        'Imported history is saved; open its DSH session to continue',
+      )
+    await this.bindExisting(agent)
+    await this.publish(agent, mapping.projectId)
+    await importer.markPublished(result.operationId)
+    return importer.status(result.operationId)
+  }
   async command(input: unknown): Promise<unknown> {
     const command = commandSchema.parse(input)
     if (command.action === 'prepare-upgrade') return this.prepareUpgrade()
@@ -1858,6 +1981,21 @@ export class HandoffCoordinator {
         503,
       )
     switch (command.action) {
+      case 'import-codex':
+        return this.exclusive('codex-import:' + command.operationId, () =>
+          this.importCodex(command),
+        )
+      case 'import-codex-status':
+        return this.codexImporter().status(command.operationId)
+      case 'import-codex-recover':
+        return this.exclusive('codex-import:' + command.operationId, async () =>
+          this.publishCodexImport(
+            await this.codexImporter().recover(
+              command.operationId,
+              command.confirmStopped,
+            ),
+          ),
+        )
       case 'pair-device':
         return new DeviceClient(this.client.mesh).create(
           command.name,
@@ -2077,6 +2215,7 @@ export class HandoffCoordinator {
       projects: await this.client.projects(),
       mappings: await this.client.mappings(),
       sessions: await this.client.sessions(),
+      codexArchives: await codexArchives(this.client.mesh),
       handoffs: await this.client.commands(),
       errors: Object.fromEntries(this.errors),
       pendingRequests: [...this.pendingRequests.keys()],

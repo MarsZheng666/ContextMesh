@@ -82,7 +82,10 @@ class ScriptedModel extends LlmAdapter {
       }
     }
     const start = options.messages.findLastIndex(
-      (m) => m.role === 'user' && JSON.stringify(m).includes('READ_WORKSPACE'),
+      (m) =>
+        m.role === 'user' &&
+        m.source?.kind !== 'contextmesh-import' &&
+        JSON.stringify(m).includes('READ_WORKSPACE'),
     )
     if (
       !options.purpose &&
@@ -339,7 +342,13 @@ export async function apply(ctx: Context) {
         } else if (request.action === 'native-resume') {
           const result = await ctx.sessionController.resolveAgent(sessionId)
           if ('error' in result) throw result.error
-          value = { live: true }
+          value = {
+            live: true,
+            cwd: ctx.workingDirectory.get(result.agent.session),
+            workspaceRoot: ctx.sandboxPolicy.resolve({
+              session: result.agent.session,
+            }).workspaceRoot,
+          }
         } else if (request.action === 'history-follow') {
           const controller = new AbortController()
           const iterator = ctx.sessionController

@@ -2,7 +2,7 @@
 
 [中文](native-agents.zh.md) · [Server deployment](deployment.md) · [DSH handoff](handoff.md)
 
-ContextMesh Server persists independent native Agent logs. DSH uses the single installed ContextMesh plugin; the optional [Codex CLI bridge](codex.md) imports completed snapshots and archives its native continuation. Selecting `adapter: 'codex'` in the SDK alone still only names a storage format; it does not install Codex or convert a DSH log. Automatic cross-Agent takeover of running work is not available yet.
+ContextMesh Server persists independent native Agent logs. DSH uses the single installed ContextMesh plugin; the optional [Codex CLI bridge](codex.md) imports snapshots or explicitly takes over unfinished DSH work, and archives its native continuation. Selecting `adapter: 'codex'` in the SDK alone still only names a storage format; it does not install Codex or convert a DSH log. Receiver-confirmed DSH → Codex takeover is described in the [takeover guide](confirmed-takeover.md).
 
 ## Storage contract
 
@@ -55,6 +55,12 @@ contextmesh recover codex-thread-id --confirm-stopped --adapter codex
 
 Exports include the adapter, original header, inherited count and events. Recovery is an explicit administrative action only after the previous process and its tools have stopped; selecting an adapter does not authorize stopping a running Agent.
 
+## Codex archive return
+
+The authenticated `GET /v1/codex-archives` catalog and `GET /v1/codex-archives/:id` return namespace-scoped archive metadata: identity, incarnation, sequence count, creation time, busy and recovery-required flags. They do not return context or credentials. `/health/ready` advertises `codex-context-return-v1`; this additive capability keeps schema 8.
+
+The receiving DSH plugin's [explicit archive import](codex-return.md) validates and converts a fixed Codex snapshot into a new DSH log. It does not reinterpret a foreign log through native restore. The target header's `contextmeshImport` records the source cut/digest, operation and expected seed event count. Incomplete imports are excluded before normal list pagination and summaries. Ordinary write-open returns `IMPORT_INCOMPLETE` until the seed is complete; only explicit importer recovery supplies the matching optional `importOperationId` to finish its saved prefix. This is a staging guard within the existing trusted namespace, not an additional authorization boundary.
+
 ## Compatibility
 
-Authenticated `/health/ready` advertises `native-agent-storage-v1` with database schema **7**. An older Server cannot accept other native formats. Schema 7 retains existing DSH headers/events and adds a catalog index; it also prevents older binaries from opening a database containing foreign native logs. See the [schema migration procedure](runtime.md#migrate-schema-6-to-7). The public installation still contains exactly one DSH ContextMesh plugin.
+Authenticated `/health/ready` advertises `native-agent-storage-v1` with database schema **8**. An older Server cannot accept other native formats. Schema 8 retains existing DSH headers/events and the native-format boundary, adding a successor-session link, separate Agent endpoint identity and one-time continuation execution records. A transferred DSH session stays readable; write-open and recovery return `SESSION_MOVED`. See the [schema migration procedure](runtime.md#migrate-schema-6-or-7-to-8). The public installation still contains exactly one DSH ContextMesh plugin.

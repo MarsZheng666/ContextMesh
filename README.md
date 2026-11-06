@@ -4,11 +4,11 @@ English | [中文](README.zh.md)
 
 **Your context, across devices, models and coding agents.**
 
-Keep conversation and tool history on a shared server. Continue a DSH task on another device, or bring a completed snapshot into Codex CLI and work with that device's own model and workspace.
+Keep conversation and tool history on a shared server. Continue a DSH task on another device, or confirm takeover into Codex CLI and continue unfinished work with that device's own model and workspace.
 
 ContextMesh combines **one shared remote Server** with **integrations on the devices that execute tasks**: a single [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugin and an optional Codex bridge built into the ContextMesh CLI.
 
-[Deploy the server](#1-deploy-the-server) · [Install a device client](#2-install-a-device-client) · [Connect devices](#3-connect-your-devices) · [DSH handoff](#4-continue-a-conversation-in-dsh) · [Codex CLI](#5-continue-a-snapshot-with-codex-cli)
+[Deploy the server](#1-deploy-the-server) · [Install a device client](#2-install-a-device-client) · [Connect devices](#3-connect-your-devices) · [DSH handoff](#4-continue-a-conversation-in-dsh) · [Codex CLI](#5-continue-with-codex-cli)
 
 ## How it fits together
 
@@ -24,7 +24,7 @@ flowchart LR
 | ---------------- | ----------------------------------------- | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------- |
 | **Server**       | One host reachable by your devices        | PostgreSQL, service credentials, HTTPS URL                         | Persist shared context, authenticate devices, coordinate ownership and transfers       |
 | **DSH plugin**   | Inside DSH on each participating device   | Server connection and local models                                 | Send and restore native events; provide shared sessions, handoff and takeover controls |
-| **Codex bridge** | Through ContextMesh CLI on a Codex device | The same Server connection, local Codex login, model and directory | Import completed snapshots, run a native Codex thread, archive results to the Server   |
+| **Codex bridge** | Through ContextMesh CLI on a Codex device | The same Server connection, local Codex login, model and directory | Import or confirm task takeover, run Codex locally, archive results to the Server      |
 
 Deploy the Server once. Devices share its HTTPS URL and use separate credentials; they need no local PostgreSQL. The service host needs a device integration only if it also executes tasks. Model requests and tools run on the executing device, and model credentials stay there.
 
@@ -36,15 +36,16 @@ Deploy the Server once. Devices share its HTTPS URL and use separate credentials
 | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | **DSH → DSH, across devices**       | Hand off or confirm takeover of the same session. For running work, check the receiver before stopping the source, then continue automatically. |
 | **Switch models in DSH**            | Use the receiver's native model selection; a device with only Sol can continue a Flash task. Models need not match across devices.              |
-| **DSH → Codex CLI**                 | Import a completed text/tool-history snapshot into a new Codex thread, then send a new instruction to continue.                                 |
+| **DSH → Codex CLI**                 | Confirm on the receiver, preflight it before stopping DSH, then automatically continue unfinished work in a new Codex thread.                   |
+| **Managed Codex → DSH**             | Copy a settled archive into a new DSH conversation with the receiver's model and chosen folder; send the next instruction when ready.           |
 | **Managed Codex → Codex CLI**       | Import an archived snapshot into another local Codex thread with that receiver's model and directory.                                           |
 | **Selected workspace files in DSH** | Preview and confirm supported changes and native file attachments before applying them on the receiver.                                         |
 
-Codex snapshot imports create a separate conversation and retain source provenance. **Automatic takeover of running tasks across different Agents and Codex → DSH import are not available yet.** See [DSH handoff](docs/handoff.md), [Codex usage](docs/codex.md), and [native storage](docs/native-agents.md).
+Codex snapshot imports create a separate conversation and retain source provenance. **DSH → Codex takeover requires explicit receiver confirmation. Codex → DSH copies a settled archive and waits for your next instruction; it does not take over live Codex execution.** See [DSH handoff](docs/handoff.md), [Codex usage](docs/codex.md), [return to DSH](docs/codex-return.md), and [native storage](docs/native-agents.md).
 
 ## Before you install
 
-**0.8.0-dev.2 is an unreleased source preview.** The plugin requires this repository's pinned **DSH 0.2.1-rc.3 and compatibility patches**. Use the pinned source build below; installing the plugin into an arbitrary global DSH is not supported.
+**0.8.0-dev.4 is an unreleased source preview.** The plugin requires this repository's pinned **DSH 0.2.1-rc.3 and compatibility patches**. Use the pinned source build below; installing the plugin into an arbitrary global DSH is not supported.
 
 Use the same reviewed source version for the Server and device clients. The instructions below use the source installation path. Self-contained macOS Apple Silicon and Linux x64 packages are also built by CI, but are currently **candidate artifacts, not published releases**. Their installation and upgrade commands are covered in the [runtime guide](docs/runtime.md).
 
@@ -93,7 +94,7 @@ pnpm install --frozen-lockfile
 pnpm build
 ```
 
-**Codex-only device:** the ContextMesh CLI is now built. Skip the DSH plugin installation and configure the connection in step 3, then follow [step 5](#5-continue-a-snapshot-with-codex-cli). Install and configure Codex CLI separately; ContextMesh does not bundle it.
+**Codex-only device:** the ContextMesh CLI is now built. Skip the DSH plugin installation and configure the connection in step 3, then follow [step 5](#5-continue-with-codex-cli). Install and configure Codex CLI separately; ContextMesh does not bundle it.
 
 ### DSH: install the single plugin
 
@@ -167,11 +168,21 @@ Ordinary conversations work in non-Git folders. Code workspaces need the same Gi
 
 See [handoff](docs/handoff.md), [model relay](docs/model-relay.md), and [file transfer](docs/files.md) for supported cases and recovery. Model relay currently supports text and completed tool history; file transfer supports native file attachments, with images, spill resources, and live processes outside the current scope.
 
-## 5. Continue a snapshot with Codex CLI
+## 5. Continue with Codex CLI
 
 Use the built client checkout and Server connection from steps 2–3. Install and configure Codex CLI on the receiving device; the bridge was validated with **Codex CLI 0.154.0**. Its local login and provider settings supply the model credentials.
 
-Finish the source turn and its tools, then:
+To take over a running DSH task, review the local model and directory, then confirm on the receiver:
+
+```sh
+pnpm cli codex takeover SOURCE_SESSION_ID \
+  --cwd /absolute/path/to/local/project \
+  --model YOUR_LOCAL_CODEX_MODEL --workspace-write --confirm
+```
+
+The receiver checks its model, context and workspace before DSH stops. Running tools must settle. Once the source closes and its final history is saved, Codex continues an unfinished task once. Completed tasks start no new work. DSH retains read-only history linked to the new Codex session. Keep the command running until completion. Git workspaces require the same clean commit; files are not copied. See [confirmed takeover and recovery](docs/confirmed-takeover.md).
+
+For an independent snapshot copy that keeps source ownership, finish the source turn and its tools, then:
 
 ```sh
 pnpm cli list
@@ -191,17 +202,22 @@ Add `--from codex` to import a managed Codex snapshot. Use `pnpm cli list --adap
 
 The default native sandbox is **read-only**; select `--workspace-write` on import when edits are intended. Source tool history becomes reference text, and files are not copied. Existing unmanaged Codex threads are not automatically collected. Text and settled tool history are supported; unsupported attachments and uncertain tool outcomes block import. After an interrupted run, inspect `status` and use the documented stopped-process reconciliation flow before resending work. See [the Codex guide](docs/codex.md) for configuration, limits and recovery.
 
+### Bring a Codex archive back to DSH
+
+In the receiving DSH's ContextMesh panel, select **Continue a Codex archive**, choose a local folder and confirm. The existing plugin creates a separate conversation using DSH's local model. Import starts no model work; send your next instruction there. The receiver needs no Codex installation. CLI users can run `pnpm cli import-codex CODEX_SESSION_ID --cwd /local/directory --confirm` while that DSH instance is running. See [archive return and recovery](docs/codex-return.md).
+
 ## Upgrades and troubleshooting
 
 | What you are maintaining                                           | Guide                                   |
 | ------------------------------------------------------------------ | --------------------------------------- |
 | Server, PostgreSQL, network access, and backups                    | [Server deployment](docs/deployment.md) |
 | DSH plugin, persistent connection settings, and model login        | [Device setup](docs/getting-started.md) |
+| Return a Codex archive to DSH                                      | [Codex → DSH](docs/codex-return.md)     |
 | Codex import, native execution, and interrupted-run recovery       | [Codex bridge](docs/codex.md)           |
 | Packaged runtimes, connection diagnostics, and controlled upgrades | [Runtime management](docs/runtime.md)   |
 | Pairing codes, device credentials, and revocation                  | [Device access](docs/devices.md)        |
 
-Keep the server and participating devices on compatible versions. Back up PostgreSQL and stop writers before upgrading; schema-changing upgrades and upgrades from a server without the maintenance API need the procedures in the runtime guide. Current schema: **7**.
+Keep the server and participating devices on compatible versions. Back up PostgreSQL and stop writers before upgrading; schema-changing upgrades and upgrades from a server without the maintenance API need the procedures in the runtime guide. Current schema: **8**.
 
 ## Development
 

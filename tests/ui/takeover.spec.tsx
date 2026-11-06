@@ -105,3 +105,34 @@ it('returns failures before message admission and leaves ordinary local messages
   expect(local).toEqual(['status'])
   localModel.close()
 })
+
+it('blocks sending to a DSH conversation already transferred to Codex without asking for project mapping', async () => {
+  const data = {
+    ...snapshot(''),
+    sessions: snapshot('').sessions.map((s) => ({
+      ...s,
+      activeNodeId: null,
+      projectId: null,
+      successorSessionId: 'codex:continued',
+    })),
+  }
+  const actions: string[] = []
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (_url: unknown, options: RequestInit) => {
+      actions.push(JSON.parse(String(options.body)).action)
+      return Response.json({ ok: true, value: data })
+    }),
+  )
+  const model = new UiModel(() => true)
+  try {
+    await expect(model.ensureOwned('session', t)).rejects.toMatchObject({
+      code: 'SESSION_MOVED',
+      message: en.SESSION_MOVED,
+    })
+    expect(actions).toEqual(['status'])
+    expect(model.getSnapshot().projectSetup).toBeUndefined()
+  } finally {
+    model.close()
+  }
+})

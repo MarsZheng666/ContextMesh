@@ -2,6 +2,9 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import type { PostgresStore } from '../../../packages/storage-postgres/src/index.js'
 import {
+  codexHandoffAccept,
+  codexDispatch,
+  codexExecutionFinish,
   takeoverRequest,
   projectAssignment,
   nodeRegistration,
@@ -106,6 +109,48 @@ export function registerHandoffRoutes(
           message: z.string().min(1).max(1000),
         })
         .parse(req.body),
+    ),
+  )
+  app.post('/v1/handoffs/:id/codex/source-stop', (req) =>
+    store.claimCodexSourceStop(
+      ns,
+      id(req.params),
+      handoffUpdate.parse(req.body),
+    ),
+  )
+  app.post('/v1/handoffs/:id/codex/adopt-pending', (req) =>
+    store.adoptPendingCodex(
+      ns,
+      id(req.params),
+      handoffUpdate.extend({ confirmStopped: z.literal(true) }).parse(req.body),
+    ),
+  )
+  app.post('/v1/handoffs/:id/codex/accept', (req) =>
+    store.acceptCodexHandoff(
+      ns,
+      id(req.params),
+      codexHandoffAccept.parse(req.body),
+    ),
+  )
+  app.post('/v1/handoffs/:id/codex/dispatch', (req) =>
+    store.claimCodexContinuation(
+      ns,
+      id(req.params),
+      codexDispatch.parse(req.body),
+    ),
+  )
+  app.post('/v1/handoffs/:id/codex/finish', (req) =>
+    store.finishCodexContinuation(
+      ns,
+      id(req.params),
+      codexExecutionFinish.parse(req.body),
+    ),
+  )
+  app.post('/v1/handoffs/:id/codex/uncertain', (req) =>
+    store.markCodexUncertain(
+      ns,
+      id(req.params),
+      handoffUpdate.extend({ runOperationId: z.uuid() }).parse(req.body),
     ),
   )
   app.get('/v1/handoffs/:id', (req) => store.getHandoff(ns, id(req.params)))

@@ -29,6 +29,17 @@ export const snapshotSchema = z.object({
       nodeId: z.string().nullable(),
     })
     .optional(),
+  codexArchives: z
+    .array(
+      z.object({
+        id: z.string(),
+        nextSeq: z.number(),
+        createdAt: z.number(),
+        busy: z.boolean(),
+        recoveryRequired: z.boolean(),
+      }),
+    )
+    .optional(),
   nodeId: z.string(),
   name: z.string(),
   models: z.array(modelChoice).optional(),
@@ -38,6 +49,7 @@ export const snapshotSchema = z.object({
       id: z.string(),
       name: z.string(),
       online: z.boolean(),
+      adapter: z.enum(['deepseek', 'codex']).optional(),
       models: z.array(modelChoice).optional(),
     }),
   ),
@@ -54,6 +66,7 @@ export const snapshotSchema = z.object({
       handoffId: z.string().nullable(),
       handoffState: z.string().nullable(),
       recoveryRequired: z.boolean(),
+      successorSessionId: z.string().nullable().optional(),
     }),
   ),
   handoffs: z.array(
@@ -64,6 +77,17 @@ export const snapshotSchema = z.object({
       targetNodeId: z.string(),
       state: z.string(),
       error: z.string().nullable(),
+      executionState: z
+        .enum([
+          'none',
+          'pending',
+          'dispatching',
+          'completed',
+          'failed',
+          'uncertain',
+        ])
+        .optional(),
+      targetSessionId: z.string().nullable().optional(),
     }),
   ),
   errors: z.record(z.string(), z.string()),
@@ -142,6 +166,8 @@ export class UiModel {
       if (data.connectivity && data.connectivity.state !== 'ready')
         throw new ControlError('CONNECTION_LOST', t('CONNECTION_LOST'))
       const session = data.sessions.find((s) => s.id === sessionId)
+      if (session?.successorSessionId)
+        throw new ControlError('SESSION_MOVED', t('SESSION_MOVED'))
       if (session?.activeNodeId && session.activeNodeId !== data.nodeId) {
         accepted = await this.ensureOwned(sessionId, t, undefined, target)
         // The native selection is already persisted as part of the takeover.
@@ -397,6 +423,7 @@ export class UiModel {
       throw new ControlError('CONNECTION_LOST', t('CONNECTION_LOST'))
     const session = data.sessions.find((s) => s.id === sessionId)
     if (!session) return true
+    if (session.successorSessionId) throw friendly('SESSION_MOVED')
     if (session.recoveryRequired) throw friendly('TAKEOVER_UNAVAILABLE')
     if (session.handoffId) throw friendly('HANDOFF_IN_PROGRESS')
     if (!session.activeNodeId || session.activeNodeId === data.nodeId) {

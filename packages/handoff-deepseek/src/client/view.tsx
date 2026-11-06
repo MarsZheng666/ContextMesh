@@ -24,6 +24,7 @@ type Actions = {
   refresh: () => Promise<void>
   open: (id: string) => void
   takeover?: (id: string) => Promise<boolean>
+  browse?: ListDirectory
 }
 const stateKeys = new Set<Key>([
   'requested',
@@ -43,6 +44,7 @@ function errorText(error: unknown, t: Locale['t']) {
 function stateLabel(state: string, t: Locale['t']) {
   return stateKeys.has(state as Key) ? t(state as Key) : state
 }
+const dialogStyle = `.cm-project-dialog{width:min(520px,calc(100vw - 48px));max-height:85vh;overflow:auto;border:1px solid #8886;border-radius:14px;padding:24px;background:var(--background-color,#202020);color:inherit;font:inherit}.cm-project-dialog::backdrop{background:#0009}.cm-project-dialog h2,.cm-project-dialog p{margin:0}.cm-project-dialog button,.cm-project-dialog input,.cm-project-dialog select{font:inherit;color:inherit;background:transparent;border:1px solid #8886;border-radius:7px;padding:9px}.cm-project-dialog select option{background:#202020}.cm-project-dialog button{cursor:pointer}.cm-project-dialog button:disabled{opacity:.5}.cm-project-dialog .cm-actions{justify-content:flex-end;margin-top:8px}.cm-directory-control{display:flex;gap:8px}.cm-directory-control input{min-width:0;flex:1}.cm-directory-path{display:flex;gap:8px}.cm-directory-path input{min-width:0;flex:1}.cm-directory-browser nav.cm-actions{justify-content:flex-start;gap:4px}.cm-directory-list{height:240px;overflow:auto;border:1px solid #8885;border-radius:8px;padding:6px}.cm-directory-entry{display:block;width:100%;border:0!important;text-align:left;padding:9px!important}.cm-directory-entry:hover{background:#8882}.cm-directory-hidden{display:flex!important;align-items:center;gap:8px}.cm-directory-browser{padding:0}`
 const style = `.cm-panel{padding:24px;max-width:1120px;margin:auto;height:100%;overflow:auto;color:inherit;font:inherit;box-sizing:border-box}.cm-panel h1{font-size:25px;margin:0 0 8px}.cm-muted{opacity:.7;font-size:13px}.cm-toolbar,.cm-actions,.cm-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.cm-panel button,.cm-panel select,.cm-panel input,.cm-dock button,.cm-dock select{font:inherit;padding:7px 10px;border:1px solid #8886;border-radius:7px;color:inherit;background:transparent}.cm-panel input{min-width:180px}.cm-panel button:disabled,.cm-dock button:disabled{opacity:.4;cursor:default}.cm-panel button,.cm-dock button{cursor:pointer}.cm-card{border:1px solid #8884;border-radius:12px;padding:16px;margin:14px 0}.cm-card h2{font-size:17px;margin:0 0 12px}.cm-session{padding:13px 0;border-top:1px solid #8883;display:flex;gap:14px;align-items:center;justify-content:space-between;flex-wrap:wrap}.cm-session strong{display:block;max-width:560px;overflow-wrap:anywhere}.cm-error{color:#d65c5c;white-space:pre-wrap;overflow-wrap:anywhere}.cm-history{position:relative;border:1px solid #8886;border-radius:12px;padding:16px;margin-top:14px}.cm-history pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;font-size:13px;max-height:450px;overflow:auto}.cm-form{display:grid;gap:12px;padding-top:14px}.cm-form label{display:grid;gap:6px}.cm-dock{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:6px 0;font-size:12px}.cm-badge{font-size:12px;opacity:.75}.cm-notice{border-left:3px solid #6479dc;padding:8px 12px;margin:12px 0}.cm-panel code{overflow-wrap:anywhere}.cm-icon{font-size:20px}`
 
 export function DirectoryBrowserView({
@@ -194,29 +196,32 @@ function DirectoryBrowser({
     if (state.listing && !state.failed) setPath(state.listing.path)
   }, [state.listing, state.failed])
   return (
-    <dialog
-      ref={dialog}
-      className="cm-project-dialog"
-      aria-labelledby="cm-directory-title"
-      onCancel={(event) => {
-        event.preventDefault()
-        event.stopPropagation()
-        cancel()
-      }}
-    >
-      <DirectoryBrowserView
-        state={state}
-        device={device}
-        path={path}
-        setPath={setPath}
-        hidden={hidden}
-        setHidden={setHidden}
-        navigate={(path) => void browser.navigate(path)}
-        pick={pick}
-        cancel={cancel}
-        t={t}
-      />
-    </dialog>
+    <>
+      <style>{style + dialogStyle}</style>
+      <dialog
+        ref={dialog}
+        className="cm-project-dialog"
+        aria-labelledby="cm-directory-title"
+        onCancel={(event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          cancel()
+        }}
+      >
+        <DirectoryBrowserView
+          state={state}
+          device={device}
+          path={path}
+          setPath={setPath}
+          hidden={hidden}
+          setHidden={setHidden}
+          navigate={(path) => void browser.navigate(path)}
+          pick={pick}
+          cancel={cancel}
+          t={t}
+        />
+      </dialog>
+    </>
   )
 }
 export function ProjectSetupForm({
@@ -395,10 +400,7 @@ function ProjectSetupDialog({
         model.cancelProjectSetup()
       }}
     >
-      <style>
-        {style +
-          `.cm-project-dialog{width:min(520px,calc(100vw - 48px));max-height:85vh;overflow:auto;border:1px solid #8886;border-radius:14px;padding:24px;background:var(--background-color,#202020);color:inherit;font:inherit}.cm-project-dialog::backdrop{background:#0009}.cm-project-dialog h2,.cm-project-dialog p{margin:0}.cm-project-dialog button,.cm-project-dialog input,.cm-project-dialog select{font:inherit;color:inherit;background:transparent;border:1px solid #8886;border-radius:7px;padding:9px}.cm-project-dialog select option{background:#202020}.cm-project-dialog button{cursor:pointer}.cm-project-dialog button:disabled{opacity:.5}.cm-project-dialog .cm-actions{justify-content:flex-end;margin-top:8px}.cm-directory-control{display:flex;gap:8px}.cm-directory-control input{min-width:0;flex:1}.cm-directory-path{display:flex;gap:8px}.cm-directory-path input{min-width:0;flex:1}.cm-directory-browser nav.cm-actions{justify-content:flex-start;gap:4px}.cm-directory-list{height:240px;overflow:auto;border:1px solid #8885;border-radius:8px;padding:6px}.cm-directory-entry{display:block;width:100%;border:0!important;text-align:left;padding:9px!important}.cm-directory-entry:hover{background:#8882}.cm-directory-hidden{display:flex!important;align-items:center;gap:8px}.cm-directory-browser{padding:0}`}
-      </style>
+      <style>{style + dialogStyle}</style>
       <ProjectSetupForm
         key={setup.sessionId}
         data={data}
@@ -429,6 +431,171 @@ function text(data: unknown) {
       .join('\n')
   return JSON.stringify(data, null, 2)
 }
+export function CodexImportPanel({
+  data,
+  request,
+  refresh,
+  open,
+  browse,
+  t,
+}: Actions & Locale & { data: Snapshot }) {
+  const [source, setSource] = useState(''),
+    [directory, setDirectory] = useState(''),
+    [browsing, setBrowsing] = useState(false),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState(''),
+    [pending, setPending] = useState(false)
+  const operation = useRef<string>(),
+    archives = data.codexArchives ?? [],
+    selected = archives.find((a) => a.id === source)
+  const submit = async () => {
+    if (!source || !directory || !window.confirm(t('codexImportConfirm')))
+      return
+    setBusy(true)
+    setError('')
+    operation.current ??= crypto.randomUUID()
+    try {
+      const result = (await request({
+        action: 'import-codex',
+        sourceId: source,
+        cwd: directory,
+        operationId: operation.current,
+        confirmed: true,
+      })) as { sessionId: string }
+      await refresh()
+      open(result.sessionId)
+    } catch (error) {
+      setError(errorText(error, t))
+      const saved = (await request({
+        action: 'import-codex-status',
+        operationId: operation.current,
+      }).catch((e) =>
+        e instanceof ControlError && e.code === 'NOT_FOUND'
+          ? undefined
+          : { phase: 'unknown' },
+      )) as { phase?: string } | undefined
+      setPending(!!saved && saved.phase !== 'published')
+    } finally {
+      setBusy(false)
+    }
+  }
+  const recover = async () => {
+    if (!operation.current || !window.confirm(t('codexRecoverConfirm'))) return
+    setBusy(true)
+    setError('')
+    try {
+      const result = (await request({
+        action: 'import-codex-recover',
+        operationId: operation.current,
+        confirmStopped: true,
+      })) as { sessionId: string }
+      setPending(false)
+      await refresh()
+      open(result.sessionId)
+    } catch (error) {
+      setError(errorText(error, t))
+    } finally {
+      setBusy(false)
+    }
+  }
+  if (!archives.length || !browse) return null
+  return (
+    <section className="cm-card">
+      <h2>{t('codexImportTitle')}</h2>
+      <p className="cm-notice">{t('codexImportNotice')}</p>
+      <label>
+        {t('codexArchive')}{' '}
+        <select
+          value={source}
+          disabled={busy || pending}
+          onChange={(event) => {
+            setSource(event.target.value)
+            operation.current = undefined
+          }}
+        >
+          <option value="">{t('codexChooseArchive')}</option>
+          {archives.map((a) => (
+            <option
+              key={a.id}
+              value={a.id}
+              disabled={a.busy || a.recoveryRequired}
+            >
+              {a.id}
+              {a.busy || a.recoveryRequired
+                ? ' · ' + t('codexArchiveBusy')
+                : ''}
+            </option>
+          ))}
+        </select>
+      </label>
+      <div className="cm-row">
+        <input
+          readOnly
+          aria-label={t('directory')}
+          value={directory}
+          placeholder={t('directoryNotSelected')}
+        />
+        <button disabled={busy || pending} onClick={() => setBrowsing(true)}>
+          {t('browseDirectory')}
+        </button>
+      </div>
+      {data.receiverModel && (
+        <p>
+          {t('receiverModel')}: {data.receiverModel.provider}/
+          {data.receiverModel.model}
+        </p>
+      )}
+      <button
+        disabled={
+          busy ||
+          !selected ||
+          selected.busy ||
+          selected.recoveryRequired ||
+          !directory
+        }
+        onClick={() => void submit()}
+      >
+        {busy
+          ? t('busy')
+          : pending
+            ? t('codexImportRetry')
+            : t('codexImportAction')}
+      </button>
+      {pending && (
+        <p className="cm-notice">
+          {t('codexImportInterrupted')}{' '}
+          <button disabled={busy} onClick={() => void recover()}>
+            {t('codexImportRecover')}
+          </button>
+        </p>
+      )}
+      {operation.current && (
+        <p>
+          {t('codexImportOperation')}: <code>{operation.current}</code>
+        </p>
+      )}
+      {error && (
+        <p role="alert" className="cm-error">
+          {error}
+        </p>
+      )}
+      {browsing && (
+        <DirectoryBrowser
+          browse={browse}
+          initialPath={directory || undefined}
+          device={data.name}
+          t={t}
+          cancel={() => setBrowsing(false)}
+          pick={(path) => {
+            setDirectory(path)
+            operation.current = undefined
+            setBrowsing(false)
+          }}
+        />
+      )}
+    </section>
+  )
+}
 export function RemotePanelView({
   data,
   error,
@@ -436,6 +603,7 @@ export function RemotePanelView({
   refresh,
   open,
   takeover,
+  browse,
   t,
 }: Actions & Locale & { data?: Snapshot; error?: Error }) {
   const [busy, setBusy] = useState(false),
@@ -491,7 +659,8 @@ export function RemotePanelView({
     )
   const selectedProject = project || data.projects[0]?.id || ''
   const targets = data.nodes.filter(
-    (node) => node.online && node.id !== data.nodeId,
+    (node) =>
+      node.online && node.id !== data.nodeId && node.adapter !== 'codex',
   )
   const selectedTarget = target || targets[0]?.id || ''
   const groups = [...new Set(data.sessions.map((session) => session.projectId))]
@@ -515,6 +684,14 @@ export function RemotePanelView({
       {data.modelPreflight && (
         <ModelCheckPanel data={data} request={request} t={t} />
       )}
+      <CodexImportPanel
+        data={data}
+        request={request}
+        refresh={refresh}
+        open={open}
+        browse={browse}
+        t={t}
+      />
       <p className="cm-notice">{t('prepare')}</p>
       {(failure || error) && (
         <p className="cm-error" role="alert">
@@ -634,6 +811,12 @@ export function RemotePanelView({
                         ? ` · ${stateLabel(session.handoffState, t)}`
                         : ''}
                     </span>
+                    {session.successorSessionId && (
+                      <p role="status">
+                        {t('continuedInCodex')}:{' '}
+                        <code>{session.successorSessionId}</code>
+                      </p>
+                    )}
                     {session.recoveryRequired && (
                       <p className="cm-error">{t('recover')}</p>
                     )}
@@ -686,7 +869,8 @@ export function RemotePanelView({
                         {t('handoff')}
                       </button>
                     )}
-                    {!session.activeNodeId &&
+                    {!session.successorSessionId &&
+                      !session.activeNodeId &&
                       !session.handoffId &&
                       last &&
                       ((last.targetNodeId === data.nodeId &&
@@ -774,6 +958,29 @@ export function RemotePanelView({
               {data.sessions.find((s) => s.id === h.sessionId)?.title ||
                 h.sessionId.slice(0, 8)}{' '}
               · {stateLabel(h.state, t)}
+              {h.executionState && h.executionState !== 'none' && (
+                <>
+                  {' '}
+                  ·{' '}
+                  {t(
+                    (
+                      {
+                        pending: 'executionPending',
+                        dispatching: 'executionDispatching',
+                        completed: 'executionCompleted',
+                        failed: 'executionFailed',
+                        uncertain: 'executionUncertain',
+                      } as const
+                    )[h.executionState],
+                  )}
+                </>
+              )}
+              {h.targetSessionId && (
+                <>
+                  {' '}
+                  · <code>{h.targetSessionId}</code>
+                </>
+              )}
             </p>
           ))}
         </section>
@@ -811,6 +1018,7 @@ export function RemotePanel({
         refresh={() => model.refresh()}
         takeover={(id) => model.ensureOwned(id, t)}
         open={open}
+        browse={model.listDirectories}
       />
     </>
   )
@@ -831,7 +1039,19 @@ export function HandoffDock({
   const data = state.data,
     session = data?.sessions.find((s) => s.id === sessionId)
   if (!data || !session) return null
-  const options = data.nodes.filter((n) => n.online && n.id !== data.nodeId)
+  if (session.successorSessionId)
+    return (
+      <div className="cm-dock">
+        <style>{style}</style>
+        <span role="status">
+          {t('continuedInCodex')}: <code>{session.successorSessionId}</code>.{' '}
+          {t('readonly')}
+        </span>
+      </div>
+    )
+  const options = data.nodes.filter(
+    (n) => n.online && n.id !== data.nodeId && n.adapter !== 'codex',
+  )
   const destination = target || options[0]?.id || ''
   const takingOver = state.takingOver?.includes(sessionId) ?? false
   const local = session.activeNodeId === data.nodeId
@@ -949,7 +1169,18 @@ export function SessionDeviceView({
   t,
 }: Locale & { data?: Snapshot; sessionId: string; detail?: boolean }) {
   const session = data?.sessions.find((s) => s.id === sessionId)
-  if (!data || !session?.activeNodeName) return null
+  if (!data || !session) return null
+  if (session.successorSessionId) {
+    const label = `${t('continuedInCodex')}: ${session.successorSessionId}`
+    return detail ? (
+      <span style={{ fontSize: 12, opacity: 0.75 }}>{label}</span>
+    ) : (
+      <span role="img" aria-label={label} title={label}>
+        ↗
+      </span>
+    )
+  }
+  if (!session.activeNodeName) return null
   const remote = session.activeNodeId !== data.nodeId
   if (!remote && !detail) return null
   const label = `${remote ? t('remote') : t('local')}: ${session.activeNodeName}`

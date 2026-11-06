@@ -1,4 +1,29 @@
 export const en = {
+  codexImportRetry: 'Retry this import',
+  codexImportRecover: 'Recover saved import',
+  codexImportInterrupted:
+    'This import needs review. Keep its reference; retry it or confirm the previous importing process and tools stopped before recovery.',
+  codexRecoverConfirm:
+    'Have you verified the previous importing process and its tools stopped? Recover this saved import without overwriting changed history?',
+  codexImportTitle: 'Continue a Codex archive in DSH',
+  codexImportNotice:
+    'Copy a saved snapshot into a new DSH conversation. The original Codex conversation stays separate. No task starts until you send a message; files and credentials are not copied.',
+  codexArchive: 'Codex archive',
+  codexChooseArchive: 'Choose a saved conversation',
+  codexArchiveBusy: 'Finish or reconcile the source first',
+  codexImportConfirm:
+    'Copy this saved Codex context into a new DSH conversation using this device’s selected model and directory? Future messages send the required context to this provider. No source process is stopped.',
+  codexImportAction: 'Import and open in DSH',
+  codexImportOperation: 'Import reference',
+
+  continuedInCodex: 'Continued in Codex',
+  executionPending: 'Continuation waiting',
+  executionDispatching: 'Codex is running',
+  executionCompleted: 'Continuation turn completed',
+  executionFailed: 'Continuation turn failed or stopped',
+  executionUncertain: 'Execution result needs review; do not resend',
+  SESSION_MOVED:
+    'This conversation was transferred to Codex. Continue in the linked Codex session; this DSH history is read-only.',
   connectionSetup: 'Connection setup',
   connectionReady: 'Connected',
   connectionOffline:
@@ -285,6 +310,31 @@ export const en = {
 } as const
 export type Key = keyof typeof en
 export const zh: Record<Key, string> = {
+  codexImportRetry: '重试本次导入',
+  codexImportRecover: '恢复已保存的导入',
+  codexImportInterrupted:
+    '导入需要核对，请保留编号重试；恢复前先确认旧导入进程及工具已停止。',
+  codexRecoverConfirm:
+    '是否已核实旧导入进程及工具停止？将恢复已保存的导入，不覆盖已经变化的历史。',
+  codexImportTitle: '在 DSH 中继续 Codex 归档',
+  codexImportNotice:
+    '将已保存的快照复制为新的 DSH 会话，原 Codex 会话保持独立。发送消息后才开始任务，不复制文件和凭据。',
+  codexArchive: 'Codex 归档',
+  codexChooseArchive: '选择已保存的会话',
+  codexArchiveBusy: '先结束或核对源端操作',
+  codexImportConfirm:
+    '是否用本机所选模型和目录，将此 Codex 快照复制为新的 DSH 会话？后续消息会将所需上下文发送给此提供方，不会停止源端进程。',
+  codexImportAction: '导入并在 DSH 中打开',
+  codexImportOperation: '导入编号',
+
+  continuedInCodex: '已在 Codex 中接续',
+  executionPending: '等待续跑',
+  executionDispatching: 'Codex 正在执行',
+  executionCompleted: '续跑轮次已完成',
+  executionFailed: '续跑轮次失败或已停止',
+  executionUncertain: '执行结果待核对，请勿重发任务',
+  SESSION_MOVED:
+    '该会话已转移到 Codex，请在关联的 Codex 会话中继续。这里保留 DSH 的只读历史。',
   connectionSetup: '连接设置',
   connectionReady: '已连接',
   connectionOffline:
