@@ -1,3 +1,4 @@
+import { codexPanel } from '../helpers/codex-panel.js'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { pathToFileURL } from 'node:url'
@@ -678,3 +679,193 @@ it('rejects an empty conversation before source stop or native task creation', a
     await f.close()
   }
 }, 30000)
+
+it.runIf(!!process.env.CONTEXTMESH_TEST_CODEX_BIN)(
+  'the sidebar confirms a running DSH takeover and its worker continues after the panel closes',
+  async () => {
+    const f = await setup(undefined, true)
+    const panelHome = join(f.root, 'panel-runtime')
+    const panel = codexPanel(f.options, panelHome)
+    try {
+      expect(await panel.request('tools/list')).toMatchObject({
+        tools: expect.arrayContaining([
+          expect.objectContaining({
+            name: 'contextmesh_panel',
+            _meta: {
+              ui: { resourceUri: 'ui://contextmesh/panel.html' },
+              'openai/ui': { entrypoints: [{ type: 'global' }] },
+            },
+          }),
+          expect.objectContaining({
+            name: 'contextmesh_start',
+            _meta: {
+              ui: {
+                resourceUri: 'ui://contextmesh/panel.html',
+                visibility: ['app'],
+              },
+            },
+          }),
+        ]),
+      })
+      expect(await panel.tool('catalog')).toMatchObject({
+        takeoverAvailable: true,
+        sessions: expect.arrayContaining([
+          expect.objectContaining({ id: f.sessionId }),
+        ]),
+      })
+      const action = {
+        kind: 'takeover',
+        sourceId: f.sessionId,
+        title: 'Running workspace verification',
+        target: {
+          cwd: f.target,
+          sandbox: 'workspace-write',
+        },
+      }
+      await expect(panel.tool('start', action)).rejects.toThrow('confirmation')
+      expect(f.model!.requests).toHaveLength(0)
+      expect(await f.sourceState()).toMatchObject({ live: true, running: true })
+      const { id } = await panel.tool('start', { ...action, confirmed: true })
+      panel.close()
+
+      const reopened = codexPanel(f.options, panelHome)
+      try {
+        await expect
+          .poll(async () => (await reopened.tool('jobs'))[0], {
+            timeout: 40000,
+          })
+          .toMatchObject({
+            id,
+            state: 'completed',
+            action: { title: 'Running workspace verification' },
+            threadId: expect.any(String),
+          })
+        const { threads } = await reopened.tool('choices')
+        expect(threads).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              id: (await reopened.tool('jobs'))[0].threadId,
+            }),
+          ]),
+        )
+      } finally {
+        reopened.close()
+      }
+      expect(f.model!.requests.map((request) => request.model)).toEqual([
+        'gpt-6.1-sol',
+        'gpt-6.1-sol',
+      ])
+      expect(await f.sourceState()).toMatchObject({
+        live: false,
+        running: false,
+      })
+    } finally {
+      panel.close()
+      await f.close()
+    }
+  },
+  90000,
+)
+
+it('the sidebar distinguishes saved sessions from unavailable sources and lists compatible archives', async () => {
+  const f = await setup(undefined, false, false)
+  const panel = codexPanel(f.options, join(f.root, 'panel-runtime'))
+  try {
+    await f.a.stop()
+    const nativeThreadId = randomUUID()
+    const archive = await f.store.publishCodexGuiArchive(f.namespace, {
+      operationId: randomUUID(),
+      nativeThreadId,
+      cliVersion: '0.154.0',
+      context: {
+        version: 1,
+        source: {
+          adapter: 'codex',
+          id: nativeThreadId,
+          incarnation: nativeThreadId,
+          eventCount: 1,
+        },
+        messages: [{ role: 'user', text: 'Isolated archive fixture' }],
+      },
+    })
+    const sessions = (await panel.tool('catalog')).sessions
+    expect(sessions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: f.sessionId,
+          adapter: 'deepseek',
+          status: 'import',
+        }),
+        expect.objectContaining({
+          id: archive.id,
+          adapter: 'codex',
+          status: 'import',
+        }),
+      ]),
+    )
+    await f.store.pool.query(
+      'UPDATE cm_sessions SET recovery_required=true WHERE namespace=$1 AND id=$2',
+      [f.namespace, f.sessionId],
+    )
+    expect((await panel.tool('catalog')).sessions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: f.sessionId, status: 'recovery' }),
+      ]),
+    )
+    const resource = await panel.request('resources/read', {
+      uri: 'ui://contextmesh/panel.html',
+    })
+    expect(JSON.stringify(resource)).toContain('Receive a shared session')
+    expect(JSON.stringify(resource)).toContain('Choose Folder…')
+    expect(JSON.stringify(resource)).not.toContain('Local Codex model')
+    expect(JSON.stringify(resource)).not.toContain('remote DSH')
+  } finally {
+    panel.close()
+    await f.close()
+  }
+}, 30000)
+
+it.runIf(!!process.env.CONTEXTMESH_TEST_CODEX_BIN)(
+  'the sidebar imports a saved session without starting model work or changing the source',
+  async () => {
+    const f = await setup(undefined, true, false)
+    const panelHome = join(f.root, 'panel-runtime')
+    const panel = codexPanel(f.options, panelHome)
+    try {
+      await f.a.stop()
+      const before = await f.client.stat(f.sessionId)
+      const { id } = await panel.tool('start', {
+        kind: 'import',
+        sourceAdapter: 'deepseek',
+        sourceId: f.sessionId,
+        title: 'Saved workspace verification',
+        target: { cwd: f.target, sandbox: 'read-only' },
+        confirmed: true,
+      })
+      await expect
+        .poll(async () => (await panel.tool('jobs'))[0], { timeout: 12000 })
+        .toMatchObject({
+          id,
+          state: 'completed',
+          action: { title: 'Saved workspace verification' },
+          threadId: expect.any(String),
+        })
+      const imported = JSON.parse(
+        await readFile(
+          join(panelHome, 'data/codex-bridge/imports', id + '.json'),
+          'utf8',
+        ),
+      )
+      expect(imported.target).toMatchObject({
+        model: 'gpt-6.1-sol',
+        provider: 'fixture',
+      })
+      expect(f.model!.requests).toHaveLength(0)
+      expect(await f.client.stat(f.sessionId)).toEqual(before)
+    } finally {
+      panel.close()
+      await f.close()
+    }
+  },
+  30000,
+)

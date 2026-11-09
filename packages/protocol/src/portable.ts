@@ -2,10 +2,13 @@ import { z } from 'zod'
 import { createHash } from 'node:crypto'
 import { integer, nativeAdapterId, nativeId } from './index.js'
 
+export const portableContextMaxBytes = 1024 * 1024
+export const portableContextMaxMessages = 10000
+
 export const portableMessage = z
   .object({
     role: z.enum(['user', 'assistant', 'reference']),
-    text: z.string().max(1024 * 1024),
+    text: z.string().max(portableContextMaxBytes),
   })
   .strict()
 export const portableContext = z
@@ -19,13 +22,13 @@ export const portableContext = z
         eventCount: integer,
       })
       .strict(),
-    messages: z.array(portableMessage).max(10000),
+    messages: z.array(portableMessage).max(portableContextMaxMessages),
   })
   .strict()
 export type PortableContext = z.infer<typeof portableContext>
 export function validatePortable(input: unknown): PortableContext {
   const parsed = portableContext.parse(input)
-  if (Buffer.byteLength(JSON.stringify(parsed)) > 1024 * 1024)
+  if (Buffer.byteLength(JSON.stringify(parsed)) > portableContextMaxBytes)
     throw new Error(
       'Context exceeds the portable import limit; no history was truncated',
     )

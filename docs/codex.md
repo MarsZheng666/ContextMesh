@@ -2,6 +2,8 @@
 
 [中文](codex.zh.md) · [Device setup](getting-started.md) · [Native storage](native-agents.md)
 
+On Mac, the [Codex Desktop sidebar](codex-desktop.md) can receive remote DSH tasks and publish saved conversations for a remote DSH device.
+
 The optional Codex bridge is included in the existing ContextMesh CLI. It imports a completed DSH or ContextMesh-managed Codex snapshot into a **new local Codex thread**, then lets you send new instructions through Codex's native app-server. The source conversation keeps its history and ownership. This `import` flow copies a snapshot. To stop a running DSH task and continue it after confirmation, use [confirmed takeover](confirmed-takeover.md).
 
 To continue a settled managed archive in DSH, use the [Codex → DSH import](codex-return.md). This creates a new DSH conversation and waits for your next instruction; it does not stop or transfer running Codex work. The receiving DSH device needs only its own model and the existing ContextMesh plugin.

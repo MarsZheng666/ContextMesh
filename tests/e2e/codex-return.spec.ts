@@ -1,12 +1,22 @@
+import { CodexPanelJobs } from '../../apps/cli/src/codex-panel-jobs.js'
+import { readCodexContext } from '../../packages/client/src/codex-context.js'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { randomUUID } from 'node:crypto'
-import { mkdir, rm, readFile, symlink } from 'node:fs/promises'
+import {
+  mkdir,
+  mkdtemp,
+  rm,
+  readFile,
+  symlink,
+  writeFile,
+} from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import { environment } from '../helpers/handoff-environment.js'
-import { TOKEN } from '../fixture.js'
+import { fixture, TOKEN } from '../fixture.js'
 import { CodexBridge } from '../../packages/adapter-codex/src/bridge.js'
 import { CodexContextImport } from '../../packages/handoff-deepseek/src/codex-import.js'
 import { MeshClient } from '../../packages/client/src/index.js'
@@ -267,6 +277,92 @@ it('rejects reused import identities with another directory and keeps private co
     await f.close()
   }
 }, 30000)
+it('publishes saved conversation text when native tool history exceeds the archive limit', async () => {
+  const f = await fixture()
+  const home = await mkdtemp(join(tmpdir(), 'contextmesh-saved-text-'))
+  f.defer(() => rm(home, { recursive: true, force: true }))
+  const threadId = randomUUID()
+  const turn = { id: 'saved-turn', status: 'completed' }
+  const content: { type: string; text?: string; path?: string }[] = [
+    { type: 'text', text: 'Keep CHECKPOINT-742 and continue the next step.' },
+  ]
+  const items = [
+    { type: 'userMessage', content },
+    ...Array.from({ length: 50 }, () => ({ type: 'reasoning' })),
+    {
+      type: 'commandExecution',
+      status: 'completed',
+      exitCode: 0,
+      aggregatedOutput: 'TOOL-OUTPUT'.repeat(650000),
+    },
+    { type: 'agentMessage', text: 'Saved checkpoint CHECKPOINT-742.' },
+  ].map((item) => ({ turnId: turn.id, item }))
+  const save = () =>
+    writeFile(
+      join(home, 'fixture.json'),
+      JSON.stringify({
+        requests: [],
+        threads: {
+          [threadId]: {
+            thread: {
+              id: threadId,
+              name: 'Large synthetic conversation',
+              cwd: home,
+              cliVersion: '0.154.0',
+              status: { type: 'notLoaded' },
+            },
+            items,
+            turns: [turn],
+          },
+        },
+      }),
+    )
+  const panel = new CodexPanelJobs({
+    connection: { endpoint: f.endpoint, token: TOKEN },
+    stateDir: join(home, 'bridge'),
+    native: {
+      executable: process.execPath,
+      args: [resolve('tests/helpers/codex-rpc-fixture.mjs')],
+      env: { ...process.env, CODEX_HOME: home },
+    },
+  })
+  await save()
+  await expect(panel.publish(threadId, randomUUID())).rejects.toThrow(
+    'The full archive exceeds 1 MiB. Choose Conversation text only',
+  )
+
+  turn.status = 'inProgress'
+  await save()
+  await expect(panel.publish(threadId, randomUUID(), 'text')).rejects.toThrow(
+    'Wait for the active Codex turn to settle',
+  )
+  expect(await f.store.codexArchives(f.namespace)).toEqual([])
+
+  turn.status = 'interrupted'
+  content.push({ type: 'localImage', path: '/private/source-only.png' })
+  await save()
+  const archive = await panel.publish(threadId, randomUUID(), 'text')
+  const codex = new MeshClient({
+    endpoint: f.endpoint,
+    token: TOKEN,
+    adapter: 'codex',
+  })
+  const { context, nativeThreadId } = await readCodexContext(codex, archive.id)
+  expect(nativeThreadId).toBe(threadId)
+  expect(context.source).toMatchObject({
+    id: archive.id,
+    eventCount: 1,
+  })
+  expect(context.messages).toEqual([
+    {
+      role: 'reference',
+      text: expect.stringContaining('conversation text only'),
+    },
+    { role: 'user', text: content[0]!.text },
+    { role: 'assistant', text: 'Saved checkpoint CHECKPOINT-742.' },
+  ])
+}, 20000)
+
 it.runIf(!!process.env.CONTEXTMESH_TEST_CODEX_BIN)(
   'real Codex CLI archives a continuation that returns to native DSH and its receiving model',
   async () => {
@@ -362,3 +458,57 @@ it('offers import, status and explicit confirmation through the existing local C
     await f.close()
   }
 }, 40000)
+
+it.runIf(!!process.env.CONTEXTMESH_TEST_CODEX_BIN)(
+  'publishes a saved desktop snapshot with the imported context and returns it to DSH',
+  async () => {
+    const f = await setup(true)
+    try {
+      const panel = new CodexPanelJobs(f.bridge.options)
+      const operation = randomUUID()
+      const archive = await panel.publish(f.imported.threadId, operation)
+      expect(await panel.publish(f.imported.threadId, operation)).toEqual(
+        archive,
+      )
+      expect(await panel.publish(f.imported.threadId, randomUUID())).toEqual(
+        archive,
+      )
+      await expect(f.codex.open(archive.id, 'write')).rejects.toMatchObject({
+        code: 'ARCHIVE_READ_ONLY',
+      })
+      const context = await readCodexContext(f.codex, archive.id)
+      expect(
+        context.context.messages.map((message) => message.text).join('\n'),
+      ).toContain('CONTINUITY-PHRASE-4817')
+      expect(context.context.messages.at(-1)).toMatchObject({
+        role: 'assistant',
+        text: 'CODEX-RELAY-731 total=17 next=verification',
+      })
+      const result = resultSchema.parse(
+        await f.b.rpc('m1', {
+          command: {
+            ...f.command,
+            sourceId: archive.id,
+          },
+        }),
+      )
+      expect(result.sourceCut).toMatchObject({
+        adapter: 'codex',
+        id: archive.id,
+      })
+      await f.b.rpc('prompt', {
+        sessionId: result.sessionId,
+        text: 'Continue the verification from the saved conversation.',
+      })
+      const state = await f.b.rpc('state', { sessionId: result.sessionId })
+      expect(JSON.stringify(state)).toContain('CONTINUITY-PHRASE-4817')
+      expect(JSON.stringify(state)).toContain(
+        'CODEX-RELAY-731 total=17 next=verification',
+      )
+      expect(f.service!.requests).toHaveLength(1)
+    } finally {
+      await f.close()
+    }
+  },
+  60000,
+)

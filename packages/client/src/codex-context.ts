@@ -74,6 +74,7 @@ export async function readCodexContext(
 
 export const codexArchiveSchema = z.object({
   id: z.string(),
+  title: z.string().nullable().optional(),
   incarnation: z.uuid(),
   nextSeq: z.number().int().nonnegative(),
   createdAt: z.number(),

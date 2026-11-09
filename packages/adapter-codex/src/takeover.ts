@@ -26,7 +26,7 @@ import {
   inspectWorkspace,
   mappedDirectory,
 } from '../../handoff-deepseek/src/workspace.js'
-import { NativeCodex, type Target } from './native.js'
+import { NativeCodex, type StartTarget, type Target } from './native.js'
 import { CodexBridge } from './bridge.js'
 import { deepSeekContext } from './context.js'
 import type { CodexOptions } from './rpc.js'
@@ -115,7 +115,7 @@ export class ConfirmedCodexTakeover {
       await mesh.close(handle, randomUUID())
     }
   }
-  private async probe(target: Target, context: PortableContext) {
+  private async probe(target: StartTarget, context: PortableContext) {
     await privateDirectory(this.options.stateDir)
     const cwd = await mkdtemp(join(this.options.stateDir, 'probe-'))
     const native = new NativeCodex(this.options.native)
@@ -156,11 +156,10 @@ export class ConfirmedCodexTakeover {
         overrides[`mcp_servers.${name}.enabled`] = false
       }
       // Check the requested native permission policy without starting task work.
-      const policyThread = await native.start(target, overrides)
-      const selected = {
-        ...target,
-        provider: z.string().min(1).max(256).parse(native.selectedProvider),
-      }
+      const { threadId: policyThread, target: selected } = await native.start(
+        target,
+        overrides,
+      )
       // The temporary directory must use the provider resolved in the user's actual project.
       const definitions = z
         .record(z.string(), z.unknown())
@@ -176,7 +175,7 @@ export class ConfirmedCodexTakeover {
       await native.rpc
         .request('thread/archive', { threadId: policyThread })
         .catch(() => {})
-      const thread = await native.start(
+      const { threadId: thread } = await native.start(
         { ...selected, cwd, sandbox: 'read-only' },
         overrides,
         'This is a readiness check only. Do not perform the imported task and do not call tools. Reply with a short readiness acknowledgement.',
@@ -207,7 +206,7 @@ export class ConfirmedCodexTakeover {
         .request('thread/archive', { threadId: thread })
         .catch(() => {})
       return {
-        target: { ...target, provider },
+        target: { ...selected, provider },
         version: snapshot.thread.cliVersion,
       }
     } finally {
@@ -229,7 +228,7 @@ export class ConfirmedCodexTakeover {
   }
   async takeover(input: {
     sourceId: string
-    target: Target
+    target: StartTarget
     confirmed: true
     operationId?: string
     waitMs?: number

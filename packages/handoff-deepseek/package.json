@@ -1,6 +1,6 @@
 {
   "name": "dsh-contextmesh-handoff",
-  "version": "0.8.0-dev.4",
+  "version": "0.8.0-dev.9",
   "private": true,
   "type": "module",
   "main": "dist/index.js",

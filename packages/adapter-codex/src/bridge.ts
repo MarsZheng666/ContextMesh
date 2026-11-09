@@ -1,6 +1,8 @@
 import { readCodexContext } from '../../client/src/codex-context.js'
 import { randomUUID, createHash } from 'node:crypto'
-import { join } from 'node:path'
+import { readdir } from 'node:fs/promises'
+import { join, resolve } from 'node:path'
+import { homedir } from 'node:os'
 import { z } from 'zod'
 import { MeshClient, type ClientOptions } from '../../client/src/index.js'
 import type { RemoteHandle, StoredEvent } from '../../protocol/src/index.js'
@@ -15,7 +17,12 @@ import {
   optionalJson,
 } from '../../runtime-manager/src/files.js'
 import { listenLocal } from '../../handoff-deepseek/src/local-control.js'
-import { NativeCodex, targetSchema, type Target } from './native.js'
+import {
+  NativeCodex,
+  startTargetSchema,
+  targetSchema,
+  type StartTarget,
+} from './native.js'
 import type { CodexOptions } from './rpc.js'
 import { deepSeekContext, nativeSnapshot } from './context.js'
 
@@ -37,7 +44,8 @@ const journalSchema = z.object({
   handoffId: z.uuid().optional(),
   sourceId: z.string(),
   sourceAdapter: z.enum(['deepseek', 'codex']),
-  target: targetSchema,
+  target: startTargetSchema,
+  requestedTarget: startTargetSchema.optional(),
   context: z.unknown(),
   codexHome: z.string().optional(),
   phase: z.enum([
@@ -113,7 +121,7 @@ export class CodexBridge {
   async import(input: {
     sourceId: string
     sourceAdapter?: 'deepseek' | 'codex'
-    target: Target
+    target: StartTarget
     operationId?: string
     handoffId?: string
   }) {
@@ -135,13 +143,14 @@ export class CodexBridge {
           operationId + '.json',
         )
         let journal = journalSchema.optional().parse(await optionalJson(file))
-        const target = await this.validateTarget(input.target)
+        const requestedTarget = await this.validateTarget(input.target)
         if (
           journal &&
           (journal.handoffId !== input.handoffId ||
             journal.sourceId !== input.sourceId ||
             journal.sourceAdapter !== (input.sourceAdapter ?? 'deepseek') ||
-            JSON.stringify(journal.target) !== JSON.stringify(target) ||
+            JSON.stringify(journal.requestedTarget ?? journal.target) !==
+              JSON.stringify(requestedTarget) ||
             journal.codexHome !== this.home())
         )
           throw new Error(
@@ -182,20 +191,29 @@ export class CodexBridge {
               operationId,
               sourceId: input.sourceId,
               sourceAdapter: input.sourceAdapter ?? 'deepseek',
-              target,
+              target: requestedTarget,
+              ...(requestedTarget.model === undefined
+                ? { requestedTarget }
+                : {}),
               context,
               codexHome: this.home(),
               phase: 'creating',
             }
             await atomicJson(file, journal)
             await native.init()
-            journal.threadId = await native.start(target)
+            const started = await native.start(requestedTarget)
+            journal.threadId = started.threadId
+            if (journal.requestedTarget) journal.target = started.target
             journal.phase = 'created'
             await atomicJson(file, journal)
           } else {
             await native.init()
-            await native.resume(journal.threadId!, target)
+            await native.resume(
+              journal.threadId!,
+              targetSchema.parse(journal.target),
+            )
           }
+          const target = targetSchema.parse(journal.target)
           const context = validatePortable(journal.context)
           if (journal.phase === 'created') {
             journal.phase = 'injecting'
@@ -270,9 +288,9 @@ export class CodexBridge {
       }),
     )
   }
-  private async validateTarget(input: Target) {
+  private async validateTarget(input: StartTarget) {
     const { realpath, stat } = await import('node:fs/promises')
-    const target = targetSchema.parse(input),
+    const target = startTargetSchema.parse(input),
       cwd = await realpath(target.cwd)
     if (!(await stat(cwd)).isDirectory())
       throw new Error('Choose an existing directory on this device')
@@ -309,6 +327,39 @@ export class CodexBridge {
         : null,
     }
   }
+  async importedContextForThread(threadId: string) {
+    const directory = join(this.options.stateDir, 'imports')
+    const files = await readdir(directory).catch((error) => {
+      if (error.code === 'ENOENT') return []
+      throw error
+    })
+    const home = resolve(this.home() ?? join(homedir(), '.codex'))
+    for (const file of files) {
+      if (!file.endsWith('.json')) continue
+      const raw = await optionalJson(join(directory, file))
+      if (
+        !raw ||
+        typeof raw !== 'object' ||
+        !('threadId' in raw) ||
+        raw.threadId !== threadId
+      )
+        continue
+      const journal = journalSchema.parse(raw)
+      if (resolve(journal.codexHome ?? join(homedir(), '.codex')) !== home)
+        continue
+      if (journal.phase !== 'done')
+        throw new Error(
+          'Finish or reconcile the original Codex import before publishing',
+        )
+      const binding = await this.status('codex:' + journal.operationId)
+      if ('pendingOperationId' in binding && binding.pendingOperationId)
+        throw new Error(
+          'Finish or reconcile the previous Codex operation before publishing',
+        )
+      return validatePortable(journal.context)
+    }
+    return undefined
+  }
   async reconcile(id: string, confirmStopped: true) {
     if (confirmStopped !== true)
       throw new Error(
@@ -329,7 +380,7 @@ export class CodexBridge {
         await native.init()
         await native.resume(
           binding.threadId,
-          await this.validateTarget(binding.target),
+          await native.target(binding.target),
         )
         const snapshot = await native.snapshot(binding.threadId)
         const observation = await this.client.stat(id)
@@ -434,7 +485,7 @@ export class CodexBridge {
         await native.init()
         await native.resume(
           binding.threadId,
-          await this.validateTarget(binding.target),
+          await native.target(binding.target),
         )
         handle = await this.client.open(id, 'write')
         if (

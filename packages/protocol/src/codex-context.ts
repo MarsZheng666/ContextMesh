@@ -1,5 +1,19 @@
 import { z } from 'zod'
-import { validatePortable, type PortableContext } from './portable.js'
+import {
+  portableContext,
+  validatePortable,
+  type PortableContext,
+} from './portable.js'
+export const codexGuiArchive = z
+  .object({
+    operationId: z.uuid(),
+    nativeThreadId: z.uuid(),
+    cliVersion: z.string().min(1).max(128),
+    title: z.string().min(1).max(160).optional(),
+    context: portableContext,
+  })
+  .strict()
+
 export const nativeSnapshot = z.object({
   thread: z
     .object({
@@ -31,6 +45,63 @@ export const nativeSnapshot = z.object({
   ),
 })
 export type NativeSnapshot = z.infer<typeof nativeSnapshot>
+export const codexArchiveScope = z.enum(['full', 'text'])
+export type CodexArchiveScope = z.infer<typeof codexArchiveScope>
+type NativeItem = NativeSnapshot['items'][number]['item']
+type PortableMessage = PortableContext['messages'][number]
+
+export function assertCodexItemSettled(item: NativeItem) {
+  if (
+    'status' in item &&
+    !['completed', 'failed', 'declined'].includes(String(item.status))
+  )
+    throw new Error('Native tool work is not settled')
+  if (
+    item.type === 'commandExecution' &&
+    item.processId != null &&
+    item.exitCode == null
+  )
+    throw new Error('Native background commands are not settled')
+}
+
+export function projectCodexMessage(
+  item: NativeItem,
+  scope: CodexArchiveScope,
+): PortableMessage | undefined {
+  if (item.type === 'userMessage') {
+    const content = z
+      .array(z.object({ type: z.string() }).passthrough())
+      .parse(item.content)
+    const parts = content.filter((part) => part.type === 'text')
+    if (scope === 'full' && parts.length !== content.length)
+      throw new Error('Native snapshot contains unsupported attachments')
+    if (scope === 'text' && !parts.length) return
+    return {
+      role: 'user',
+      text: parts.map((part) => z.string().parse(part.text)).join('\n'),
+    }
+  }
+  if (item.type === 'agentMessage')
+    return { role: 'assistant', text: z.string().parse(item.text) }
+  if (scope === 'text' || item.type === 'reasoning') return
+  assertCodexItemSettled(item)
+  if (
+    ![
+      'commandExecution',
+      'fileChange',
+      'functionCallOutput',
+      'mcpToolCall',
+      'dynamicToolCall',
+      'plan',
+    ].includes(item.type)
+  )
+    throw new Error('Native snapshot contains unsupported content')
+  return {
+    role: 'reference',
+    text: `[Native ${item.type}; historical reference only]\n${JSON.stringify(item)}`,
+  }
+}
+
 export function extendCodexContext(
   base: PortableContext,
   native: NativeSnapshot,
@@ -42,47 +113,8 @@ export function extendCodexContext(
     throw new Error('Wait for native Codex work to settle before importing')
   const messages = [...validatePortable(base).messages]
   for (const { item } of native.items) {
-    if (item.type === 'userMessage') {
-      const content = z
-        .array(
-          z.object({ type: z.literal('text'), text: z.string() }).passthrough(),
-        )
-        .parse(item.content)
-      messages.push({
-        role: 'user',
-        text: content.map((c) => c.text).join('\n'),
-      })
-    } else if (item.type === 'agentMessage')
-      messages.push({ role: 'assistant', text: z.string().parse(item.text) })
-    else if (item.type === 'reasoning') continue
-    else {
-      if (
-        'status' in item &&
-        !['completed', 'failed', 'declined'].includes(String(item.status))
-      )
-        throw new Error('Native tool work is not settled')
-      if (
-        item.type === 'commandExecution' &&
-        item.processId != null &&
-        item.exitCode == null
-      )
-        throw new Error('Native background commands are not settled')
-      if (
-        ![
-          'commandExecution',
-          'fileChange',
-          'functionCallOutput',
-          'mcpToolCall',
-          'dynamicToolCall',
-          'plan',
-        ].includes(item.type)
-      )
-        throw new Error('Native snapshot contains unsupported content')
-      messages.push({
-        role: 'reference',
-        text: `[Native ${item.type}; historical reference only]\n${JSON.stringify(item)}`,
-      })
-    }
+    const message = projectCodexMessage(item, 'full')
+    if (message) messages.push(message)
   }
   return validatePortable({ ...base, messages })
 }

@@ -109,6 +109,51 @@ it('imports a fixed DSH surface without starting work, then persists Codex conti
   ).toContain('Continue after restart')
   expect((await f.client.stat(f.id))?.nextSeq).toBe(6)
 })
+it('reuses the resolved native default when an import resumes after settings change', async () => {
+  const f = await setup()
+  const input = {
+    sourceId: f.id,
+    target: { cwd: f.target.cwd, sandbox: f.target.sandbox },
+    operationId: randomUUID(),
+  }
+  const first = await f.bridge.import(input)
+  const file = join(
+    f.bridge.options.stateDir,
+    'imports',
+    input.operationId + '.json',
+  )
+  const journal = JSON.parse(await readFile(file, 'utf8'))
+  expect(journal.target).toMatchObject({
+    model: 'fixture-default',
+    provider: 'fixture',
+  })
+  expect(journal.requestedTarget).not.toHaveProperty('model')
+
+  // Model resolution must stay pinned after the native thread has been archived.
+  await writeFile(file, JSON.stringify({ ...journal, phase: 'archived' }))
+  const resumed = new CodexBridge({
+    ...f.bridge.options,
+    native: {
+      ...f.native,
+      env: {
+        ...f.native.env,
+        CODEX_FIXTURE_DEFAULT_MODEL: 'different-default',
+      },
+    },
+  })
+  expect(await resumed.import(input)).toEqual(first)
+  const requests = (await f.state()).requests
+  expect(requests.filter((r: any) => r.method === 'thread/start')).toHaveLength(
+    1,
+  )
+  expect(
+    requests.find((r: any) => r.method === 'thread/resume').params,
+  ).toMatchObject({
+    model: 'fixture-default',
+    modelProvider: 'fixture',
+  })
+})
+
 it('does not reinject after a native response is lost', async () => {
   const f = await setup('inject-drop'),
     operationId = randomUUID()
