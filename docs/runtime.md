@@ -2,7 +2,7 @@
 
 [中文](runtime.zh.md)
 
-The 0.8.0-dev.9 runtime packages contain Node, the pinned DeepSeek Harness runtime and the **single** `dsh-contextmesh-handoff` plugin. They are built for macOS Apple Silicon and Linux x64. Linux packages record and check their minimum glibc version in the manifest; release CI builds against Ubuntu 22.04 (glibc 2.35). Windows and additional architectures are not supported yet. A global Node, pnpm or Git installation is unnecessary for ordinary conversations; Git is needed when working with Git projects.
+The 0.8.0-dev.10 runtime packages contain Node, the pinned DeepSeek Harness runtime and the **single** `dsh-contextmesh-handoff` plugin. They are built for macOS Apple Silicon and Linux x64. Linux packages record and check their minimum glibc version in the manifest; release CI builds against Ubuntu 22.04 (glibc 2.35). Windows and additional architectures are not supported yet. A global Node, pnpm or Git installation is unnecessary for ordinary conversations; Git is needed when working with Git projects.
 
 Packages are produced by the **Release packages** workflow. Publication is a separate maintainer action: a workflow artifact is a candidate, not a published release. Obtain a platform archive and its checksum from the same trusted release, verify the SHA-256 value, then unpack it. Keep the original checksum and `manifest.json`. The manifest records platform, Node/DSH versions, protocol and schema compatibility, source commit, lockfile/patch hashes, file checksums and bundled third-party license information.
 
@@ -110,7 +110,7 @@ contextmesh server resume-upgrade
 contextmesh server maintenance off
 ```
 
-Maintenance blocks new mutations/writers at the API and database admission boundary; existing writers can append, flush and close. An expired lease does not prove a writer stopped. Backups require no active or unresolved writers, are private, and are validated with PostgreSQL's archive reader. Managed server upgrades preserve PostgreSQL major version 18 and require the target image to have the same schema as the running server. Schema-changing images are rejected before maintenance or downtime. Backups record the actual schema (6, 7 or 8); restoration also supports verified schema-6 and schema-7 archives. A recorded interruption keeps maintenance enabled; `resume-upgrade` continues that exact image after validating its backup and drain state.
+Maintenance blocks new mutations/writers at the API and database admission boundary; existing writers can append, flush and close. An expired lease does not prove a writer stopped. Backups require no active or unresolved writers, are private, and are validated with PostgreSQL's archive reader. Managed server upgrades preserve PostgreSQL major version 18 and require the target image to have the same schema as the running server. Schema-changing images are rejected before maintenance or downtime. Backups record the actual schema (6, 7, 8 or 9); restoration also supports verified schema-6 and schema-7 archives. A recorded interruption keeps maintenance enabled; `resume-upgrade` continues that exact image after validating its backup and drain state.
 
 The old 0.6.1 service has no maintenance API. For that first server upgrade, stop **all old clients, tools and the API**, verify the processes are gone, and take a PostgreSQL backup before replacing the API. Do not use lease expiry as evidence. The managed client can adopt the stopped 0.6.1 home; the server upgrade command deliberately refuses an old server without maintenance support. For schema 6/7 → 8, follow the stopped-service migration below. PostgreSQL-major upgrades remain separate administrator operations.
 
@@ -136,7 +136,7 @@ Older servers reject schema 7. If rollback is required, stop all devices and the
 
 ## Migrate schema 6 or 7 to 8
 
-This source preview uses schema **8**. It retains native headers and events and adds successor-session links, per-device Agent endpoints and confirmed continuation records. DSH's native Session format remains unchanged. No context rewrite or model-credential migration occurs.
+The cross-Agent takeover release introduced schema **8**. It retains native headers and events and adds successor-session links, per-device Agent endpoints and confirmed continuation records. DSH's native Session format remains unchanged. No context rewrite or model-credential migration occurs.
 
 1. Prepare the reviewed schema-8 Server and matching clients before downtime.
 2. Enable maintenance on the old Server. Stop all clients, Codex processes, tools and background commands. Resolve unfinished handoffs, model switches, file transfers and failed writers; verify actual process shutdown.
@@ -145,3 +145,17 @@ This source preview uses schema **8**. It retains native headers and events and 
 5. Verify authenticated `/health/ready` reports `schemaVersion: 8` and `cross-agent-takeover-v1`. Check original headers/events, maintenance state and matching device packages before reopening writes.
 
 Older servers refuse schema 8. Rollback requires stopping clients/API and explicitly restoring the old verified backup with its matching deployment; newer writes will be lost. Managed `server upgrade` and `resume-upgrade` still require the same schema and do not perform this migration.
+
+## Migrate schema 8 to 9
+
+Schema **9** adds the chunked archive catalog, record index and block tables. Existing Session and legacy archive rows retain their formats. The matching device runtime supports schema 8 for legacy operations and schema 9 for chunked archives.
+
+1. Prepare the reviewed schema-9 API and device packages. Enable maintenance on the schema-8 Server, stop active clients and tools, and resolve pending writers. Verify that the processes have stopped.
+2. Take and verify a PostgreSQL backup under the old deployment. Keep the matching API image and private settings with the backup.
+3. Stop the old API. Keep the existing database volume, replace only the API image or program and start it alone. Startup applies the additive migration inside the database transaction.
+4. Check authenticated `/health/ready` for `schemaVersion: 9` and `chunked-archives-v2`. Keep maintenance enabled while checking existing conversations, legacy archives and client compatibility. Then reopen writes.
+5. Verify chunked publication and budgeted import on test conversations before routine use.
+
+A schema-8 binary cannot open a schema-9 database. Restoring a verified schema-8 backup discards writes made after that backup. The managed same-schema upgrade command keeps its explicit migration boundary.
+
+The API defaults to 20 GiB of raw chunk storage per namespace, counting reserved space for unfinished uploads. Set `CONTEXTMESH_ARCHIVE_QUOTA_BYTES` in the API environment to change this capacity. Staging uploads expire after 24 hours without progress and are cleaned up periodically. Committed archives are included in PostgreSQL backups.

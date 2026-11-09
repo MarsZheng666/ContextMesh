@@ -81,6 +81,6 @@ Keep the device running and restore its connection. On restart, a persisted sele
 
 ## Database upgrade
 
-The current server uses schema **8**. Migration preserves existing native Session headers and events, retains the native-format boundary and adds linked cross-Agent ownership and execution records. Back up PostgreSQL and stop writers before following the [migration guide](runtime.md#migrate-schema-6-or-7-to-8). Older servers refuse schema 8; rollback requires the backup. The DSH Session format is unchanged.
+For a Server update, back up PostgreSQL, stop writers and follow the [schema migration guide](runtime.md#migrate-schema-8-to-9). The migration retains existing native Session headers and events.
 
 [Device pairing](devices.md) is available with the same plugin.

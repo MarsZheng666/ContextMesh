@@ -14,9 +14,10 @@ p,small{line-height:1.5}label{display:grid;gap:5px;margin-block:10px}
 label.check{display:flex;align-items:center}
 .folder-row{display:flex;align-items:center;gap:8px}.folder-row input{min-width:0}.folder-row button{flex-shrink:0}
 #folderStatus{display:block;margin-top:4px}
-input,select,button{font:inherit;color:inherit;padding:7px 10px;border:1px solid GrayText;border-radius:6px;box-sizing:border-box}
+input,select,button,textarea{font:inherit;color:inherit;padding:7px 10px;border:1px solid GrayText;border-radius:6px;box-sizing:border-box}
 input:not([type=checkbox]),select{width:100%}button{cursor:pointer}button:disabled{opacity:.5;cursor:default}
 article{border-top:1px solid GrayText;padding-block:12px;overflow-wrap:anywhere}article p{margin-bottom:5px}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:19rem;overflow:auto}
 code{display:block;user-select:all;margin-block:6px}dialog{margin:auto;max-width:28rem}dialog::backdrop{background:#0007}
 </style>
 <header><h1>ContextMesh</h1><button id="refresh" type="button" disabled>Refresh</button></header>
@@ -34,8 +35,33 @@ code{display:block;user-select:all;margin-block:6px}dialog{margin:auto;max-width
 <small id="folderStatus" role="status"></small>
 <datalist id="folders"></datalist>
 <label class="check"><input id="write" type="checkbox">Allow writes in the selected project</label>
+<div id="budgetOptions" hidden>
+<label>Next instruction for finding relevant history <textarea id="archiveQuery" rows="2" maxlength="16000"></textarea></label>
+<details><summary>Advanced context settings</summary>
+<label>Context window override (tokens) <input id="contextWindow" type="number" min="1" max="10000000"></label>
+</details>
+<button type="button" id="historyOpen" hidden>Browse full archive</button>
+<span id="picksStatus" aria-live="polite"></span>
+<button type="button" id="picksClear" hidden>Clear selected excerpts</button>
+</div>
 <button id="take" disabled>Review transfer</button>
 </form>
+</section>
+<section id="history" hidden>
+<h2 id="historyTitle">Archive history</h2>
+<form id="historySearchForm">
+<label>Search history <input id="historyQuery" maxlength="512"></label>
+<button>Search</button>
+</form>
+<div id="historyList" aria-live="polite"></div>
+<button id="historyMore" type="button" hidden>More records</button>
+<button id="historyParent" type="button" hidden>Earlier linked archive</button>
+<div id="historyContent" hidden>
+<pre id="historyText"></pre>
+<button id="historyNext" type="button" hidden>Next part</button>
+<button id="historyInclude" type="button">Include this excerpt</button>
+</div>
+<button type="button" id="historyClose">Close history</button>
 </section>
 <section>
 <h2>Publish a conversation</h2>
@@ -47,7 +73,7 @@ code{display:block;user-select:all;margin-block:6px}dialog{margin:auto;max-width
 <option value="text">Conversation text only</option>
 </select>
 </label>
-<p id="archiveHelp">Choose Conversation text only for long conversations or conversations with attachments.</p>
+<p id="archiveHelp">Choose what to share. Full archives include supported tool records.</p>
 <p>Wait for the conversation and its tools to finish before publishing.</p>
 <button id="publish" disabled>Review snapshot</button>
 </form>
@@ -59,6 +85,7 @@ code{display:block;user-select:all;margin-block:6px}dialog{margin:auto;max-width
 <dialog id="review">
 <h2 id="reviewTitle"></h2>
 <p id="reviewText"></p>
+<details id="reviewDetails" hidden><summary>Records selected for the model</summary><ul id="reviewRecords"></ul></details>
 <form method="dialog">
 <button value="cancel" autofocus>Cancel</button>
 <button value="confirm">Confirm</button>
@@ -67,9 +94,12 @@ code{display:block;user-select:all;margin-block:6px}dialog{margin:auto;max-width
 <script type="module">
 const $ = (id) => document.getElementById(id)
 const pending = new Map()
+const bytesLabel = (bytes) => bytes >= 1048576 ? (bytes / 1048576).toFixed(1) + ' MiB' : (bytes / 1024).toFixed(1) + ' KiB'
 let seq = 0, action, refreshingJobs = false
 let remote = [], local = [], receiveCapabilities, receiving = false
 let pickingFolder = false, selectedPath
+let historyArchive, historyCursor, historyParent, activeExcerpt, include = []
+let selectedSourceKey, historyGeneration = 0
 const sourceLabels = {
   takeover: 'Ready to take over',
   import: 'Saved · Ready to import',
@@ -82,13 +112,13 @@ const agentLabels = {deepseek: 'DeepSeek Harness', codex: 'Codex'}
 function post(message) {
   window.parent.postMessage({jsonrpc:'2.0', ...message}, '*')
 }
-function rpc(method, params) {
+function rpc(method, params, timeout = 30000) {
   const id = ++seq
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       pending.delete(id)
       reject(new Error('Codex did not respond in time. Check recent transfers before submitting again.'))
-    }, 30000)
+    }, timeout)
     pending.set(id, (message) => {
       clearTimeout(timer)
       if (message.error) reject(new Error(message.error.message))
@@ -103,8 +133,8 @@ window.addEventListener('message', ({source, data}) => {
   if (receive) { pending.delete(data.id); receive(data) }
   if (data.method === 'ping' && data.id != null) post({id:data.id,result:{}})
 })
-async function tool(name, args = {}) {
-  const result = await rpc('tools/call', {name:'contextmesh_' + name, arguments:args})
+async function tool(name, args = {}, timeout) {
+  const result = await rpc('tools/call', {name:'contextmesh_' + name, arguments:args}, timeout)
   const text = result.content?.find((entry) => entry.type === 'text')?.text
   if (result.isError || !text) throw new Error(text || 'The panel action failed.')
   return JSON.parse(text)
@@ -154,6 +184,15 @@ async function refreshJobs() {
       line(item, 'p', job.message)
       if (job.archiveId) line(item, 'code', 'Archive reference ' + job.archiveId.slice(-12))
       if (job.state === 'attention') line(item, 'code', 'Operation ' + job.id)
+      if (job.action.kind === 'publish' && ['failed','attention'].includes(job.state)) {
+        const retry = line(item, 'button', 'Retry publication')
+        retry.addEventListener('click', async () => {
+          retry.disabled = true
+          try { await tool('retry_publish', {id:job.id}); await refreshJobs() }
+          catch (error) { showError(error) }
+          finally { retry.disabled = false }
+        })
+      }
       if (job.threadId) {
         const button = line(item, 'button', 'Open in Codex')
         button.addEventListener('click', () => tool('open', {id:job.id}).catch(showError))
@@ -170,6 +209,17 @@ function canReceive(s) {
 }
 function updateReceive() {
   const source = remote.find((s) => sourceKey(s) === $('source').value)
+  const budgeted = source?.status === 'import' && (source.format === 2 ||
+    source.adapter === 'deepseek' && receiveCapabilities?.chunkedArchives)
+  $('budgetOptions').hidden = !budgeted
+  $('historyOpen').hidden = source?.format !== 2
+  if (selectedSourceKey !== $('source').value) {
+    selectedSourceKey = $('source').value
+    $('history').hidden = true
+    historyGeneration++
+    include = []
+    updatePicks()
+  }
   $('take').disabled = receiving || pickingFolder || !source || !canReceive(source)
   $('take').textContent = source?.status === 'import' ? 'Review import' : source?.status === 'takeover' ? 'Review takeover' : 'Review transfer'
   $('sourceHelp').textContent = source?.status === 'import'
@@ -181,6 +231,76 @@ function updateReceive() {
     : 'Saved sessions can be imported. Live sessions can be taken over when the source supports it.'
 }
 $('source').addEventListener('change', updateReceive)
+function updatePicks() {
+  $('picksStatus').textContent = include.length ? include.length + ' selected excerpt(s)' : ''
+  $('picksClear').hidden = !include.length
+}
+$('picksClear').addEventListener('click', () => { include = []; updatePicks() })
+async function loadHistory(reset = false) {
+  const id = historyArchive, generation = ++historyGeneration
+  $('historyMore').disabled = true
+  if (reset) {
+    $('historyList').replaceChildren()
+    $('historyContent').hidden = true
+    historyCursor = undefined
+  }
+  try {
+    const page = await tool('archive_index', {id, query:$('historyQuery').value, after:historyCursor})
+    if (generation !== historyGeneration) return
+    $('historyTitle').textContent = page.title
+    historyCursor = page.next ?? undefined
+    historyParent = page.parent
+    $('historyParent').hidden = !historyParent
+    $('historyMore').hidden = historyCursor === undefined
+    if (!page.records.length && reset) line($('historyList'), 'p', 'No matching records.')
+    for (const record of page.records) {
+      const row = document.createElement('article')
+      line(row,'strong', 'Record ' + record.seq + ' · ' + record.kind + ' · ' + bytesLabel(record.bytes))
+      line(row,'p',record.preview)
+      const view = line(row,'button','Read record')
+      view.type = 'button'
+      view.addEventListener('click', () => readExcerpt(id, record.seq, 0).catch(showError))
+      for (const anchor of record.anchors.slice(-4)) {
+        const jump = line(row,'button','Line ' + anchor.line)
+        jump.type = 'button'
+        jump.addEventListener('click', () => readExcerpt(id, record.seq, anchor.offset).catch(showError))
+      }
+      $('historyList').append(row)
+    }
+  } finally { if (generation === historyGeneration) $('historyMore').disabled = false }
+}
+async function readExcerpt(id, seq, offset) {
+  const generation = historyGeneration
+  const page = await tool('archive_content', {id, seq, offset})
+  if (generation !== historyGeneration) return
+  activeExcerpt = {id,seq,offset,next:page.next}
+  $('historyText').textContent = page.text
+  $('historyContent').hidden = false
+  $('historyNext').hidden = page.next === null
+}
+$('historyOpen').addEventListener('click', () => {
+  const source = remote.find(s => sourceKey(s) === $('source').value)
+  if (!source || source.format !== 2) return
+  historyArchive = source.id
+  $('historyQuery').value = ''
+  $('history').hidden = false
+  loadHistory(true).catch(showError)
+})
+$('historyClose').addEventListener('click', () => { $('history').hidden = true; historyGeneration++ })
+$('historySearchForm').addEventListener('submit', (event) => { event.preventDefault(); loadHistory(true).catch(showError) })
+$('historyMore').addEventListener('click', () => loadHistory().catch(showError))
+$('historyParent').addEventListener('click', () => { historyArchive = historyParent; loadHistory(true).catch(showError) })
+$('historyNext').addEventListener('click', () => {
+  if (activeExcerpt?.next != null) readExcerpt(activeExcerpt.id,activeExcerpt.seq,activeExcerpt.next).catch(showError)
+})
+$('historyInclude').addEventListener('click', () => {
+  if (!activeExcerpt) return
+  const {id,seq,offset} = activeExcerpt
+  if (include.some(item => item.id === id && item.seq === seq && item.offset === offset)) return
+  if (include.length >= 8) { showError(new Error('Select up to eight excerpts.')); return }
+  include.push({id,seq,offset,length:4096})
+  updatePicks()
+})
 $('cwd').addEventListener('input', () => { selectedPath = undefined })
 $('browse').addEventListener('click', async () => {
   pickingFolder = true
@@ -238,14 +358,20 @@ async function refresh() {
   $('refresh').disabled = false
   await refreshJobs()
 }
-function review(kind, text, args) {
+function review(kind, text, args, records = []) {
   action = args
   $('review').returnValue = ''
   $('reviewTitle').textContent = kind
   $('reviewText').textContent = text
+  $('reviewDetails').hidden = !records.length
+  $('reviewDetails').open = false
+  $('reviewRecords').replaceChildren()
+  for (const record of records) line($('reviewRecords'),'li',
+    record.kind + ' · record ' + record.seq + ' · ' + bytesLabel(record.length) +
+    (record.length < record.totalBytes ? ' excerpt' : ''))
   $('review').showModal()
 }
-$('receive').addEventListener('submit', (event) => {
+$('receive').addEventListener('submit', async (event) => {
   event.preventDefault()
   const source = remote.find((s) => sourceKey(s) === $('source').value)
   if (pickingFolder || !source || !canReceive(source)) return
@@ -253,28 +379,62 @@ $('receive').addEventListener('submit', (event) => {
   const title = conversationTitle(source.title)
   const label = '“' + (title || source.id) + '” in ' + target.cwd + ' with ' + target.sandbox + ' access.'
   if (source.status === 'import') {
-    review('Import saved session', 'Import ' + label + ' The new conversation uses Codex’s default model. Send a message in Codex to continue.',
-      {kind:'import', sourceId:source.id, sourceAdapter:source.adapter, title, target, confirmed:true})
+    let resume
+    let detail = '', records = []
+    if (!$('budgetOptions').hidden) {
+      const query = $('archiveQuery').value.trim() || undefined
+      const contextWindow = $('contextWindow').value ? Number($('contextWindow').value) : undefined
+      resume = {query,include,contextWindow}
+      receiving = true
+      updateReceive()
+      try {
+        const plan = await tool('preview_import', {id:source.id,sourceAdapter:source.adapter,target,resume}, 180000)
+        if (sourceKey(source) !== $('source').value) return
+        resume = {...resume, planDigest:plan.planDigest}
+        records = plan.selected
+        detail = ' Saved ' + bytesLabel(plan.archivedBytes) + ' across ' + plan.archivedRecords + ' records. This import loads ' +
+          plan.selected.length + ' records or excerpts with a conservative estimate of ' + plan.inputTokens + ' tokens.'
+      } catch (error) { showError(error); return }
+      finally { receiving = false; updateReceive() }
+    }
+    review('Import saved session', 'Import ' + label + ' The new conversation uses Codex’s local model.' + detail + ' Send a message in Codex to continue.',
+      {kind:'import', sourceId:source.id, sourceAdapter:source.adapter, title, target, resume, confirmed:true}, records)
   } else {
     review('Take over shared session', 'Take over ' + label + ' Codex will check its default model with the conversation context before stopping the source, then continue any unfinished work.',
       {kind:'takeover', sourceId:source.id, title, target, confirmed:true})
   }
 })
-$('send').addEventListener('submit', (event) => {
+$('send').addEventListener('submit', async (event) => {
   event.preventDefault()
   const thread = local.find((t) => t.id === $('thread').value)
   if (!thread) return
   const title = localTitle(thread)
   const scope = $('archiveScope').value
-  const contents = scope === 'text' ? 'the saved user and assistant messages' : 'the saved messages and supported tool results'
-  const details = scope === 'text' ? ' Tool history and attachments stay in Codex.' : ''
-  review('Publish a Codex snapshot', 'Share ' + contents + ' from “' + (title || thread.id) + '” on the ContextMesh Server. A compatible agent connected to the server can open a copy.' + details,
-    {kind:'publish', threadId:thread.id, title, scope, confirmed:true})
+  const button = $('publish')
+  button.disabled = true
+  $('notice').textContent = 'Preparing a local copy for review…'
+  try {
+    const capture = receiveCapabilities?.chunkedArchives
+      ? await tool('prepare_publish', {threadId:thread.id, scope}, 180000)
+      : null
+    const contents = scope === 'text' ? 'the saved user and assistant messages' : 'the saved messages and supported tool records'
+    let details = capture ? ' ' + capture.records + ' records · ' + bytesLabel(capture.bytes) + '.' : ' This Server uses the legacy 1 MiB archive format.'
+    if (capture?.interrupted) details += ' The last turn was interrupted.'
+    if (capture?.omittedAttachments) details += ' ' + capture.omittedAttachments + ' attachment parts stay in Codex.'
+    if (capture?.unrecognizedItems) details += ' ' + capture.unrecognizedItems + ' unrecognized items stay in Codex.'
+    $('notice').textContent = 'Review what will be shared.'
+    review('Publish a Codex archive', 'Share ' + contents + ' from “' + (title || thread.id) + '” on the ContextMesh Server.' + details,
+      {kind:'publish', threadId:thread.id, title, scope, captureId:capture?.id, confirmed:true})
+  } catch (error) { showError(error) }
+  finally { button.disabled = false }
 })
 $('review').addEventListener('close', async () => {
   const args = action
   action = undefined
-  if ($('review').returnValue !== 'confirm' || !args) return
+  if ($('review').returnValue !== 'confirm' || !args) {
+    if (args?.captureId) tool('discard_capture', {id:args.captureId}).catch(showError)
+    return
+  }
   const button = $(args.kind === 'publish' ? 'publish' : 'take')
   if (args.kind !== 'publish') receiving = true
   button.disabled = true

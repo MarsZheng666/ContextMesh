@@ -4,7 +4,7 @@ English | [中文](README.zh.md)
 
 **Your context, across devices, models and coding agents.**
 
-Keep conversation and tool history on a shared server. Continue a DSH task on another device, or confirm takeover into Codex CLI and continue unfinished work with that device's own model and workspace. On Mac, use the ContextMesh sidebar in Codex Desktop to receive tasks and publish saved conversations.
+Keep conversation and tool history on a shared server. Continue a DSH task on another device, or confirm takeover into Codex CLI and continue unfinished work with that device's own model and workspace. On Mac, use the ContextMesh sidebar in Codex Desktop to receive tasks and publish saved conversations and tool history. A compatible receiver loads the records and excerpts that fit its model.
 
 ContextMesh combines **one shared remote Server** with **integrations on the devices that execute tasks**: a single [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugin and an optional Codex bridge built into the ContextMesh CLI.
 
@@ -45,7 +45,7 @@ Codex snapshot imports create a separate conversation and retain source provenan
 
 ## Before you install
 
-**0.8.0-dev.9 is an unreleased source preview.** The plugin requires this repository's pinned **DSH 0.2.1-rc.3 and compatibility patches**. Use the pinned source build below; installing the plugin into an arbitrary global DSH is not supported.
+**0.8.0-dev.10 is an unreleased source preview.** The plugin requires this repository's pinned **DSH 0.2.1-rc.3 and compatibility patches**. Use the pinned source build below; installing the plugin into an arbitrary global DSH is not supported.
 
 Use the same reviewed source version for the Server and device clients. The instructions below use the source installation path. Self-contained macOS Apple Silicon and Linux x64 packages are also built by CI, but are currently **candidate artifacts, not published releases**. Their installation and upgrade commands are covered in the [runtime guide](docs/runtime.md).
 
@@ -210,7 +210,7 @@ On your Mac, [install the managed runtime](docs/runtime.md), connect it to the S
 contextmesh codex install-panel
 ```
 
-In Codex Desktop, select **ContextMesh** in the sidebar. Import a saved session, confirm a supported live takeover, or publish a saved Codex conversation for another compatible agent to open. Choose **Conversation text only** when a full archive is too large. [Desktop setup and usage](docs/codex-desktop.md)
+In Codex Desktop, select **ContextMesh** in the sidebar. Import a saved session, confirm a supported live takeover, or publish a saved Codex conversation for another compatible agent to open. Full archives can span many storage blocks. Choose **Conversation text only** to share the saved messages alone. [Desktop setup and usage](docs/codex-desktop.md)
 
 ### Bring a Codex archive back to DSH
 

@@ -72,7 +72,10 @@ jobs:
       - uses: actions/checkout@v4
       - run: docker build -t contextmesh:candidate .
       - name: Inspect image release metadata
-        run: docker run --rm --network none --read-only --entrypoint node contextmesh:candidate -e "const m=require('/app/server-release.json');if(m.schema!==8||m.protocol!==1)process.exit(1)"
+        run: |
+          expected_schema="$(sed -n 's/^export const STORAGE_SCHEMA_VERSION = \([0-9][0-9]*\)$/\1/p' packages/protocol/src/index.ts)"
+          test -n "$expected_schema"
+          docker run --rm --network none --read-only --entrypoint node --env EXPECTED_SCHEMA="$expected_schema" contextmesh:candidate -e "const m=require('/app/server-release.json');if(m.schema!==Number(process.env.EXPECTED_SCHEMA)||m.protocol!==1)process.exit(1)"
       - name: Archive image for separate publication approval
         run: docker save contextmesh:candidate | gzip > contextmesh-image.tar.gz
       - uses: actions/upload-artifact@v4

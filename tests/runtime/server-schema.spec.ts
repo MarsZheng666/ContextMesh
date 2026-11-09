@@ -1,3 +1,4 @@
+import { STORAGE_SCHEMA_VERSION } from '../../packages/protocol/src/index.js'
 import { test, expect, vi } from 'vitest'
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -40,7 +41,7 @@ test('rejects a schema-changing image before maintenance or stopping the service
     ).rejects.toThrow('Schema-changing upgrades')
     expect(await f.client.request('/v1/admin/maintenance')).toMatchObject({
       enabled: false,
-      schema: 8,
+      schema: STORAGE_SCHEMA_VERSION,
     })
     expect(await readFile(join(root, 'compose.yaml'), 'utf8')).toBe(original)
     const calls = (await readFile(log, 'utf8'))
@@ -82,7 +83,7 @@ test('records the actual database schema in a verified backup', async () => {
     const result = await backupServer(root)
     expect(
       JSON.parse(await readFile(join(result.directory, 'backup.json'), 'utf8')),
-    ).toMatchObject({ verified: true, schema: 8 })
+    ).toMatchObject({ verified: true, schema: STORAGE_SCHEMA_VERSION })
   } finally {
     vi.unstubAllEnvs()
     await rm(root, { recursive: true, force: true })

@@ -88,6 +88,7 @@ export interface ModelBudget {
   capacityMode?: CapacityMode
   maxOutputTokens?: number
   toolsAllowed?: boolean
+  archive?: boolean
 }
 type Request = Pick<
   GenerateOptions,

@@ -1,3 +1,5 @@
+import { ArchiveHistory, archiveSize } from './archive-history.js'
+import type { ArchiveResumeOptions } from '../../../protocol/src/archives.js'
 import { ConnectionSetup } from './connection.js'
 import { FilesPanel } from './files.js'
 import { ModelCheckPanel } from './models.js'
@@ -6,13 +8,14 @@ import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import {
   ControlError,
+  errorText,
   historySchema,
   type History,
   type Snapshot,
   type UiModel,
   type ProjectSetup,
 } from './state.js'
-import { en, type Key } from './locales.js'
+import type { Key } from './locales.js'
 import {
   DirectoryBrowserModel,
   type ListDirectory,
@@ -36,11 +39,6 @@ const stateKeys = new Set<Key>([
   'failed',
   'recovery_required',
 ])
-function errorText(error: unknown, t: Locale['t']) {
-  if (error instanceof ControlError && error.code in en)
-    return t(error.code as Key)
-  return error instanceof Error ? error.message : String(error)
-}
 function stateLabel(state: string, t: Locale['t']) {
   return stateKeys.has(state as Key) ? t(state as Key) : state
 }
@@ -444,37 +442,92 @@ export function CodexImportPanel({
     [browsing, setBrowsing] = useState(false),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
-    [pending, setPending] = useState(false)
+    [pending, setPending] = useState(false),
+    [history, setHistory] = useState(false),
+    [query, setQuery] = useState(''),
+    [include, setInclude] = useState<
+      NonNullable<ArchiveResumeOptions['include']>
+    >([])
   const operation = useRef<string>(),
+    attempt = useRef<ArchiveResumeOptions>(),
     archives = data.codexArchives ?? [],
     selected = archives.find((a) => a.id === source)
   const submit = async () => {
-    if (!source || !directory || !window.confirm(t('codexImportConfirm')))
-      return
+    if (!source || !directory) return
     setBusy(true)
     setError('')
-    operation.current ??= crypto.randomUUID()
     try {
+      if (!operation.current) {
+        let message = t('codexImportConfirm')
+        if (selected?.format === 2) {
+          const resume = { query: query.trim() || undefined, include }
+          const plan = (await request({
+            action: 'preview-codex-archive',
+            sourceId: source,
+            cwd: directory,
+            resume,
+          })) as {
+            archivedBytes: number
+            selected: { seq: number; kind: string; length: number }[]
+            inputTokens: number
+            planDigest: string
+          }
+          message +=
+            '\n\n' +
+            t('archiveSaved') +
+            ' · ' +
+            archiveSize(plan.archivedBytes) +
+            '\n' +
+            t('archiveLoad') +
+            ' · ' +
+            plan.selected.length +
+            '\n' +
+            t('archiveTokens') +
+            ' · ' +
+            plan.inputTokens +
+            '\n\n' +
+            plan.selected
+              .slice(0, 8)
+              .map(
+                (record) =>
+                  '#' +
+                  record.seq +
+                  ' · ' +
+                  record.kind +
+                  ' · ' +
+                  archiveSize(record.length),
+              )
+              .join('\n')
+          if (plan.selected.length > 8) message += '\n…'
+          attempt.current = { ...resume, planDigest: plan.planDigest }
+        } else attempt.current = undefined
+        if (!window.confirm(message)) return
+        operation.current = crypto.randomUUID()
+      }
       const result = (await request({
         action: 'import-codex',
         sourceId: source,
         cwd: directory,
         operationId: operation.current,
         confirmed: true,
+        resume: attempt.current,
       })) as { sessionId: string }
       await refresh()
       open(result.sessionId)
     } catch (error) {
       setError(errorText(error, t))
-      const saved = (await request({
-        action: 'import-codex-status',
-        operationId: operation.current,
-      }).catch((e) =>
-        e instanceof ControlError && e.code === 'NOT_FOUND'
-          ? undefined
-          : { phase: 'unknown' },
-      )) as { phase?: string } | undefined
-      setPending(!!saved && saved.phase !== 'published')
+      if (operation.current) {
+        const saved = (await request({
+          action: 'import-codex-status',
+          operationId: operation.current,
+        }).catch((e) =>
+          e instanceof ControlError && e.code === 'NOT_FOUND'
+            ? undefined
+            : { phase: 'unknown' },
+        )) as { phase?: string } | undefined
+        setPending(!!saved && saved.phase !== 'published')
+        if (!saved) operation.current = undefined
+      }
     } finally {
       setBusy(false)
     }
@@ -511,6 +564,8 @@ export function CodexImportPanel({
           onChange={(event) => {
             setSource(event.target.value)
             operation.current = undefined
+            setInclude([])
+            setHistory(false)
           }}
         >
           <option value="">{t('codexChooseArchive')}</option>
@@ -544,6 +599,59 @@ export function CodexImportPanel({
           {t('receiverModel')}: {data.receiverModel.provider}/
           {data.receiverModel.model}
         </p>
+      )}
+      {selected?.format === 2 && (
+        <div>
+          <label>
+            {t('archiveFind')}{' '}
+            <textarea
+              rows={2}
+              value={query}
+              maxLength={16000}
+              disabled={busy || pending}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          </label>
+          <button
+            disabled={busy || pending}
+            onClick={() => setHistory(!history)}
+          >
+            {t(history ? 'archiveClose' : 'archiveBrowse')}
+          </button>
+          {include.length > 0 && (
+            <span>
+              {t('archiveSelected')} · {include.length}{' '}
+              <button disabled={busy || pending} onClick={() => setInclude([])}>
+                {t('archiveClear')}
+              </button>
+            </span>
+          )}
+          {history && (
+            <ArchiveHistory
+              key={source}
+              source={source}
+              request={request}
+              t={t}
+              close={() => setHistory(false)}
+              pick={(selection) => {
+                if (
+                  include.some(
+                    (item) =>
+                      item.id === selection.id &&
+                      item.seq === selection.seq &&
+                      item.offset === selection.offset,
+                  )
+                )
+                  return
+                if (include.length >= 8) {
+                  setError(t('archiveTooMany'))
+                  return
+                }
+                setInclude([...include, selection])
+              }}
+            />
+          )}
+        </div>
       )}
       <button
         disabled={

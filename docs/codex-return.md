@@ -6,7 +6,7 @@ Copy a settled ContextMesh archive or a [snapshot published from Codex Desktop](
 
 ## Prepare the devices
 
-- Use the same reviewed ContextMesh version on the Server and clients. The Server must advertise `codex-context-return-v1`; the database remains schema **8**, so an existing schema-8 database needs no additional migration for this feature.
+- Use the same reviewed ContextMesh version on the Server and clients. The Server advertises `codex-context-return-v1` for legacy archives and `chunked-archives-v2` for chunked archives on schema 9.
 - On the source, finish the managed Codex run and wait until ContextMesh reports its result archived. If a previous operation is uncertain, reconcile it first using the [Codex recovery procedure](codex.md). Desktop conversations appear in the archive after you confirm publication in the ContextMesh panel.
 - On the receiver, run DSH with the existing **single** `dsh-contextmesh-handoff` plugin and connect it to the same Server namespace using that device's credential. Configure its own model provider; Codex CLI and the source model are not required on this device.
 - Choose a model with DSH's native selector before importing. Until a local selection exists, the local DSH default is used. The plugin checks that model and the imported context before creating the copy. It never silently substitutes a source model or another available model.
@@ -24,7 +24,7 @@ The new conversation opens with the imported history. **Send your next instructi
 These commands contact the receiving DSH plugin's local control socket; keep that DSH instance running. With a built source checkout, replace `contextmesh` with `pnpm cli`:
 
 ```sh
-contextmesh list --adapter codex
+contextmesh codex archives
 contextmesh import-codex CODEX_SESSION_ID \
   --cwd /absolute/path/on/this/dsh-device \
   --operation-id YOUR_OPERATION_UUID --confirm
@@ -34,6 +34,8 @@ contextmesh import-codex-status YOUR_OPERATION_UUID
 `--operation-id` is optional; without it, the CLI generates an ID and prints `Import reference: ...` before contacting DSH. Keep this reference. Reusing it with the same source, directory and local model resumes the same copy rather than creating another conversation. A different set of choices requires a new operation only after checking the previous result. `--state-dir` selects the plugin's existing private state directory when using a nondefault DSH profile. Runtime-managed CLI commands select their managed profile automatically.
 
 The returned metadata includes the new `dsh:` session ID, operation reference, source ID and fixed archive cut, archive time, local directory, model and phase (`writing`, `archived`, `published`). Status does not return conversation content or credentials. `archived` means the complete seed history is durable on the Server; `published` means it has also been activated and announced in the receiving DSH instance.
+
+With a chunked archive, the receiving model and project determine the context budget. You can browse records by path or error, include an excerpt, and review the estimated load before import. The history-search field helps find related records. Send your next instruction in the new conversation when ready.
 
 ## What the copy contains
 

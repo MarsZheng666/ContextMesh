@@ -6,7 +6,7 @@
 
 ## 准备设备
 
-- Server 与客户端使用同一经过检查的 ContextMesh 版本。Server 需要提供 `codex-context-return-v1` 能力；数据库仍为 **schema 8**，已有 schema 8 无需为本功能再次迁移。
+- Server 与客户端使用同一经过检查的 ContextMesh 版本。Server 为旧归档提供 `codex-context-return-v1`。使用分块归档需要 schema 9 和 `chunked-archives-v2`。
 - 源端先完成托管的 Codex 运行，等 ContextMesh 确认结果已归档。如果之前的操作结果不确定，先按 [Codex 恢复流程](codex.zh.md)核对。桌面会话在你从 ContextMesh 面板确认发布后才会进入共享归档。
 - 接收端运行 DSH 和现有的**唯一一个** `dsh-contextmesh-handoff` 插件，使用本设备凭据连接同一 Server 命名空间。配置本机模型服务即可；接收端无需安装 Codex CLI，也无需配置源端模型。
 - 导入前用 DSH 原生模型选择器选好模型。尚无本机选择时使用本机 DSH 默认值。插件先检查模型和导入上下文，再创建副本；不会静默替换成源端模型或随意挑选可用模型。
@@ -24,7 +24,7 @@
 这些命令连接接收端 DSH 插件的本地控制接口，需要保持该 DSH 实例运行。在已构建的源码目录，将下方 `contextmesh` 换成 `pnpm cli`：
 
 ```sh
-contextmesh list --adapter codex
+contextmesh codex archives
 contextmesh import-codex CODEX_SESSION_ID \
   --cwd /absolute/path/on/this/dsh-device \
   --operation-id YOUR_OPERATION_UUID --confirm
@@ -34,6 +34,8 @@ contextmesh import-codex-status YOUR_OPERATION_UUID
 `--operation-id` 可省略；CLI 会生成编号，在连接 DSH 前打印 `Import reference: ...`。请保留这个编号。同一来源、目录和本机模型使用同一编号重试，会恢复原来的副本，不新建会话。修改选项前先检查上次结果，再决定是否需要新的操作。非默认 DSH 配置可通过 `--state-dir` 指定插件现有的私有状态目录；托管运行包的 CLI 会自动选用其托管配置目录。
 
 返回信息包含新的 `dsh:` 会话 ID、操作编号、来源 ID 和固定归档截点、归档时间、本机目录、模型及阶段（`writing`、`archived`、`published`）。状态查询不返回对话正文或凭据。`archived` 表示完整导入历史已持久化到 Server；`published` 表示接收端 DSH 已完成激活并发布会话。
+
+使用分块归档时，本机模型和项目决定可加载的上下文预算。可以按路径或错误查找记录、选择补入片段，并在导入前查看预计加载量。历史搜索框里的文字用来查找相关记录，下一条指令仍在新会话中发送。
 
 ## 复制哪些内容
 

@@ -10,13 +10,13 @@ The **ContextMesh** entry in the Codex sidebar opens its own panel. A Mac runnin
 2. Sign in to Codex Desktop and make sure the local model you intend to use works.
 3. Run `contextmesh codex install-panel` once. In the desktop app, switch to Codex and select **ContextMesh** in the sidebar. If the entry is missing, restart the app. If the app was installed in a different location, pass `--codex-bin /absolute/path/to/bundled/codex`.
 
-The runtime registers one ContextMesh sidebar entry and supplies its local service. On the remote DSH device, use the existing single ContextMesh plugin. Update the Server for desktop publishing support (`codex-gui-archive-v1`). The database stays at schema 8.
+The runtime registers one ContextMesh sidebar entry and supplies its local service. On the remote DSH device, use the existing single ContextMesh plugin. Chunked archives require a schema 9 Server that advertises `chunked-archives-v2`. Existing servers and archives remain accessible through the older interface.
 
 ## Receive a shared session
 
 1. In **Receive a shared session**, select a conversation and a project directory on your Mac. New conversations use the receiving Codex default model. Use **Choose Folder…** to browse any accessible folder with the macOS picker, or enter its absolute path. Enable project writes only if the task should edit files.
 2. Choose the action shown for the session.
-   - **Review import** copies saved context into a new Codex conversation. Send the next message in Codex to continue.
+   - **Review import** previews the records that fit the receiving Codex model. Use the optional next instruction to find relevant history, or use **Browse full archive** to select an excerpt. Confirm the import, then send the next message in Codex.
    - **Review takeover** transfers ownership of a live session from a supported source. ContextMesh checks the model and workspace before requesting that the source stop. Codex then continues any unfinished work.
 3. Find the conversation title in **Recent transfers**, then select **Open in Codex**. Sessions that need recovery or have a transfer in progress show their status in the list.
 
@@ -25,8 +25,10 @@ For live takeover, ordinary directories are supported. A Git task needs clean wo
 ## Publish a conversation
 
 1. Wait for the Codex conversation and any tools to finish. Under **Publish a conversation**, select the saved conversation and choose **Archive contents**.
-   - **Full archive** includes saved messages and supported tool history. The latest turn must have completed.
-   - **Conversation text only** shares saved user and assistant messages, including text saved before an interruption. Tool history and attachments stay in Codex. Choose this when a full archive is too large or has unsupported items.
+   - **Full archive** includes saved messages and supported tool records, including recorded logs from interrupted turns after tools have settled. The review shows the record count, size and any parts the adapter could not export.
+   - **Conversation text only** shares saved user and assistant messages, including text saved before an interruption.
 2. Review the scope and confirm publication. In DSH, select **Continue a Codex archive**, find it by title or archive reference, choose the receiving directory and confirm. Send your next instruction in the new conversation.
 
-An archive can contain up to 1 MiB, including any earlier imported context within the chosen scope. The original stays available in Codex. The Server persists published copies in PostgreSQL, and connected devices in the same namespace can see them. Codex login and model credentials stay on the Mac. [Archive format and recovery](codex-return.md)
+The Server stores complete exported records in PostgreSQL as blocks of up to 512 KiB. Each record has a byte-range index, and large logs have searchable anchors for errors and paths. Full history stays available to devices in the same namespace even when a receiving model uses only a subset. Interrupted uploads can resume from **Recent transfers → Retry publication**. Archives published by an older Server use its legacy 1 MiB format.
+
+Codex resolves the model from the receiving project. ContextMesh reads the available window from the effective Codex configuration or a matching local model profile. If it cannot determine a window, set a conservative token window under **Advanced context settings**. The estimate reserves space for the receiving prompt, tools, user input and output. For a different model after import, use the panel to prepare a new import. [Archive format and recovery](codex-return.md)

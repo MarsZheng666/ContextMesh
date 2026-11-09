@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { createInterface } from 'node:readline'
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
@@ -28,7 +29,11 @@ createInterface({ input: process.stdin }).on('line', (line) => {
         config: { mcp_servers: { fixture_mcp: { enabled: true } } },
       })
     case 'thread/start': {
-      const id = 'native-' + Object.keys(state.threads).length
+      const id = p.ephemeral
+        ? 'ephemeral'
+        : process.env.CODEX_FIXTURE_UUIDS === '1'
+          ? randomUUID()
+          : 'native-' + Object.keys(state.threads).length
       const model =
         p.model ?? process.env.CODEX_FIXTURE_DEFAULT_MODEL ?? 'fixture-default'
       const thread = {
@@ -39,13 +44,14 @@ createInterface({ input: process.stdin }).on('line', (line) => {
         modelProvider: 'fixture',
         model,
       }
-      state.threads[id] = {
-        thread,
-        items: [],
-        turns: [],
-        injected: [],
-        sandbox: p.sandbox,
-      }
+      if (!p.ephemeral)
+        state.threads[id] = {
+          thread,
+          items: [],
+          turns: [],
+          injected: [],
+          sandbox: p.sandbox,
+        }
       save()
       return reply({
         thread,
@@ -118,6 +124,19 @@ createInterface({ input: process.stdin }).on('line', (line) => {
           },
         },
       )
+      if (process.env.CODEX_FIXTURE_RUN_LOG_BYTES) {
+        t.items.splice(t.items.length - 1, 0, {
+          turnId: id,
+          item: {
+            type: 'commandExecution',
+            status: 'completed',
+            exitCode: 0,
+            aggregatedOutput: 'x'.repeat(
+              Number(process.env.CODEX_FIXTURE_RUN_LOG_BYTES),
+            ),
+          },
+        })
+      }
       save()
       reply({ turn })
       if (

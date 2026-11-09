@@ -12,6 +12,10 @@ const app = buildServer({
   token,
   namespace: process.env.CONTEXTMESH_NAMESPACE,
   logger: true,
+  archiveQuotaBytes:
+    process.env.CONTEXTMESH_ARCHIVE_QUOTA_BYTES === undefined
+      ? undefined
+      : Number(process.env.CONTEXTMESH_ARCHIVE_QUOTA_BYTES),
 })
 app.addHook('onClose', async () => store.stop())
 let stopping = false

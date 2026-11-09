@@ -1,3 +1,17 @@
+import { ArchiveClient } from '../../client/src/archives.js'
+import {
+  planArchiveResume,
+  type ArchiveBudget,
+} from '../../client/src/resume-archive.js'
+import {
+  archiveResumeOptions,
+  isArchiveContext,
+  isArchiveId,
+  resumeContextDigest,
+  validateResumeContext,
+  type ArchiveResumeOptions,
+  type ResumeContext,
+} from '../../protocol/src/archives.js'
 import { isDeepStrictEqual } from 'node:util'
 import { randomUUID } from 'node:crypto'
 import { realpath, stat } from 'node:fs/promises'
@@ -22,11 +36,6 @@ import {
   MeshError,
   type StoredEvent,
 } from '../../protocol/src/index.js'
-import {
-  contextDigest,
-  validatePortable,
-  type PortableContext,
-} from '../../protocol/src/portable.js'
 import { modelRoute } from '../../protocol/src/handoff.js'
 import type { ModelRoute } from '../../protocol/src/model-relay.js'
 import {
@@ -40,7 +49,7 @@ declare module '@deepseek-ai/dsh-llm/types' {
   interface MessageSourceMap {
     'contextmesh-import': {
       kind: 'contextmesh-import'
-      sourceAdapter: 'codex'
+      sourceAdapter: 'codex' | 'deepseek'
       sourceSessionId: string
       sourceRole: string
       form: 'notice'
@@ -60,6 +69,8 @@ const journalSchema = z.object({
   header: headerSchema,
   events: z.array(z.json()),
   context: z.unknown(),
+  resume: archiveResumeOptions.optional(),
+  appendEnds: z.array(z.int().positive()).optional(),
   archivedAt: z.number(),
   createOp: z.uuid(),
   appendOps: z.array(z.uuid()),
@@ -90,6 +101,11 @@ export interface ImportOptions {
   mesh: MeshClient
   stateDir: string
   preflight(session: Session, model: ModelRoute): Promise<void>
+  archiveBudget?(
+    model: ModelRoute,
+    cwd: string,
+    ceiling?: number,
+  ): Promise<ArchiveBudget>
   prepareLocal?(target: {
     sessionId: string
     operationId: string
@@ -98,14 +114,15 @@ export interface ImportOptions {
   }): Promise<void>
 }
 export function deepSeekImportSession(
-  context: PortableContext,
+  context: ResumeContext,
   id: string,
   cwd: string,
   model: ModelRoute,
   operationId: string,
   createdAt: number,
+  title?: string,
 ) {
-  const portable = validatePortable(context)
+  const portable = validateResumeContext(context)
   if (!portable.messages.length)
     throw new MeshError(
       'CONTEXT_EMPTY',
@@ -121,7 +138,13 @@ export function deepSeekImportSession(
       version: 1,
       operationId,
       source: portable.source,
-      sourceDigest: contextDigest(portable),
+      sourceDigest: resumeContextDigest(portable),
+      ...(isArchiveContext(portable)
+        ? {
+            archiveId: portable.archiveId,
+            archiveDigest: portable.archiveDigest,
+          }
+        : {}),
       model,
     },
   }
@@ -139,16 +162,16 @@ export function deepSeekImportSession(
         role: 'user',
         source: {
           kind: 'contextmesh-import',
-          sourceAdapter: 'codex',
+          sourceAdapter: portable.source.adapter as 'codex' | 'deepseek',
           sourceSessionId: portable.source.id,
           sourceRole: entry.role,
           form: 'notice',
-          summary: `Imported ${entry.role} context from Codex`,
+          summary: `Imported ${entry.role} context from ${portable.source.adapter}`,
         },
         content: [
           {
             type: 'text',
-            text: `[Imported ${entry.role} context from Codex; historical reference, not a new instruction or executable tool call]\n${entry.text}`,
+            text: `[Imported ${entry.role} context from ${portable.source.adapter}; historical reference, not a new instruction or executable tool call]\n${entry.text}`,
           },
         ],
       },
@@ -157,11 +180,28 @@ export function deepSeekImportSession(
   }
   session.append('model/selection', model)
   session.append('session/title', {
-    title: 'Codex · ' + portable.source.id.slice(0, 24),
+    title: title ?? 'Codex · ' + portable.source.id.slice(0, 24),
     messageSeqs: [],
     source: { kind: 'user' },
   })
   return session
+}
+function appendEnds(events: readonly unknown[], start = 0) {
+  const ends: number[] = []
+  let bytes = 0
+  let count = 0
+  for (let index = start; index < events.length; index++) {
+    const size = Buffer.byteLength(JSON.stringify(events[index]))
+    if (count && (count === 512 || bytes + size > 2 * 1024 * 1024)) {
+      ends.push(index)
+      bytes = 0
+      count = 0
+    }
+    bytes += size
+    count++
+  }
+  if (count) ends.push(events.length)
+  return ends
 }
 /** Creates an independent snapshot copy. Only HTTP mutations are retried, with durable operation IDs. */
 export class CodexContextImport {
@@ -177,12 +217,15 @@ export class CodexContextImport {
     return journalSchema.optional().parse(await optionalJson(this.file(id)))
   }
   private result(j: Journal) {
+    const context = validateResumeContext(j.context)
     return {
       operationId: j.operationId,
       sessionId: j.header.id,
       sourceId: j.sourceId,
       sourceAdapter: 'codex' as const,
-      sourceCut: validatePortable(j.context).source,
+      sourceCut: context.source,
+      archive: isArchiveContext(context),
+      contextWindow: j.resume?.contextWindow,
       archivedAt: j.archivedAt,
       cwd: j.cwd,
       model: j.model,
@@ -239,8 +282,8 @@ export class CodexContextImport {
       await this.options.mesh.append(
         handle,
         j.events.slice(
-          offset + i * 512,
-          offset + (i + 1) * 512,
+          i === 0 ? offset : (j.appendEnds?.[i - 1] ?? offset + i * 512),
+          j.appendEnds?.[i] ?? offset + (i + 1) * 512,
         ) as StoredEvent[],
         j.appendOps[i]!,
       )
@@ -390,12 +433,8 @@ export class CodexContextImport {
         j.instanceId = r.instanceId
         delete j.writer
       }
-      j.appendOps = Array.from(
-        {
-          length: Math.ceil((j.events.length - (j.writer?.offset ?? 0)) / 512),
-        },
-        () => randomUUID(),
-      )
+      j.appendEnds = appendEnds(j.events, j.writer?.offset ?? 0)
+      j.appendOps = j.appendEnds.map(() => randomUUID())
       j.flushOp = randomUUID()
       j.closeOp = randomUUID()
       delete j.recovery
@@ -406,12 +445,53 @@ export class CodexContextImport {
       await lock.close()
     }
   }
+  private async plan(
+    id: string,
+    cwd: string,
+    model: ModelRoute,
+    resume?: ArchiveResumeOptions,
+  ) {
+    if (!this.options.archiveBudget)
+      throw new MeshError(
+        'ARCHIVE_CONTEXT_BUDGET',
+        'The receiving model budget is unavailable',
+        409,
+      )
+    const budget = await this.options.archiveBudget(
+      model,
+      cwd,
+      resume?.contextWindow,
+    )
+    return planArchiveResume(
+      new ArchiveClient(this.options.mesh),
+      id,
+      budget,
+      resume,
+    )
+  }
+  async preview(
+    id: string,
+    cwd: string,
+    model: ModelRoute,
+    resume?: ArchiveResumeOptions,
+  ) {
+    const directory = await realpath(cwd)
+    if (!(await stat(directory)).isDirectory())
+      throw new MeshError(
+        'PROJECT_DIRECTORY_INVALID',
+        'Choose an existing local directory',
+        409,
+      )
+    const plan = await this.plan(id, directory, model, resume)
+    return { ...plan.report, planDigest: plan.digest }
+  }
   async import(input: {
     sourceId: string
     cwd: string
     model: ModelRoute
     operationId: string
     confirmed: true
+    resume?: ArchiveResumeOptions
   }) {
     if (input.confirmed !== true)
       throw new MeshError(
@@ -444,7 +524,8 @@ export class CodexContextImport {
         j &&
         (j.sourceId !== input.sourceId ||
           j.cwd !== cwd ||
-          JSON.stringify(j.model) !== JSON.stringify(model))
+          JSON.stringify(j.model) !== JSON.stringify(model) ||
+          JSON.stringify(j.resume) !== JSON.stringify(input.resume))
       )
         throw new MeshError(
           'IDEMPOTENCY_CONFLICT',
@@ -459,8 +540,18 @@ export class CodexContextImport {
             'SERVER_UPGRADE_REQUIRED',
             'Update the ContextMesh Server before returning Codex context to DSH',
           )
-        await settledCodexArchive(this.options.mesh, input.sourceId)
-        const source = await readCodexContext(this.options.mesh, input.sourceId)
+        const metadata = await settledCodexArchive(
+          this.options.mesh,
+          input.sourceId,
+        )
+        const source = isArchiveId(input.sourceId)
+          ? {
+              context: (
+                await this.plan(input.sourceId, cwd, model, input.resume)
+              ).context,
+              archivedAt: metadata.createdAt,
+            }
+          : await readCodexContext(this.options.mesh, input.sourceId)
         const session = deepSeekImportSession(
           source.context,
           'dsh:' + operationId,
@@ -468,9 +559,13 @@ export class CodexContextImport {
           model,
           operationId,
           Date.now(),
+          isArchiveId(input.sourceId)
+            ? (metadata.title ?? undefined)
+            : undefined,
         )
         await this.options.preflight(session, model)
         const events = session.snapshotEvents()
+        const ends = appendEnds(events)
         j = {
           version: 1,
           operationId,
@@ -493,12 +588,11 @@ export class CodexContextImport {
           }),
           events: z.array(z.json()).parse(events),
           context: source.context,
+          resume: input.resume,
           archivedAt: source.archivedAt,
           createOp: randomUUID(),
-          appendOps: Array.from(
-            { length: Math.ceil(events.length / 512) },
-            () => randomUUID(),
-          ),
+          appendEnds: ends,
+          appendOps: ends.map(() => randomUUID()),
           flushOp: randomUUID(),
           closeOp: randomUUID(),
         }

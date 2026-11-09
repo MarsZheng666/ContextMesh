@@ -120,6 +120,34 @@ ALTER TABLE cm_handoffs ADD COLUMN IF NOT EXISTS execution_turn text;
 ALTER TABLE cm_handoffs ADD COLUMN IF NOT EXISTS source_stop_claimed boolean NOT NULL DEFAULT false;
 INSERT INTO cm_schema(version) VALUES(8);
 `
+const v9 = `
+CREATE TABLE cm_archives (
+ namespace text NOT NULL, id text NOT NULL, publisher text NOT NULL,
+ manifest jsonb NOT NULL, reserved_bytes bigint NOT NULL, parent_id text,
+ next_block bigint NOT NULL DEFAULT 0, next_record bigint NOT NULL DEFAULT 0,
+ uploaded_bytes bigint NOT NULL DEFAULT 0, remaining bigint NOT NULL DEFAULT 0,
+ partial_header bytea NOT NULL DEFAULT ''::bytea, chain text NOT NULL,
+ expires_at timestamptz NOT NULL DEFAULT (clock_timestamp()+interval '24 hours'),
+ committed_at timestamptz, PRIMARY KEY(namespace,id),
+ FOREIGN KEY(namespace,parent_id) REFERENCES cm_archives(namespace,id)
+);
+CREATE INDEX cm_archive_catalog ON cm_archives(namespace,committed_at DESC,id DESC) WHERE committed_at IS NOT NULL;
+CREATE INDEX cm_archive_staging ON cm_archives(namespace,expires_at) WHERE committed_at IS NULL;
+CREATE TABLE cm_archive_blocks (
+ namespace text NOT NULL, archive_id text NOT NULL, seq bigint NOT NULL,
+ digest text NOT NULL, data bytea NOT NULL CHECK(octet_length(data) BETWEEN 1 AND 524288),
+ PRIMARY KEY(namespace,archive_id,seq),
+ FOREIGN KEY(namespace,archive_id) REFERENCES cm_archives(namespace,id) ON DELETE CASCADE
+);
+CREATE TABLE cm_archive_entries (
+ namespace text NOT NULL, archive_id text NOT NULL, seq bigint NOT NULL,
+ byte_start bigint NOT NULL, meta jsonb NOT NULL, terms text[] NOT NULL,
+ PRIMARY KEY(namespace,archive_id,seq),
+ FOREIGN KEY(namespace,archive_id) REFERENCES cm_archives(namespace,id) ON DELETE CASCADE
+);
+CREATE INDEX cm_archive_entry_terms ON cm_archive_entries USING gin(terms);
+INSERT INTO cm_schema(version) VALUES(9);
+`
 export async function migrate(pool: Pool): Promise<void> {
   const client = await pool.connect()
   try {
@@ -158,7 +186,11 @@ export async function migrate(pool: Pool): Promise<void> {
       await client.query(v7)
       version = 7
     }
-    if (version === 7) await client.query(v8)
+    if (version === 7) {
+      await client.query(v8)
+      version = 8
+    }
+    if (version === 8) await client.query(v9)
     await client.query('COMMIT')
   } catch (error) {
     await client.query('ROLLBACK')

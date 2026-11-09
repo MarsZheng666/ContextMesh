@@ -4,7 +4,7 @@
 
 **让上下文跨设备、跨模型、跨 Coding Agent 延续。**
 
-将对话和工具历史保存在共享 Server，在另一台设备继续 DSH 任务，或确认转移至 Codex CLI，使用接收端自己的模型和工作区自动继续未完成的任务。在 Mac 上，也可以从 Codex 桌面侧栏接管任务或发布已保存的会话。
+将对话和工具历史保存在共享 Server，在另一台设备继续 DSH 任务，或确认转移至 Codex CLI，使用接收端自己的模型和工作区自动继续未完成的任务。在 Mac 上，也可以从 Codex 桌面侧栏接管任务或发布已保存的会话与工具历史。接收端会按本机模型的上下文预算加载记录。
 
 ContextMesh 由**一个共享远端 Server**和**执行任务设备上的集成组件**组成：唯一的 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 插件，以及内置于 ContextMesh CLI 的可选 Codex 适配器。
 
@@ -45,7 +45,7 @@ Codex 快照导入会创建独立会话并保留来源。**DSH → Codex 接管�
 
 ## 安装前了解
 
-**0.8.0-dev.9 为尚未发布的源码预览版。** 插件依赖本仓库锁定的 **DSH 0.2.1-rc.3 和兼容补丁**。请使用下方锁定版本的源码构建，不支持直接装入任意全局 DSH。
+**0.8.0-dev.10 为尚未发布的源码预览版。** 插件依赖本仓库锁定的 **DSH 0.2.1-rc.3 和兼容补丁**。请使用下方锁定版本的源码构建，不支持直接装入任意全局 DSH。
 
 Server 与设备客户端请使用同一经审核的源码版本。以下采用源码安装方式。CI 也会构建包含运行环境的 macOS Apple Silicon 和 Linux x64 安装包，但目前它们是**候选产物，尚未作为正式 Release 发布**。候选包的安装与升级方式见[运行包指南](docs/runtime.zh.md)。
 
@@ -210,7 +210,7 @@ pnpm cli codex status CODEX_SESSION_ID
 contextmesh codex install-panel
 ```
 
-在 Codex 桌面版左侧栏点击 **ContextMesh**。可以导入已保存的会话、确认接管受支持的在线任务，也可以发布已保存的 Codex 会话供其他兼容 Agent 打开。完整归档太大时，可选 **Conversation text only**（仅会话文字）。[桌面版安装与使用](docs/codex-desktop.zh.md)
+在 Codex 桌面版左侧栏点击 **ContextMesh**。可以导入已保存的会话、确认接管受支持的在线任务，也可以发布已保存的 Codex 会话供其他兼容 Agent 打开。完整归档可以跨多个数据块。只需共享对话时，可选 **Conversation text only**（仅会话文字）。[桌面版安装与使用](docs/codex-desktop.zh.md)
 
 ### 将 Codex 归档带回 DSH
 
