@@ -2,6 +2,8 @@
 
 [English](codex.md) · [设备配置](getting-started.zh.md) · [原生存储](native-agents.zh.md)
 
+在 Mac 上可从 [Codex 桌面侧栏](codex-desktop.zh.md)接管远程 DSH 任务，或发布会话快照供远程 DSH 接续。
+
 可选的 Codex 适配器已包含在现有 ContextMesh CLI 中。它将已完成的 DSH 或 ContextMesh 管理的 Codex 快照导入为**本机新的 Codex 线程**，再通过 Codex 原生 app-server 发送新指令。源会话保留原历史和写入权。这是明确的快照复制，不会自动抢占执行中的任务。
 
 运行中的 DSH 任务可通过[确认接管后自动续跑](confirmed-takeover.zh.md)转移；下方 `import` 命令仍只是快照复制，保留来源所有权。

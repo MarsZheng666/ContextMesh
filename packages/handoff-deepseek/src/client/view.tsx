@@ -520,7 +520,7 @@ export function CodexImportPanel({
               value={a.id}
               disabled={a.busy || a.recoveryRequired}
             >
-              {a.id}
+              {a.title ? a.title + ' · ' + a.id.slice(-12) : a.id}
               {a.busy || a.recoveryRequired
                 ? ' · ' + t('codexArchiveBusy')
                 : ''}

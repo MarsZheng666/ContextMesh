@@ -8,6 +8,7 @@ import { meta, oneTurnLog } from '../upstream/contract.js'
 import { CodexBridge } from '../../packages/adapter-codex/src/bridge.js'
 import { CodexContextImport } from '../../packages/handoff-deepseek/src/codex-import.js'
 import { MeshClient } from '../../packages/client/src/index.js'
+import { readCodexContext } from '../../packages/client/src/codex-context.js'
 import {
   MeshError,
   type StoredEvent,
@@ -272,4 +273,61 @@ it('keeps source and target untouched when the receiving model preflight rejects
       '/v1/codex-archives/' + encodeURIComponent(f.source.sessionId),
     )) as any,
   ).toMatchObject({ busy: false, recoveryRequired: false })
+})
+
+it('publishes one immutable desktop archive for concurrent submissions of the same saved context', async () => {
+  const f = await fixture()
+  const threadId = randomUUID()
+  const codex = new MeshClient({
+    endpoint: f.endpoint,
+    token: TOKEN,
+    adapter: 'codex',
+    retries: 0,
+  })
+  const path = '/v1/codex-archives'
+  const input = {
+    operationId: randomUUID(),
+    nativeThreadId: threadId,
+    cliVersion: '0.167.0',
+    title: 'Isolated desktop archive',
+    context: {
+      version: 1,
+      source: {
+        adapter: 'codex',
+        id: threadId,
+        incarnation: threadId,
+        eventCount: 2,
+      },
+      messages: [
+        { role: 'user', text: 'Saved native thread' },
+        { role: 'assistant', text: 'Verification completed' },
+      ],
+    },
+  }
+  const [archive, duplicate] = await Promise.all([
+    codex.request(path, input),
+    codex.request(path, { ...input, operationId: randomUUID() }),
+  ])
+  expect(archive).toEqual(duplicate)
+  const { id } = archive as { id: string }
+  expect(await codex.request(path)).toMatchObject([
+    { id, nextSeq: 1, busy: false, title: input.title },
+  ])
+  expect(await codex.request(path, input)).toEqual(archive)
+  await expect(
+    codex.request(path, { ...input, title: 'Different request' }),
+  ).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' })
+  await expect(
+    codex.request(path, {
+      ...input,
+      operationId: randomUUID(),
+      nativeThreadId: randomUUID(),
+    }),
+  ).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' })
+  await expect(codex.open(id, 'write')).rejects.toMatchObject({
+    code: 'ARCHIVE_READ_ONLY',
+  })
+  expect((await readCodexContext(codex, id)).context.messages).toEqual(
+    input.context.messages,
+  )
 })

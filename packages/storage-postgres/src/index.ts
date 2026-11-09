@@ -2,14 +2,93 @@ import { z } from 'zod'
 import { HandoffPostgresStore, type Update } from './handoff-store.js'
 import { MeshError } from '../../protocol/src/index.js'
 import { contextDigest, validatePortable } from '../../protocol/src/portable.js'
+import { randomUUID } from 'node:crypto'
+import { codexGuiArchive } from '../../protocol/src/codex-context.js'
 import type { HandoffManifest } from '../../protocol/src/handoff.js'
 export type { StoreOptions } from './base.js'
 
 /** Native logs keep their own formats; handoff records link the transferred task. */
 export class PostgresStore extends HandoffPostgresStore {
+  async publishCodexGuiArchive(
+    ns: string,
+    request: z.infer<typeof codexGuiArchive>,
+  ) {
+    const input = codexGuiArchive.parse(request)
+    const context = input.context
+    if (
+      context.source.adapter !== 'codex' ||
+      context.source.id !== input.nativeThreadId ||
+      !context.messages.length ||
+      Buffer.byteLength(JSON.stringify(context)) > 1024 * 1024
+    )
+      throw new MeshError(
+        'INVALID_ARGUMENT',
+        'Expected a nonempty portable Codex snapshot within the archive limit',
+        400,
+      )
+    const digest = contextDigest(context)
+    const id = 'codex:gui:' + digest
+    return this.operation(
+      ns,
+      input.operationId,
+      ['codex-gui-archive', id, input.cliVersion, input.title],
+      async (db) => {
+        const time = Date.now()
+        const header = {
+          id,
+          version: 1,
+          createdAt: time,
+          isSeeded: false,
+          nativeThreadId: input.nativeThreadId,
+          title: input.title,
+          sourceDigest: digest,
+          portable: context,
+        }
+        const inserted = await db.query(
+          "INSERT INTO cm_sessions(namespace,id,adapter,header,inherited_count,creator_instance,incarnation,next_seq,materialized) VALUES($1,$2,'codex',$3,0,$4,$5,1,true) ON CONFLICT DO NOTHING",
+          [ns, id, JSON.stringify(header), input.operationId, randomUUID()],
+        )
+        if (inserted.rowCount) {
+          // The whole snapshot is already in the portable base. Older DSH receivers can read this archive with their existing codec.
+          const event = {
+            seq: 0,
+            type: 'codex/snapshot',
+            time,
+            snapshot: {
+              thread: {
+                id: input.nativeThreadId,
+                cwd: '',
+                cliVersion: input.cliVersion,
+                status: { type: 'idle' },
+              },
+              turns: [],
+              items: [],
+            },
+          }
+          await db.query(
+            'INSERT INTO cm_events(namespace,session_id,seq,event) VALUES($1,$2,0,$3)',
+            [ns, id, JSON.stringify(event)],
+          )
+        } else {
+          const existing = await this.session(db, ns, id)
+          if (
+            existing.adapter !== 'codex' ||
+            !existing.materialized ||
+            JSON.parse(existing.header).sourceDigest !== digest
+          )
+            throw new MeshError(
+              'ALREADY_EXISTS',
+              'The Codex archive identity is already in use',
+            )
+        }
+        return { id }
+      },
+    )
+  }
+
   async codexArchives(ns: string, id?: string) {
     const result = await this.pool.query(
-      `SELECT s.id,s.incarnation,s.next_seq::int AS "nextSeq",(s.header::jsonb->>'createdAt')::double precision AS "createdAt",s.active_handle IS NOT NULL AS busy,
+      `SELECT s.id,s.incarnation,s.header::jsonb->>'title' AS title,s.next_seq::int AS "nextSeq",(s.header::jsonb->>'createdAt')::double precision AS "createdAt",s.active_handle IS NOT NULL AS busy,
       (s.recovery_required OR s.active_handoff IS NOT NULL OR
        EXISTS(SELECT 1 FROM cm_handoffs h WHERE h.namespace=s.namespace AND h.target_session=s.id AND h.execution IN ('pending','dispatching','uncertain')) OR
        (s.header::jsonb ? 'handoffId' AND NOT EXISTS(SELECT 1 FROM cm_handoffs h WHERE h.namespace=s.namespace AND h.id::text=s.header::jsonb->>'handoffId' AND h.state='completed' AND h.target_session=s.id))) AS "recoveryRequired"

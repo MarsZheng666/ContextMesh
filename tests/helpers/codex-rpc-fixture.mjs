@@ -29,13 +29,15 @@ createInterface({ input: process.stdin }).on('line', (line) => {
       })
     case 'thread/start': {
       const id = 'native-' + Object.keys(state.threads).length
+      const model =
+        p.model ?? process.env.CODEX_FIXTURE_DEFAULT_MODEL ?? 'fixture-default'
       const thread = {
         id,
         cwd: p.cwd,
         cliVersion: '0.154.0',
         status: { type: 'idle' },
         modelProvider: 'fixture',
-        model: p.model,
+        model,
       }
       state.threads[id] = {
         thread,
@@ -48,7 +50,7 @@ createInterface({ input: process.stdin }).on('line', (line) => {
       return reply({
         thread,
         cwd: p.cwd,
-        model: p.model,
+        model,
         modelProvider: 'fixture',
         sandbox: {
           type: p.sandbox === 'read-only' ? 'readOnly' : 'workspaceWrite',
@@ -77,11 +79,16 @@ createInterface({ input: process.stdin }).on('line', (line) => {
       return reply({ thread: t.thread })
     case 'thread/turns/list':
       return reply({ data: t.turns, nextCursor: null })
-    case 'thread/items/list':
+    case 'thread/items/list': {
+      if (fail === 'cursor-loop')
+        return reply({ data: t.items, nextCursor: 'same' })
+      const start = Number(p.cursor ?? 0)
+      const end = start + (p.limit ?? 100)
       return reply({
-        data: t.items,
-        nextCursor: fail === 'cursor-loop' ? 'same' : null,
+        data: t.items.slice(start, end),
+        nextCursor: end < t.items.length ? String(end) : null,
       })
+    }
     case 'turn/start': {
       if (fail === 'probe-fail' && !p.clientUserMessageId)
         return send({

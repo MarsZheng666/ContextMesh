@@ -33,6 +33,7 @@ export const snapshotSchema = z.object({
     .array(
       z.object({
         id: z.string(),
+        title: z.string().nullable().optional(),
         nextSeq: z.number(),
         createdAt: z.number(),
         busy: z.boolean(),

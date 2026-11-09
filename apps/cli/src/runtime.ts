@@ -40,7 +40,7 @@ export async function runRuntime(args: string[]) {
     home = runtimeHome()
   if (command === '--help' || command === 'help' || !command) {
     console.log(
-      'ContextMesh\n  install <unpacked-bundle> [--sha256 <manifest-sha256>]\n  setup\n  dsh [--port <port>]\n  open [--print-url]\n  status\n  stop\n  adopt <DSH_HOME> --confirm-stopped\n  doctor\n  codex import | takeover | run | --help\n  import-codex <Codex-session-id> --cwd <directory> --confirm\n  import-codex-status <operation-id>\n  import-codex-recover <operation-id> --confirm-stopped\n  server init | start\n  upgrade --check | <bundle>\n  rollback\nCredentials are entered interactively or read from private configuration files.',
+      'ContextMesh\n  install <unpacked-bundle> [--sha256 <manifest-sha256>]\n  setup\n  dsh [--port <port>]\n  open [--print-url]\n  status\n  stop\n  adopt <DSH_HOME> --confirm-stopped\n  doctor\n  codex install-panel | import | takeover | run | --help\n  import-codex <Codex-session-id> --cwd <directory> --confirm\n  import-codex-status <operation-id>\n  import-codex-recover <operation-id> --confirm-stopped\n  server init | start\n  upgrade --check | <bundle>\n  rollback\nCredentials are entered interactively or read from private configuration files.',
     )
     return true
   }

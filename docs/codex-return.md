@@ -2,12 +2,12 @@
 
 [中文](codex-return.zh.md) · [Codex setup](codex.md) · [DSH → Codex takeover](confirmed-takeover.md)
 
-Copy a settled, ContextMesh-managed Codex archive into a **new DSH conversation**. Use the receiving DSH device's own model and directory. The original Codex thread stays independent. This flow copies a fixed archived snapshot; it does not stop Codex, transfer its live execution or automatically send a new model request.
+Copy a settled ContextMesh archive or a [snapshot published from Codex Desktop](codex-desktop.md) into a **new DSH conversation**. Use the receiving DSH device's own model and directory. The original Codex thread stays independent. This flow copies a fixed archived snapshot; it does not stop Codex, transfer its live execution or automatically send a new model request.
 
 ## Prepare the devices
 
 - Use the same reviewed ContextMesh version on the Server and clients. The Server must advertise `codex-context-return-v1`; the database remains schema **8**, so an existing schema-8 database needs no additional migration for this feature.
-- On the source, finish the managed Codex run and wait until ContextMesh reports its result archived. If a previous operation is uncertain, reconcile it first using the [Codex recovery procedure](codex.md). Unmanaged native threads are not collected.
+- On the source, finish the managed Codex run and wait until ContextMesh reports its result archived. If a previous operation is uncertain, reconcile it first using the [Codex recovery procedure](codex.md). Desktop conversations appear in the archive after you confirm publication in the ContextMesh panel.
 - On the receiver, run DSH with the existing **single** `dsh-contextmesh-handoff` plugin and connect it to the same Server namespace using that device's credential. Configure its own model provider; Codex CLI and the source model are not required on this device.
 - Choose a model with DSH's native selector before importing. Until a local selection exists, the local DSH default is used. The plugin checks that model and the imported context before creating the copy. It never silently substitutes a source model or another available model.
 
@@ -37,7 +37,7 @@ The returned metadata includes the new `dsh:` session ID, operation reference, s
 
 ## What the copy contains
 
-The copy includes portable text history and settled native Codex user/assistant messages, with completed tool and plan records as references. All imported entries are explicitly marked historical references with their source adapter, session and original role. They do not become target system/developer instructions, provider-specific reasoning state or executable tool requests. Unsupported content, oversized context and unresolved native work block import instead of being silently discarded.
+The copy includes saved user and assistant messages. It includes completed tool and plan records when the source archive contains them. A desktop archive published with **Conversation text only** contains the saved messages and a note about the chosen scope. All imported entries become historical references with their source adapter, session and original role. The receiving agent uses its own instructions and tool permissions. Unsupported content, oversized context and unresolved native work block import.
 
 The DSH header records the source incarnation, archived event cut and context digest. Each operation keeps that same snapshot across retries, even if the source later adds another turn. The Server persists the separate DSH event log. Codex's native thread and remote archive remain intact; new DSH turns do not synchronize back into that thread. If the Codex session came from an earlier takeover, the old DSH source remains read-only and the returned DSH conversation has a new identity.
 

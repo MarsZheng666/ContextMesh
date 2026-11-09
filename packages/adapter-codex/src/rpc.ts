@@ -143,7 +143,7 @@ export class CodexRpc extends EventEmitter {
   }
   async initialize() {
     await this.request('initialize', {
-      clientInfo: { name: 'contextmesh', version: '0.8.0-dev.4' },
+      clientInfo: { name: 'contextmesh', version: '0.8.0-dev.9' },
       capabilities: { experimentalApi: true, requestAttestation: false },
     })
     this.write({ method: 'initialized' })

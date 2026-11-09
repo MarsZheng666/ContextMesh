@@ -4,11 +4,11 @@ English | [中文](README.zh.md)
 
 **Your context, across devices, models and coding agents.**
 
-Keep conversation and tool history on a shared server. Continue a DSH task on another device, or confirm takeover into Codex CLI and continue unfinished work with that device's own model and workspace.
+Keep conversation and tool history on a shared server. Continue a DSH task on another device, or confirm takeover into Codex CLI and continue unfinished work with that device's own model and workspace. On Mac, use the ContextMesh sidebar in Codex Desktop to receive tasks and publish saved conversations.
 
 ContextMesh combines **one shared remote Server** with **integrations on the devices that execute tasks**: a single [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugin and an optional Codex bridge built into the ContextMesh CLI.
 
-[Deploy the server](#1-deploy-the-server) · [Install a device client](#2-install-a-device-client) · [Connect devices](#3-connect-your-devices) · [DSH handoff](#4-continue-a-conversation-in-dsh) · [Codex CLI](#5-continue-with-codex-cli)
+[Deploy the server](#1-deploy-the-server) · [Install a device client](#2-install-a-device-client) · [Connect devices](#3-connect-your-devices) · [DSH handoff](#4-continue-a-conversation-in-dsh) · [Codex Desktop](#use-the-codex-desktop-sidebar) · [Codex CLI](#5-continue-with-codex-cli)
 
 ## How it fits together
 
@@ -16,7 +16,7 @@ ContextMesh combines **one shared remote Server** with **integrations on the dev
 flowchart LR
   A["Device A · DSH + ContextMesh plugin"] <-->|"Native session events"| S["Remote ContextMesh Server"]
   B["Device B · DSH + ContextMesh plugin"] <-->|"Native session events"| S
-  C["Device C · Codex CLI + ContextMesh CLI"] <-->|"Import context / archive snapshots"| S
+  C["Device C · Codex Desktop / CLI + ContextMesh"] <-->|"Import context / archive snapshots"| S
   S -->|"Persist shared history"| DB[(PostgreSQL)]
 ```
 
@@ -32,20 +32,20 @@ Deploy the Server once. Devices share its HTTPS URL and use separate credentials
 
 ## What works today
 
-| Workflow                            | Current behavior                                                                                                                                |
-| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| **DSH → DSH, across devices**       | Hand off or confirm takeover of the same session. For running work, check the receiver before stopping the source, then continue automatically. |
-| **Switch models in DSH**            | Use the receiver's native model selection; a device with only Sol can continue a Flash task. Models need not match across devices.              |
-| **DSH → Codex CLI**                 | Confirm on the receiver, preflight it before stopping DSH, then automatically continue unfinished work in a new Codex thread.                   |
-| **Managed Codex → DSH**             | Copy a settled archive into a new DSH conversation with the receiver's model and chosen folder; send the next instruction when ready.           |
-| **Managed Codex → Codex CLI**       | Import an archived snapshot into another local Codex thread with that receiver's model and directory.                                           |
-| **Selected workspace files in DSH** | Preview and confirm supported changes and native file attachments before applying them on the receiver.                                         |
+| Workflow                            | Current behavior                                                                                                                                                                 |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **DSH → DSH, across devices**       | Hand off or confirm takeover of the same session. For running work, check the receiver before stopping the source, then continue automatically.                                  |
+| **Switch models in DSH**            | Use the receiver's native model selection; a device with only Sol can continue a Flash task. Models need not match across devices.                                               |
+| **DSH → Codex Desktop / CLI**       | Confirm on the receiver, preflight it before stopping DSH, then automatically continue unfinished work in a new Codex thread.                                                    |
+| **Codex → DSH**                     | Copy a settled archive or a snapshot published from Codex Desktop into a new DSH conversation with the receiver's model and chosen folder; send the next instruction when ready. |
+| **Managed Codex → Codex CLI**       | Import an archived snapshot into another local Codex thread with that receiver's model and directory.                                                                            |
+| **Selected workspace files in DSH** | Preview and confirm supported changes and native file attachments before applying them on the receiver.                                                                          |
 
 Codex snapshot imports create a separate conversation and retain source provenance. **DSH → Codex takeover requires explicit receiver confirmation. Codex → DSH copies a settled archive and waits for your next instruction; it does not take over live Codex execution.** See [DSH handoff](docs/handoff.md), [Codex usage](docs/codex.md), [return to DSH](docs/codex-return.md), and [native storage](docs/native-agents.md).
 
 ## Before you install
 
-**0.8.0-dev.4 is an unreleased source preview.** The plugin requires this repository's pinned **DSH 0.2.1-rc.3 and compatibility patches**. Use the pinned source build below; installing the plugin into an arbitrary global DSH is not supported.
+**0.8.0-dev.9 is an unreleased source preview.** The plugin requires this repository's pinned **DSH 0.2.1-rc.3 and compatibility patches**. Use the pinned source build below; installing the plugin into an arbitrary global DSH is not supported.
 
 Use the same reviewed source version for the Server and device clients. The instructions below use the source installation path. Self-contained macOS Apple Silicon and Linux x64 packages are also built by CI, but are currently **candidate artifacts, not published releases**. Their installation and upgrade commands are covered in the [runtime guide](docs/runtime.md).
 
@@ -201,6 +201,16 @@ pnpm cli codex status CODEX_SESSION_ID
 Add `--from codex` to import a managed Codex snapshot. Use `pnpm cli list --adapter codex` to list its remote archives. With a managed runtime package, use `contextmesh` in place of `pnpm cli`.
 
 The default native sandbox is **read-only**; select `--workspace-write` on import when edits are intended. Source tool history becomes reference text, and files are not copied. Existing unmanaged Codex threads are not automatically collected. Text and settled tool history are supported; unsupported attachments and uncertain tool outcomes block import. After an interrupted run, inspect `status` and use the documented stopped-process reconciliation flow before resending work. See [the Codex guide](docs/codex.md) for configuration, limits and recovery.
+
+### Use the Codex Desktop sidebar
+
+On your Mac, [install the managed runtime](docs/runtime.md), connect it to the Server shared by your devices using `contextmesh setup`, then enable the sidebar.
+
+```sh
+contextmesh codex install-panel
+```
+
+In Codex Desktop, select **ContextMesh** in the sidebar. Import a saved session, confirm a supported live takeover, or publish a saved Codex conversation for another compatible agent to open. Choose **Conversation text only** when a full archive is too large. [Desktop setup and usage](docs/codex-desktop.md)
 
 ### Bring a Codex archive back to DSH
 

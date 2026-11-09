@@ -1,8 +1,19 @@
+import { createHash } from 'node:crypto'
 import { realpath, stat } from 'node:fs/promises'
 import { z } from 'zod'
 import { CodexRpc, type CodexOptions } from './rpc.js'
 import { codexItems, nativeSnapshot, type NativeSnapshot } from './context.js'
-import type { PortableContext } from '../../protocol/src/portable.js'
+import {
+  portableContextMaxBytes,
+  portableContextMaxMessages,
+  validatePortable,
+  type PortableContext,
+} from '../../protocol/src/portable.js'
+import {
+  assertCodexItemSettled,
+  projectCodexMessage,
+  type CodexArchiveScope,
+} from '../../protocol/src/codex-context.js'
 
 export interface Target {
   cwd: string
@@ -18,9 +29,11 @@ export const targetSchema = z
     sandbox: z.enum(['read-only', 'workspace-write']),
   })
   .strict()
+export const startTargetSchema = targetSchema.partial({ model: true })
+export type StartTarget = z.infer<typeof startTargetSchema>
+
 export class NativeCodex {
   readonly rpc: CodexRpc
-  selectedProvider?: string
   constructor(options: CodexOptions = {}) {
     this.rpc = new CodexRpc(options)
   }
@@ -35,14 +48,14 @@ export class NativeCodex {
     return { ...target, cwd }
   }
   async start(
-    target: Target,
+    target: StartTarget,
     config?: Record<string, unknown>,
     developerInstructions?: string,
   ) {
     const r = z
       .object({
         thread: nativeSnapshot.shape.thread,
-        model: z.string(),
+        model: targetSchema.shape.model,
         cwd: z.string(),
         sandbox: z.object({ type: z.string() }).passthrough(),
         approvalPolicy: z.literal('never'),
@@ -61,7 +74,7 @@ export class NativeCodex {
       r.sandbox.type !==
         (target.sandbox === 'read-only' ? 'readOnly' : 'workspaceWrite') ||
       (target.provider !== undefined && r.modelProvider !== target.provider) ||
-      r.model !== target.model ||
+      (target.model !== undefined && r.model !== target.model) ||
       (await realpath(r.cwd)) !== target.cwd
     )
       throw new Error(
@@ -69,11 +82,13 @@ export class NativeCodex {
       )
     if (!/^0\.(15[4-9]|1[6-9]\d|[2-9]\d\d)\./.test(r.thread.cliVersion))
       throw new Error('Use Codex CLI 0.154.x or a compatible newer 0.x CLI')
-    this.selectedProvider = z
-      .string()
-      .min(1)
+    const provider = targetSchema.shape.provider
+      .unwrap()
       .parse(r.modelProvider ?? r.thread.modelProvider)
-    return r.thread.id
+    return {
+      threadId: r.thread.id,
+      target: { ...target, model: r.model, provider },
+    }
   }
   async inject(threadId: string, context: PortableContext) {
     await this.rpc.request('thread/inject_items', {
@@ -112,10 +127,15 @@ export class NativeCodex {
     if (r.thread.status.type !== 'idle')
       throw new Error('The local Codex thread is not idle')
   }
-  private async page(method: string, threadId: string) {
-    const data: unknown[] = [],
-      cursors = new Set<string>()
+  private async *pages(
+    method: 'thread/turns/list' | 'thread/items/list',
+    threadId: string,
+    limit = 100,
+    maxItems = 10000,
+  ) {
+    const cursors = new Set<string>()
     let cursor: string | null = null
+    let count = 0
     do {
       const result = z
         .object({
@@ -126,32 +146,62 @@ export class NativeCodex {
           await this.rpc.request(method, {
             threadId,
             cursor,
-            limit: 100,
+            limit,
             sortDirection: 'asc',
             ...(method === 'thread/turns/list' ? { itemsView: 'summary' } : {}),
           }),
         )
-      data.push(...result.data)
-      if (data.length > 10000)
-        throw new Error(
-          'Native history exceeds the snapshot limit; no history was truncated',
-        )
+      count += result.data.length
+      if (count > maxItems)
+        throw new Error('Native history exceeds the scan limit for one archive')
       cursor = result.nextCursor
       if (cursor && cursors.has(cursor))
         throw new Error('Codex pagination did not advance')
       if (cursor) cursors.add(cursor)
+      yield result.data
     } while (cursor)
+  }
+  private async page(
+    method: 'thread/turns/list' | 'thread/items/list',
+    threadId: string,
+  ) {
+    const data: unknown[] = []
+    for await (const page of this.pages(method, threadId)) data.push(...page)
     return data
   }
-  async snapshot(threadId: string): Promise<NativeSnapshot> {
-    const read = async () =>
-      z.object({ thread: nativeSnapshot.shape.thread }).parse(
-        await this.rpc.request('thread/read', {
-          threadId,
-          includeTurns: false,
+  async savedThreads() {
+    return z
+      .object({
+        data: z.array(
+          z.object({
+            id: z.uuid(),
+            name: z.string().nullable().optional(),
+            preview: z.string(),
+            cwd: z.string(),
+            updatedAt: z.number(),
+          }),
+        ),
+      })
+      .parse(
+        await this.rpc.request('thread/list', {
+          archived: false,
+          limit: 50,
+          sortKey: 'updated_at',
+          modelProviders: [],
+          sourceKinds: ['appServer', 'cli', 'vscode', 'unknown'],
         }),
-      ).thread
-    const thread = await read()
+      ).data
+  }
+  private async readThread(threadId: string) {
+    return z.object({ thread: nativeSnapshot.shape.thread }).parse(
+      await this.rpc.request('thread/read', {
+        threadId,
+        includeTurns: false,
+      }),
+    ).thread
+  }
+  async snapshot(threadId: string): Promise<NativeSnapshot> {
+    const thread = await this.readThread(threadId)
     if (thread.id !== threadId || thread.status.type !== 'idle')
       throw new Error('Wait for native Codex work to finish before exporting')
     const turns = await this.page('thread/turns/list', threadId),
@@ -159,21 +209,10 @@ export class NativeCodex {
     const result = nativeSnapshot.parse({ thread, turns, items })
     if (result.turns.some((t) => t.status === 'inProgress'))
       throw new Error('A native turn is still executing')
-    for (const { item } of result.items) {
-      if (
-        'status' in item &&
-        !['completed', 'failed', 'declined'].includes(String(item.status))
-      )
-        throw new Error('Native tool work is not settled')
-      if (
-        item.type === 'commandExecution' &&
-        item.processId != null &&
-        item.exitCode == null
-      )
-        throw new Error('Stop native background commands before exporting')
-    }
-    const final = await read()
+    for (const { item } of result.items) assertCodexItemSettled(item)
+    const final = await this.readThread(threadId)
     if (
+      final.id !== threadId ||
       final.status.type !== 'idle' ||
       JSON.stringify(turns) !==
         JSON.stringify(await this.page('thread/turns/list', threadId))
@@ -184,6 +223,121 @@ export class NativeCodex {
     if (Buffer.byteLength(JSON.stringify(result)) > 6 * 1024 * 1024)
       throw new Error('Native snapshot exceeds the archive limit')
     return result
+  }
+  private async scanSavedItems(
+    threadId: string,
+    visit?: (value: unknown) => void,
+  ) {
+    const hash = createHash('sha256')
+    let count = 0
+    let bytes = 0
+    for await (const page of this.pages(
+      'thread/items/list',
+      threadId,
+      50,
+      50000,
+    )) {
+      for (const entry of page) {
+        const serialized = JSON.stringify(entry)
+        bytes += Buffer.byteLength(serialized)
+        if (bytes > 128 * 1024 * 1024)
+          throw new Error(
+            'Native history exceeds the scan limit for one archive',
+          )
+        hash.update(serialized).update('\n')
+        count++
+        visit?.(entry)
+      }
+    }
+    return { count, digest: hash.digest('hex') }
+  }
+  async savedArchive(
+    threadId: string,
+    inherited: PortableContext['messages'],
+    scope: CodexArchiveScope,
+  ) {
+    const settled = (thread: NativeSnapshot['thread']) =>
+      thread.id === threadId &&
+      ['idle', 'notLoaded'].includes(thread.status.type)
+    const thread = await this.readThread(threadId)
+    if (!settled(thread))
+      throw new Error('Wait for native Codex work to finish before publishing')
+    const turns = await this.page('thread/turns/list', threadId)
+    const statuses = nativeSnapshot.shape.turns.parse(turns)
+    const latest = statuses.at(-1)?.status
+    if (!latest || statuses.some((turn) => turn.status === 'inProgress'))
+      throw new Error(
+        'Wait for the active Codex turn to settle before publishing',
+      )
+    if (scope === 'full' && latest !== 'completed')
+      throw new Error(
+        'A full archive needs a completed latest turn. Choose Conversation text only to share the saved conversation.',
+      )
+
+    const tooLarge = (limit = '1 MiB') =>
+      new Error(
+        scope === 'full'
+          ? `The full archive exceeds ${limit}. Choose Conversation text only to share the saved conversation.`
+          : `The conversation text exceeds the archive limit of ${limit}.`,
+      )
+    const messages: PortableContext['messages'] = []
+    let messageBytes = 0
+    const append = (message: PortableContext['messages'][number]) => {
+      messageBytes +=
+        Buffer.byteLength(JSON.stringify(message)) + (messages.length ? 1 : 0)
+      if (messageBytes > portableContextMaxBytes) throw tooLarge()
+      if (messages.length >= portableContextMaxMessages)
+        throw tooLarge('10,000 messages')
+      messages.push(message)
+    }
+    if (scope === 'text')
+      append({
+        role: 'reference',
+        text: 'ContextMesh archive contains conversation text only. Tool outputs and attachments remain in the source conversation.',
+      })
+    for (const message of inherited)
+      if (scope === 'full' || message.role !== 'reference') append(message)
+    const saved = await this.scanSavedItems(threadId, (value) => {
+      const { item } = nativeSnapshot.shape.items.element.parse(value)
+      assertCodexItemSettled(item)
+      let message
+      try {
+        message = projectCodexMessage(item, scope)
+      } catch (error) {
+        if (scope === 'full')
+          throw new Error(
+            'The full archive contains unsupported items. Choose Conversation text only to share the saved conversation.',
+            { cause: error },
+          )
+        throw error
+      }
+      if (message) append(message)
+    })
+    if (messages.length === (scope === 'text' ? 1 : 0))
+      throw new Error('There are no saved conversation messages to publish')
+    const checked = await this.scanSavedItems(threadId)
+    if (
+      saved.digest !== checked.digest ||
+      JSON.stringify(turns) !==
+        JSON.stringify(await this.page('thread/turns/list', threadId)) ||
+      !settled(await this.readThread(threadId))
+    )
+      throw new Error(
+        'Native history changed during export; no snapshot was committed',
+      )
+    const context: PortableContext = {
+      version: 1,
+      source: {
+        adapter: 'codex',
+        id: threadId,
+        incarnation: threadId,
+        eventCount: saved.count,
+      },
+      messages,
+    }
+    if (Buffer.byteLength(JSON.stringify(context)) > portableContextMaxBytes)
+      throw tooLarge()
+    return { thread, context: validatePortable(context) }
   }
   async execute(
     threadId: string,

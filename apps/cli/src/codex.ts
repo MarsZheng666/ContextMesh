@@ -3,14 +3,51 @@ import { z } from 'zod'
 import { resolveConnection } from '../../../packages/client/src/config.js'
 import { runtimeHome } from '../../../packages/runtime-manager/src/install.js'
 import { ConfirmedCodexTakeover } from '../../../packages/adapter-codex/src/takeover.js'
+import { installCodexPanel } from './codex-panel-install.js'
+import { CodexPanelJobs } from './codex-panel-jobs.js'
+import { serveCodexPanel } from './codex-panel-mcp.js'
 import { CodexBridge } from '../../../packages/adapter-codex/src/bridge.js'
 
 export async function runCodex(args: string[]) {
   if (args[0] !== 'codex') return false
   const [_, command, id, ...flags] = args
+  if (command === 'install-panel') {
+    if (
+      (id && (id !== '--codex-bin' || flags.length !== 1)) ||
+      (!id && flags.length)
+    )
+      throw new Error(
+        'Use contextmesh codex install-panel [--codex-bin <desktop executable>]',
+      )
+    await installCodexPanel(flags[0])
+    console.log(
+      'ContextMesh installed. Open Codex and select ContextMesh in the sidebar. Restart the app if the entry does not appear.',
+    )
+    return true
+  }
+  if (command === 'panel-mcp' || command === 'panel-worker') {
+    if (flags.length || (command === 'panel-mcp' ? id !== undefined : !id))
+      throw new Error('Invalid ContextMesh panel command')
+    const connection = await resolveConnection()
+    const jobs = new CodexPanelJobs({
+      connection: {
+        endpoint: connection.endpoint ?? 'https://unconfigured.invalid',
+        token: connection.token ?? '',
+      },
+      deviceId: connection.nodeId,
+      stateDir: join(runtimeHome(), 'data/codex-bridge'),
+      native: {
+        executable: process.env.CONTEXTMESH_CODEX_BIN,
+        env: { ...process.env, CONTEXTMESH_TOKEN: undefined },
+      },
+    })
+    if (command === 'panel-mcp') await serveCodexPanel(jobs)
+    else await jobs.run(id!)
+    return true
+  }
   if (!command || command === '--help' || command === 'help') {
     console.log(
-      'ContextMesh Codex\n  codex takeover <DSH-session-id> --cwd <directory> --model <local-model> --confirm [--workspace-write] [--operation <uuid>]\n  codex takeover-status <handoff-id>\n  codex takeover-recover <handoff-id> --confirm-stopped\n  codex import <source-session-id> --cwd <directory> --model <local-model> [--from deepseek|codex] [--workspace-write] [--operation <uuid>]\n  codex run <codex-session-id> --message <new-instruction> [--timeout-seconds <10..3600>]\n  codex status <import-operation-id|codex-session-id>\n  codex reconcile <codex-session-id> --confirm-stopped\nOptions: --state-dir <private-directory>, --codex-home <Codex-directory>, --codex-bin <executable>\nTakeover preflights Codex, then safely stops DSH and continues unfinished work once. --confirm authorizes sending context to the selected provider. Keep this command running until it finishes.\nImport creates a separate Codex conversation from a completed snapshot. It does not stop or take over the source.',
+      'ContextMesh Codex\n  codex install-panel [--codex-bin <desktop executable>]\n  codex takeover <DSH-session-id> --cwd <directory> --model <local-model> --confirm [--workspace-write] [--operation <uuid>]\n  codex takeover-status <handoff-id>\n  codex takeover-recover <handoff-id> --confirm-stopped\n  codex import <source-session-id> --cwd <directory> --model <local-model> [--from deepseek|codex] [--workspace-write] [--operation <uuid>]\n  codex run <codex-session-id> --message <new-instruction> [--timeout-seconds <10..3600>]\n  codex status <import-operation-id|codex-session-id>\n  codex reconcile <codex-session-id> --confirm-stopped\nOptions: --state-dir <private-directory>, --codex-home <Codex-directory>, --codex-bin <executable>\nTakeover preflights Codex, then safely stops DSH and continues unfinished work once. --confirm authorizes sending context to the selected provider. Keep this command running until it finishes.\nImport creates a separate Codex conversation from a completed snapshot. It does not stop or take over the source.',
     )
     return true
   }

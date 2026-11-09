@@ -305,6 +305,15 @@ export class BasePostgresStore {
       request.operationId,
       ['create', request],
       async (db) => {
+        if (
+          request.header.id.startsWith('codex:gui:') &&
+          request.adapter === 'codex'
+        )
+          throw new MeshError(
+            'INVALID_ARGUMENT',
+            'Publish desktop snapshots through the Codex archive endpoint',
+            400,
+          )
         if (!request.header.isSeeded && request.inheritedEventCount !== 0) {
           throw new MeshError(
             'INVALID_ARGUMENT',
@@ -365,6 +374,11 @@ export class BasePostgresStore {
         if (!row.materialized && row.creator_instance !== request.instanceId)
           throw new MeshError('NOT_FOUND', `session "${id}" not found`, 404)
         if (request.access === 'write') {
+          if (row.adapter === 'codex' && row.id.startsWith('codex:gui:'))
+            throw new MeshError(
+              'ARCHIVE_READ_ONLY',
+              'A published desktop snapshot is read-only',
+            )
           const value = this.decode(row.header) as {
             contextmeshImport?: unknown
           }

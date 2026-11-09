@@ -18,6 +18,8 @@ import {
   nativeAdapterId,
 } from '../../../packages/protocol/src/index.js'
 
+import { codexGuiArchive } from '../../../packages/protocol/src/codex-context.js'
+
 export interface ServerOptions {
   store: PostgresStore
   token: string
@@ -186,6 +188,9 @@ export function buildServer(options: ServerOptions) {
   registerHandoffRoutes(app, options.store, ns)
   registerModelRelayRoutes(app, options.store, ns)
   registerTransferRoutes(app, options.store, ns)
+  app.post('/v1/codex-archives', (req) =>
+    options.store.publishCodexGuiArchive(ns, codexGuiArchive.parse(req.body)),
+  )
   app.get('/v1/codex-archives', () => options.store.codexArchives(ns))
   app.get('/v1/codex-archives/:id', async (req) => {
     const row = (await options.store.codexArchives(ns, id(req.params)))[0]
@@ -205,6 +210,7 @@ export function buildServer(options: ServerOptions) {
         'native-agent-storage-v1',
         'cross-agent-takeover-v1',
         'codex-context-return-v1',
+        'codex-gui-archive-v1',
         'maintenance-v1',
         'handoff-v1',
         'takeover-v1',
