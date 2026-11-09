@@ -1,4 +1,8 @@
 import {
+  validateResumeContext,
+  type ResumeContext,
+} from '../../protocol/src/archives.js'
+import {
   foldSurface,
   deriveEventMessage,
   type SessionEvent,
@@ -99,8 +103,8 @@ export function deepSeekContext(
   })
 }
 
-export function codexItems(context: PortableContext) {
-  return validatePortable(context).messages.map((message) => ({
+export function codexItems(context: ResumeContext) {
+  return validateResumeContext(context).messages.map((message) => ({
     type: 'message',
     role: message.role === 'reference' ? 'user' : message.role,
     content: [

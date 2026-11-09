@@ -1,3 +1,9 @@
+import { archiveItem } from './archive-capture.js'
+import type { ArchiveRecord } from '../../client/src/archive-record.js'
+import type {
+  ArchiveHeader,
+  ResumeContext,
+} from '../../protocol/src/archives.js'
 import { createHash } from 'node:crypto'
 import { realpath, stat } from 'node:fs/promises'
 import { z } from 'zod'
@@ -51,6 +57,7 @@ export class NativeCodex {
     target: StartTarget,
     config?: Record<string, unknown>,
     developerInstructions?: string,
+    ephemeral = false,
   ) {
     const r = z
       .object({
@@ -64,6 +71,7 @@ export class NativeCodex {
       .parse(
         await this.rpc.request('thread/start', {
           ...target,
+          ...(ephemeral ? { ephemeral: true } : {}),
           ...(target.provider ? { modelProvider: target.provider } : {}),
           ...(config ? { config } : {}),
           ...(developerInstructions ? { developerInstructions } : {}),
@@ -90,7 +98,7 @@ export class NativeCodex {
       target: { ...target, model: r.model, provider },
     }
   }
-  async inject(threadId: string, context: PortableContext) {
+  async inject(threadId: string, context: ResumeContext) {
     await this.rpc.request('thread/inject_items', {
       threadId,
       items: codexItems(context),
@@ -164,9 +172,11 @@ export class NativeCodex {
   private async page(
     method: 'thread/turns/list' | 'thread/items/list',
     threadId: string,
+    maxItems = 10000,
   ) {
     const data: unknown[] = []
-    for await (const page of this.pages(method, threadId)) data.push(...page)
+    for await (const page of this.pages(method, threadId, 100, maxItems))
+      data.push(...page)
     return data
   }
   async savedThreads() {
@@ -226,7 +236,8 @@ export class NativeCodex {
   }
   private async scanSavedItems(
     threadId: string,
-    visit?: (value: unknown) => void,
+    visit?: (value: unknown) => void | Promise<void>,
+    largePage?: number,
   ) {
     const hash = createHash('sha256')
     let count = 0
@@ -234,22 +245,95 @@ export class NativeCodex {
     for await (const page of this.pages(
       'thread/items/list',
       threadId,
-      50,
-      50000,
+      largePage ?? 50,
+      largePage === undefined ? 50000 : Number.MAX_SAFE_INTEGER,
     )) {
       for (const entry of page) {
         const serialized = JSON.stringify(entry)
         bytes += Buffer.byteLength(serialized)
-        if (bytes > 128 * 1024 * 1024)
+        if (largePage === undefined && bytes > 128 * 1024 * 1024)
           throw new Error(
             'Native history exceeds the scan limit for one archive',
           )
         hash.update(serialized).update('\n')
         count++
-        visit?.(entry)
+        await visit?.(entry)
       }
     }
     return { count, digest: hash.digest('hex') }
+  }
+  private async archiveCut(
+    threadId: string,
+    pageSize: number,
+    allowEmpty: boolean,
+    visit: (entry: NativeSnapshot['items'][number]) => void | Promise<void>,
+  ) {
+    const settled = (thread: NativeSnapshot['thread']) =>
+      thread.id === threadId &&
+      ['idle', 'notLoaded'].includes(thread.status.type)
+    const thread = await this.readThread(threadId)
+    if (!settled(thread))
+      throw new Error('Wait for native Codex work to finish before publishing')
+    const readTurns = () =>
+      this.page('thread/turns/list', threadId, Number.MAX_SAFE_INTEGER)
+    const turns = await readTurns()
+    const checkedTurns = nativeSnapshot.shape.turns.parse(turns)
+    if (
+      (!allowEmpty && !checkedTurns.length) ||
+      checkedTurns.some((turn) => turn.status === 'inProgress')
+    )
+      throw new Error(
+        'Wait for the active Codex turn to settle before publishing',
+      )
+
+    const saved = await this.scanSavedItems(
+      threadId,
+      (value) => visit(nativeSnapshot.shape.items.element.parse(value)),
+      pageSize,
+    )
+    const verified = await this.scanSavedItems(threadId, undefined, pageSize)
+    if (
+      saved.digest !== verified.digest ||
+      JSON.stringify(turns) !== JSON.stringify(await readTurns()) ||
+      !settled(await this.readThread(threadId))
+    )
+      throw new Error(
+        'Native history changed during export; review a new snapshot',
+      )
+    return {
+      thread,
+      eventCount: saved.count,
+      interrupted:
+        checkedTurns.length > 0 && checkedTurns.at(-1)?.status !== 'completed',
+      nativeDigest: createHash('sha256')
+        .update(saved.digest)
+        .update(JSON.stringify(turns))
+        .digest('hex'),
+    }
+  }
+  async captureArchive(
+    threadId: string,
+    scope: ArchiveHeader['scope'],
+    append: (record: ArchiveRecord) => Promise<void>,
+    pageSize: number,
+  ) {
+    const coverage = { omittedAttachments: 0, unrecognizedItems: 0 }
+    const cut = await this.archiveCut(
+      threadId,
+      pageSize,
+      false,
+      async (item) => {
+        const record = archiveItem(item, scope, coverage)
+        if (record) await append(record)
+      },
+    )
+    return { ...cut, ...coverage }
+  }
+  async savedCutDigest(threadId: string, pageSize: number) {
+    const cut = await this.archiveCut(threadId, pageSize, true, ({ item }) =>
+      assertCodexItemSettled(item),
+    )
+    return cut.nativeDigest
   }
   async savedArchive(
     threadId: string,

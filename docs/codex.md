@@ -12,8 +12,8 @@ To continue a settled managed archive in DSH, use the [Codex → DSH import](cod
 
 - Install the supported official Codex CLI separately and make `codex` available on PATH. The adapter was validated with **0.154.0**; a compatible newer 0.x version must provide the same app-server methods. ContextMesh does not bundle Codex or install a second DSH plugin.
 - Configure the receiving machine's Codex login and model provider locally. ContextMesh uses that configuration through Codex, without uploading its authentication files or copying source model credentials.
-- Connect ContextMesh with `contextmesh setup` and use a schema-8 Server. Keep the HTTPS connection described in the [server guide](deployment.md).
-- Finish the source turn, including tool calls. This preview supports text and historical tool references. Unsupported attachments, unresolved tool outcomes, unsupported projections and oversized contexts are rejected before import; nothing is silently truncated.
+- Connect ContextMesh with `contextmesh setup` and use a schema-8 or schema-9 Server. Chunked archives require schema 9. Keep the HTTPS connection described in the [server guide](deployment.md).
+- Finish the source turn, including tool calls. This preview supports text and historical tool references. Unresolved tool outcomes and unsupported projections require review. Chunked archive imports preview the records that fit the receiving model before creating a local thread.
 
 ## Import and continue
 
@@ -54,7 +54,7 @@ This creates another thread and remote session with source provenance. It does n
 
 Private import journals and thread bindings live in `~/.contextmesh/data/codex-bridge`, or the directory given with `--state-dir`. They may contain imported context and must remain private. The Server persists the portable context, source identity/digest and native thread/turn/item snapshots under adapter `codex`. Native Codex maintains its own local thread history as well. Remote archives are created by these bridge commands; unrelated Codex use is not automatically synchronized.
 
-The portable contract preserves the source session ID, incarnation and fixed event count. DSH projections use its canonical surface fold, including replacements. Provider replay state and hidden reasoning are excluded from the portable text; native source logs remain intact. Context is limited to 1 MiB, with bounded native pagination and archive size. The target provider can still reject a context that exceeds its own capacity.
+The portable contract preserves the source session ID, incarnation and fixed event count. DSH projections use its canonical surface fold, including replacements. Provider replay state and hidden reasoning are excluded from the portable text; native source logs remain intact. Legacy exports use a 1 MiB portable envelope. For chunked archives, run `contextmesh codex archives`, then import an `archive:…` reference. Use `--history-query` to guide selection or `--context-window` to set a conservative receiver ceiling. A saved DSH session can use the same planner when one of these options is provided. The target provider can still reject a context that exceeds its own capacity.
 
 ## Interrupted operations
 

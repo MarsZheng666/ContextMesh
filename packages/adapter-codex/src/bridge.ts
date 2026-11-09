@@ -1,6 +1,25 @@
+import { ArchiveSpool } from './archive-spool.js'
+import { captureCodexArchive, readCodexCut } from './archive-export.js'
+import { DshArchiveView } from './dsh-archive-view.js'
+import type { ArchiveBudget } from '../../client/src/resume-archive.js'
+import { ArchiveClient } from '../../client/src/archives.js'
+import {
+  archiveTokenBound,
+  planArchiveResume,
+} from '../../client/src/resume-archive.js'
+import {
+  archiveResumeOptions,
+  isArchiveContext,
+  isArchiveId,
+  resumeContextDigest,
+  validateResumeContext,
+  type ArchiveResumeOptions,
+  type ArchiveResumeContext,
+} from '../../protocol/src/archives.js'
+import { codexArchiveBudget, resolveArchiveTarget } from './archive-budget.js'
 import { readCodexContext } from '../../client/src/codex-context.js'
 import { randomUUID, createHash } from 'node:crypto'
-import { readdir } from 'node:fs/promises'
+import { readdir, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { z } from 'zod'
@@ -36,6 +55,7 @@ const bindingSchema = z
     codexHome: z.string().optional(),
     pending: z.uuid().optional(),
     handoffId: z.uuid().optional(),
+    archiveImport: z.uuid().optional(),
   })
   .strict()
 const journalSchema = z.object({
@@ -47,6 +67,7 @@ const journalSchema = z.object({
   target: startTargetSchema,
   requestedTarget: startTargetSchema.optional(),
   context: z.unknown(),
+  resume: archiveResumeOptions.optional(),
   codexHome: z.string().optional(),
   phase: z.enum([
     'creating',
@@ -62,6 +83,7 @@ const journalSchema = z.object({
   incarnation: z.uuid().optional(),
 })
 type Journal = z.infer<typeof journalSchema>
+type Binding = z.infer<typeof bindingSchema>
 export interface BridgeOptions {
   connection: Omit<ClientOptions, 'adapter'>
   stateDir: string
@@ -124,6 +146,7 @@ export class CodexBridge {
     target: StartTarget
     operationId?: string
     handoffId?: string
+    resume?: ArchiveResumeOptions
   }) {
     const operationId = z
       .uuid()
@@ -151,7 +174,8 @@ export class CodexBridge {
             journal.sourceAdapter !== (input.sourceAdapter ?? 'deepseek') ||
             JSON.stringify(journal.requestedTarget ?? journal.target) !==
               JSON.stringify(requestedTarget) ||
-            journal.codexHome !== this.home())
+            journal.codexHome !== this.home() ||
+            JSON.stringify(journal.resume) !== JSON.stringify(input.resume))
         )
           throw new Error(
             'Import operation was reused with different source or target settings',
@@ -181,10 +205,36 @@ export class CodexBridge {
         let handle: RemoteHandle | undefined
         try {
           if (!journal) {
-            const context = await this.source(
-              input.sourceAdapter ?? 'deepseek',
-              input.sourceId,
-            )
+            const sourceAdapter = input.sourceAdapter ?? 'deepseek'
+            const archived =
+              isArchiveId(input.sourceId) ||
+              (sourceAdapter === 'deepseek' &&
+                !input.handoffId &&
+                input.resume !== undefined)
+
+            const resolved = archived
+              ? await (async () => {
+                  await native.init()
+                  return resolveArchiveTarget(
+                    native,
+                    requestedTarget,
+                    input.resume?.contextWindow,
+                  )
+                })()
+              : undefined
+            const context = resolved
+              ? (
+                  await this.planArchive(
+                    input.sourceId,
+                    sourceAdapter,
+                    resolved.budget,
+                    input.resume,
+                  )
+                ).context
+              : await this.source(
+                  input.sourceAdapter ?? 'deepseek',
+                  input.sourceId,
+                )
             journal = {
               version: 1,
               handoffId: input.handoffId,
@@ -192,16 +242,19 @@ export class CodexBridge {
               sourceId: input.sourceId,
               sourceAdapter: input.sourceAdapter ?? 'deepseek',
               target: requestedTarget,
-              ...(requestedTarget.model === undefined
+              ...(archived || requestedTarget.model === undefined
                 ? { requestedTarget }
                 : {}),
               context,
+              resume: input.resume,
               codexHome: this.home(),
               phase: 'creating',
             }
             await atomicJson(file, journal)
-            await native.init()
-            const started = await native.start(requestedTarget)
+            if (!resolved) await native.init()
+            const started = await native.start(
+              resolved?.target ?? requestedTarget,
+            )
             journal.threadId = started.threadId
             if (journal.requestedTarget) journal.target = started.target
             journal.phase = 'created'
@@ -214,7 +267,7 @@ export class CodexBridge {
             )
           }
           const target = targetSchema.parse(journal.target)
-          const context = validatePortable(journal.context)
+          const context = validateResumeContext(journal.context)
           if (journal.phase === 'created') {
             journal.phase = 'injecting'
             await atomicJson(file, journal)
@@ -224,7 +277,21 @@ export class CodexBridge {
           }
           const sessionId = 'codex:' + operationId
           if (journal.phase === 'injected') {
-            const snapshot = await native.snapshot(journal.threadId!)
+            const event: StoredEvent = isArchiveContext(context)
+              ? {
+                  seq: 0,
+                  type: 'codex/archive-cut',
+                  time: Date.now(),
+                  cut: await native.savedCutDigest(journal.threadId!, 32),
+                }
+              : {
+                  seq: 0,
+                  type: 'codex/snapshot',
+                  time: Date.now(),
+                  snapshot: z
+                    .json()
+                    .parse(await native.snapshot(journal.threadId!)),
+                }
             journal.phase = 'archiving'
             await atomicJson(file, journal)
             handle = await this.client.create(
@@ -233,26 +300,22 @@ export class CodexBridge {
                 version: 1,
                 createdAt: Date.now(),
                 isSeeded: false,
-                portable: context,
-                sourceDigest: contextDigest(context),
+                ...(isArchiveContext(context)
+                  ? {
+                      contextmeshArchive: {
+                        id: context.archiveId,
+                        digest: context.archiveDigest,
+                      },
+                    }
+                  : { portable: context }),
+                sourceDigest: resumeContextDigest(context),
                 nativeThreadId: journal.threadId!,
                 ...(journal.handoffId ? { handoffId: journal.handoffId } : {}),
                 target: z.json().parse(target),
               },
               0,
             )
-            await this.client.append(
-              handle,
-              [
-                {
-                  seq: 0,
-                  type: 'codex/snapshot',
-                  time: Date.now(),
-                  snapshot: z.json().parse(snapshot),
-                },
-              ],
-              randomUUID(),
-            )
+            await this.client.append(handle, [event], randomUUID())
             await this.client.flush(handle, randomUUID())
             journal.incarnation = handle.session.incarnation
             await this.client.close(handle, randomUUID())
@@ -268,6 +331,7 @@ export class CodexBridge {
             target,
             codexHome: journal.codexHome,
             handoffId: journal.handoffId,
+            archiveImport: isArchiveContext(context) ? operationId : undefined,
           })
           journal.phase = 'done'
           await atomicJson(file, journal)
@@ -287,6 +351,57 @@ export class CodexBridge {
         }
       }),
     )
+  }
+  private async planArchive(
+    id: string,
+    sourceAdapter: 'codex' | 'deepseek',
+    budget: ArchiveBudget,
+    resume?: ArchiveResumeOptions,
+  ) {
+    if (isArchiveId(id))
+      return planArchiveResume(
+        new ArchiveClient(this.client),
+        id,
+        budget,
+        resume,
+      )
+    if (sourceAdapter !== 'deepseek')
+      throw new Error('Choose a version 2 archive or a saved DSH conversation')
+    const source = new MeshClient({
+      ...this.options.connection,
+      adapter: 'deepseek',
+    })
+    const view = await DshArchiveView.open(source, id)
+    try {
+      return await planArchiveResume(view, view.id, budget, resume, true)
+    } finally {
+      await view.close()
+    }
+  }
+  async previewArchive(
+    id: string,
+    target: StartTarget,
+    resume?: ArchiveResumeOptions,
+    sourceAdapter: 'codex' | 'deepseek' = 'codex',
+  ) {
+    const native = new NativeCodex(this.options.native)
+    try {
+      await native.init()
+      const resolved = await resolveArchiveTarget(
+        native,
+        await this.validateTarget(target),
+        resume?.contextWindow,
+      )
+      const plan = await this.planArchive(
+        id,
+        sourceAdapter,
+        resolved.budget,
+        resume,
+      )
+      return { ...plan.report, planDigest: plan.digest }
+    } finally {
+      await native.close()
+    }
   }
   private async validateTarget(input: StartTarget) {
     const { realpath, stat } = await import('node:fs/promises')
@@ -356,9 +471,79 @@ export class CodexBridge {
         throw new Error(
           'Finish or reconcile the previous Codex operation before publishing',
         )
-      return validatePortable(journal.context)
+      return validateResumeContext(journal.context)
     }
     return undefined
+  }
+  private async archiveBinding(binding: Binding) {
+    if (!binding.archiveImport) return undefined
+    const journal = journalSchema.parse(
+      await optionalJson(
+        join(this.options.stateDir, 'imports', binding.archiveImport + '.json'),
+      ),
+    )
+    const context = validateResumeContext(journal.context)
+    if (
+      !isArchiveContext(context) ||
+      journal.phase !== 'done' ||
+      journal.threadId !== binding.threadId
+    )
+      throw new Error('Imported archive binding is invalid')
+    return { context, ceiling: journal.resume?.contextWindow }
+  }
+  private runSpool(id: string) {
+    return new ArchiveSpool(
+      join(this.options.stateDir, 'archive-runs', z.uuid().parse(id)),
+      this.client.endpoint,
+    )
+  }
+  private async archiveEvent(
+    binding: Binding,
+    context: ArchiveResumeContext,
+    sequence: number,
+    turnId?: string,
+    expectedCut?: string,
+  ) {
+    const operationId = binding.pending!
+    const spool = this.runSpool(operationId)
+    const saved = await captureCodexArchive(
+      spool,
+      binding.threadId,
+      'full',
+      this.options.native,
+      context,
+      turnId,
+    )
+    const cut = saved.manifest.header.nativeDigest
+    if (!cut || (expectedCut && expectedCut !== cut))
+      throw new Error(
+        'Saved Codex work changed while preparing the archive. Review the previous operation before retrying.',
+      )
+    const { id } = await spool.upload(new ArchiveClient(this.client))
+    const event: StoredEvent = {
+      seq: sequence,
+      type: 'codex/archive-cut',
+      time: Date.now(),
+      cut,
+      archiveId: id,
+      runOperationId: operationId,
+    }
+    return { event, text: saved.replyText }
+  }
+  private async lastArchiveCut(handle: RemoteHandle) {
+    const read = await this.client.read(
+      handle,
+      Math.max(0, handle.session.nextSeq - 1),
+      1,
+    )
+    const last = read.events.at(-1)
+    if (
+      !last ||
+      last.type !== 'codex/archive-cut' ||
+      typeof last.cut !== 'string'
+    )
+      throw new Error('The remote Codex archive checkpoint is unavailable')
+    return { last, end: read.end }
   }
   async reconcile(id: string, confirmStopped: true) {
     if (confirmStopped !== true)
@@ -382,7 +567,13 @@ export class CodexBridge {
           binding.threadId,
           await native.target(binding.target),
         )
-        const snapshot = await native.snapshot(binding.threadId)
+        const archived = await this.archiveBinding(binding)
+        const snapshot = archived
+          ? undefined
+          : await native.snapshot(binding.threadId)
+        const localCut = archived
+          ? await readCodexCut(binding.threadId, this.options.native)
+          : undefined
         const observation = await this.client.stat(id)
         if (
           !observation ||
@@ -390,6 +581,29 @@ export class CodexBridge {
           observation.header.nativeThreadId !== binding.threadId
         )
           throw new Error('Session identity changed; recovery is blocked')
+        let prepared: StoredEvent | undefined
+        let archivedSequence: number | undefined
+        if (archived) {
+          const reader = await this.client.open(id, 'read')
+          try {
+            if (reader.session.incarnation !== binding.incarnation)
+              throw new Error('Session identity changed during recovery')
+            const prior = await this.lastArchiveCut(reader)
+            archivedSequence = prior.end
+            if (prior.last.cut !== localCut)
+              prepared = (
+                await this.archiveEvent(
+                  binding,
+                  archived.context,
+                  prior.end,
+                  undefined,
+                  localCut,
+                )
+              ).event
+          } finally {
+            await this.client.close(reader, randomUUID())
+          }
+        }
         await this.client.request(
           `/v1/sessions/${encodeURIComponent(id)}/recover`,
           { operationId: randomUUID(), confirmStopped: true, adapter: 'codex' },
@@ -397,33 +611,50 @@ export class CodexBridge {
         handle = await this.client.open(id, 'write')
         if (handle.session.incarnation !== binding.incarnation)
           throw new Error('Session identity changed during recovery')
-        const cut = await this.client.read(handle, 0, Number.MAX_SAFE_INTEGER)
-        const prior = cut.events.findLast((e) => e.type === 'codex/snapshot')
-        const current = { turns: snapshot.turns, items: snapshot.items }
-        const old = prior && nativeSnapshot.parse(prior.snapshot)
-        const changed =
-          !old ||
-          JSON.stringify({ turns: old.turns, items: old.items }) !==
-            JSON.stringify(current)
-        if (changed)
-          await this.client.append(
-            handle,
-            [
-              {
-                seq: cut.end,
-                type: 'codex/snapshot',
-                time: Date.now(),
-                runOperationId: binding.pending,
-                snapshot: z.json().parse(snapshot),
-              },
-            ],
-            randomUUID(),
-          )
+        let changed = false
+        if (archived) {
+          const { end } = await this.lastArchiveCut(handle)
+          if (end !== archivedSequence)
+            throw new Error('Remote archive history changed during recovery')
+          if (prepared) {
+            await this.client.append(handle, [prepared], randomUUID())
+            changed = true
+          }
+        } else {
+          const cut = await this.client.read(handle, 0, Number.MAX_SAFE_INTEGER)
+          const prior = cut.events.findLast((e) => e.type === 'codex/snapshot')
+          const current = { turns: snapshot!.turns, items: snapshot!.items }
+          const old = prior && nativeSnapshot.parse(prior.snapshot)
+          changed =
+            !old ||
+            JSON.stringify({ turns: old.turns, items: old.items }) !==
+              JSON.stringify(current)
+          if (changed)
+            await this.client.append(
+              handle,
+              [
+                {
+                  seq: cut.end,
+                  type: 'codex/snapshot',
+                  time: Date.now(),
+                  runOperationId: binding.pending,
+                  snapshot: z.json().parse(snapshot),
+                },
+              ],
+              randomUUID(),
+            )
+        }
         await this.client.flush(handle, randomUUID())
         await this.client.close(handle, randomUUID())
         handle = undefined
+        const finished = binding.pending
         delete binding.pending
         await atomicJson(file, binding)
+        if (archived)
+          await rm(this.runSpool(finished!).directory, {
+            recursive: true,
+            force: true,
+          }).catch(() => {})
         return { sessionId: id, reconciled: true, replayed: false, changed }
       } catch (error) {
         if (handle)
@@ -496,24 +727,6 @@ export class CodexBridge {
           throw new Error(
             'Remote session identity changed; import a fresh snapshot',
           )
-        if (
-          handle.session.header.sourceDigest !==
-          contextDigest(validatePortable(handle.session.header.portable))
-        )
-          throw new Error('Portable archive digest does not match')
-        const old = await this.client.read(handle, 0, Number.MAX_SAFE_INTEGER)
-        const last = old.events.findLast((e) => e.type === 'codex/snapshot')
-        const local = await native.snapshot(binding.threadId)
-        if (
-          !last ||
-          JSON.stringify({
-            turns: nativeSnapshot.parse(last.snapshot).turns,
-            items: nativeSnapshot.parse(last.snapshot).items,
-          }) !== JSON.stringify({ turns: local.turns, items: local.items })
-        )
-          throw new Error(
-            'The native Codex thread changed outside ContextMesh; import its reviewed history before continuing',
-          )
         await this.client.renew(handle)
         const lease = await this.client.capabilities()
         renewal = setInterval(
@@ -531,6 +744,63 @@ export class CodexBridge {
           },
           Math.max(100, Math.floor(lease.leaseMs / 3)),
         )
+        const archived = await this.archiveBinding(binding)
+        let end: number
+        if (archived) {
+          if (
+            handle.session.header.sourceDigest !==
+            resumeContextDigest(archived.context)
+          )
+            throw new Error('Imported archive digest does not match')
+          const prior = await this.lastArchiveCut(handle)
+          end = prior.end
+          if (
+            prior.last.cut !==
+            (await readCodexCut(binding.threadId, this.options.native))
+          )
+            throw new Error(
+              'The native Codex thread changed outside ContextMesh; review its saved history before continuing',
+            )
+          if (!prior.last.archiveId) {
+            const budget = await codexArchiveBudget(
+              native,
+              binding.target,
+              archived.ceiling,
+            )
+            const usage =
+              archiveTokenBound([archived.context.messages, message]) +
+              96 * archived.context.messages.length
+            if (
+              usage + budget.fixedTokens + budget.outputReserve + 1024 >
+              budget.contextWindow
+            )
+              throw new Error(
+                'The receiving model has insufficient context capacity. Prepare the archive again with a smaller selection.',
+              )
+          }
+        } else {
+          if (
+            handle.session.header.sourceDigest !==
+            contextDigest(validatePortable(handle.session.header.portable))
+          )
+            throw new Error('Portable archive digest does not match')
+          const old = await this.client.read(handle, 0, Number.MAX_SAFE_INTEGER)
+          end = old.end
+          const last = old.events.findLast((e) => e.type === 'codex/snapshot')
+          const local = await native.snapshot(binding.threadId)
+          if (
+            !last ||
+            JSON.stringify({
+              turns: nativeSnapshot.parse(last.snapshot).turns,
+              items: nativeSnapshot.parse(last.snapshot).items,
+            }) !== JSON.stringify({ turns: local.turns, items: local.items })
+          )
+            throw new Error(
+              'The native Codex thread changed outside ContextMesh; import its reviewed history before continuing',
+            )
+        }
+        if (lost)
+          throw new Error('ContextMesh writer ownership could not be renewed')
         binding.pending = randomUUID()
         await atomicJson(file, binding)
         await control?.beforeDispatch(handle, binding.pending)
@@ -543,14 +813,35 @@ export class CodexBridge {
         )
         if (lost)
           throw new Error('ContextMesh writer ownership could not be renewed')
-        const snapshot = await native.snapshot(binding.threadId)
-        const event: StoredEvent = {
-          seq: old.end,
-          runOperationId: binding.pending,
-          type: 'codex/snapshot',
-          time: Date.now(),
-          snapshot: z.json().parse(snapshot),
+        let event: StoredEvent
+        let text: string
+        if (archived) {
+          const saved = await this.archiveEvent(
+            binding,
+            archived.context,
+            end,
+            turn.id,
+          )
+          event = saved.event
+          text = saved.text
+        } else {
+          const snapshot = await native.snapshot(binding.threadId)
+          event = {
+            seq: end,
+            runOperationId: binding.pending,
+            type: 'codex/snapshot',
+            time: Date.now(),
+            snapshot: z.json().parse(snapshot),
+          }
+          text = snapshot.items
+            .filter(
+              (i) => i.turnId === turn.id && i.item.type === 'agentMessage',
+            )
+            .map((i) => String(i.item.text))
+            .join('\n')
         }
+        if (lost)
+          throw new Error('ContextMesh writer ownership could not be renewed')
         await this.client.append(handle, [event], randomUUID())
         await this.client.flush(handle, randomUUID())
         clearInterval(renewal)
@@ -562,12 +853,14 @@ export class CodexBridge {
           )
         await this.client.close(handle, randomUUID())
         handle = undefined
+        const finished = binding.pending
         delete binding.pending
         await atomicJson(file, binding)
-        const text = snapshot.items
-          .filter((i) => i.turnId === turn.id && i.item.type === 'agentMessage')
-          .map((i) => String(i.item.text))
-          .join('\n')
+        if (archived)
+          await rm(this.runSpool(finished!).directory, {
+            recursive: true,
+            force: true,
+          }).catch(() => {})
         return {
           sessionId: id,
           threadId: binding.threadId,

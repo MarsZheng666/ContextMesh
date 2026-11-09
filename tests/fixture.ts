@@ -47,6 +47,7 @@ export async function fixture() {
     )
     await app.close()
     for (const table of [
+      'cm_archives',
       'cm_workspace_transfers',
       'cm_pairings',
       'cm_device_credentials',

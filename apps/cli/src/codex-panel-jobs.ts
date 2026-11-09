@@ -1,6 +1,13 @@
+import { captureCodexArchive } from '../../../packages/adapter-codex/src/archive-export.js'
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { readdir } from 'node:fs/promises'
+import { ArchiveSpool } from '../../../packages/adapter-codex/src/archive-spool.js'
+import { ArchiveClient } from '../../../packages/client/src/archives.js'
+import {
+  archiveFeature,
+  archiveResumeOptions,
+} from '../../../packages/protocol/src/archives.js'
+import { readdir, rm, stat } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
 import { z } from 'zod'
 import {
@@ -18,7 +25,7 @@ import {
   type remoteSessionSchema,
 } from '../../../packages/client/src/handoff.js'
 import {
-  codexArchiveSchema,
+  codexArchives,
   settledCodexArchive,
 } from '../../../packages/client/src/codex-context.js'
 import {
@@ -48,6 +55,7 @@ export const confirmedAction = z.discriminatedUnion('kind', [
   receiveAction.extend({
     kind: z.literal('import'),
     sourceAdapter: z.enum(['deepseek', 'codex']),
+    resume: archiveResumeOptions.optional(),
   }),
   z
     .object({
@@ -55,6 +63,7 @@ export const confirmedAction = z.discriminatedUnion('kind', [
       threadId: z.uuid(),
       title: transferTitle,
       scope: codexArchiveScope.optional(),
+      captureId: z.uuid().optional(),
       confirmed: z.literal(true),
     })
     .strict(),
@@ -83,14 +92,17 @@ const jobSchema = z.object({
   pid: z.number().int().positive().optional(),
   threadId: z.uuid().optional(),
   archiveId: z.string().optional(),
+  progress: z.object({ sent: z.number(), total: z.number() }).optional(),
 })
 type Job = z.infer<typeof jobSchema>
 
 export class CodexPanelJobs {
   readonly bridge: CodexBridge
   private readonly directory: string
+  readonly archives: ArchiveClient
   constructor(readonly options: BridgeOptions & { deviceId?: string }) {
     this.bridge = new CodexBridge(options)
+    this.archives = new ArchiveClient(this.bridge.client)
     this.directory = join(options.stateDir, 'panel-jobs')
   }
   private path(id: string) {
@@ -107,14 +119,13 @@ export class CodexPanelJobs {
     const { features = [] } = await this.bridge.client.capabilities()
     const [sessions, archives] = await Promise.all([
       new HandoffClient(this.bridge.client, '').sessions(),
-      features.includes('codex-context-return-v1')
-        ? this.bridge.client
-            .request('/v1/codex-archives')
-            .then((value) => z.array(codexArchiveSchema).parse(value))
-        : [],
+      codexArchives(this.bridge.client, features),
     ])
     return {
-      publishAvailable: features.includes('codex-gui-archive-v1'),
+      publishAvailable:
+        features.includes(archiveFeature) ||
+        features.includes('codex-gui-archive-v1'),
+      chunkedArchives: features.includes(archiveFeature),
       takeoverAvailable: features.includes('cross-agent-takeover-v1'),
       importAvailable: features.includes('native-agent-storage-v1'),
       sessions: [
@@ -128,6 +139,8 @@ export class CodexPanelJobs {
         ...archives.map((archive) => ({
           id: archive.id,
           title: archive.title,
+          format: archive.format,
+          bytes: archive.bytes,
           activeNodeName: null,
           adapter: 'codex',
           status: archive.recoveryRequired
@@ -155,6 +168,17 @@ export class CodexPanelJobs {
       if (error.code === 'ENOENT') return []
       throw error
     })
+    await Promise.all(
+      files
+        .filter((name) => z.uuid().safeParse(name).success)
+        .map(async (id) => {
+          const age = await stat(this.spool(id).directory).catch(
+            () => undefined,
+          )
+          if (age && Date.now() - age.mtimeMs > 24 * 60 * 60 * 1000)
+            await this.discardCapture(id).catch(() => {})
+        }),
+    )
     const jobs = await Promise.all(
       files
         .filter(
@@ -193,14 +217,66 @@ export class CodexPanelJobs {
   async enqueue(value: Action) {
     this.requireConnection()
     const action = confirmedAction.parse(value)
+    const capture = action.kind === 'publish' ? action.captureId : undefined
     const job: Job = {
-      id: randomUUID(),
+      id: capture ?? randomUUID(),
       action,
       createdAt: Date.now(),
       state: 'queued',
       message: 'Waiting for the local worker…',
     }
-    await atomicJson(this.path(job.id), job)
+    if (capture && action.kind === 'publish') {
+      const accepted = await this.withCaptureLock(capture, async () => {
+        const prior = jobSchema
+          .optional()
+          .parse(await optionalJson(this.path(capture)))
+        if (prior) {
+          if (JSON.stringify(prior.action) !== JSON.stringify(action))
+            throw new Error(
+              'This prepared archive was already confirmed with different settings',
+            )
+          return false
+        }
+        const saved = await this.spool(capture).saved()
+        if (
+          !saved ||
+          saved.manifest.header.source.id !== action.threadId ||
+          saved.manifest.header.scope !== (action.scope ?? 'full')
+        )
+          throw new Error(
+            'Review the conversation and archive contents again before publishing',
+          )
+        await atomicJson(this.path(job.id), job)
+        return true
+      })
+      if (!accepted) return { id: capture }
+    } else await atomicJson(this.path(job.id), job)
+    return this.startWorker(job)
+  }
+  private async withCaptureLock<T>(id: string, work: () => Promise<T>) {
+    const directory = join(
+      this.directory,
+      z.uuid().parse(id),
+      'capture-control',
+    )
+    await privateDirectory(directory)
+    const lock = await listenLocal(directory, async () => ({ busy: true }))
+    try {
+      return await work()
+    } finally {
+      await lock.close()
+    }
+  }
+  async retryPublish(id: string) {
+    const job = await this.read(id)
+    if (
+      job.action.kind !== 'publish' ||
+      !['attention', 'failed'].includes(job.state)
+    )
+      throw new Error('This publication cannot be retried right now')
+    return this.startWorker(job)
+  }
+  private async startWorker(job: Job) {
     const worker = spawn(
       process.execPath,
       [...process.execArgv, process.argv[1]!, 'codex', 'panel-worker', job.id],
@@ -233,8 +309,14 @@ export class CodexPanelJobs {
     }
   }
   private async runJob(file: string, id: string) {
-    const job = jobSchema.parse(await optionalJson(file))
-    if (job.state !== 'queued')
+    const job = await this.read(id)
+    if (
+      job.state !== 'queued' &&
+      !(
+        job.action.kind === 'publish' &&
+        ['failed', 'attention'].includes(job.state)
+      )
+    )
       throw new Error('This panel operation has already started')
     job.state = 'running'
     job.message =
@@ -278,6 +360,7 @@ export class CodexPanelJobs {
           sourceAdapter,
           sourceId,
           target,
+          resume: job.action.resume,
           operationId: id,
         })
         job.threadId = z.uuid().parse(result.threadId)
@@ -286,7 +369,32 @@ export class CodexPanelJobs {
           'Imported into a new Codex conversation. Open it to send your next message.'
       } else {
         const { threadId, scope } = job.action
-        job.archiveId = (await this.publish(threadId, id, scope)).id
+        const spool = this.spool(id)
+        if ((await spool.saved()) || (await this.archives.supported())) {
+          if (job.action.captureId && !(await spool.saved()))
+            throw new Error(
+              'Review the conversation again to prepare a new copy',
+            )
+          const result = await this.publishChunked(
+            threadId,
+            id,
+            scope,
+            async (sent, total) => {
+              if (
+                sent === total ||
+                !job.progress ||
+                sent - job.progress.sent >= Math.max(1, Math.floor(total / 20))
+              ) {
+                job.progress = { sent, total }
+                job.message = `Uploading archive blocks (${sent}/${total})…`
+                await atomicJson(file, job)
+              }
+            },
+          )
+          job.archiveId = result.id
+        } else {
+          job.archiveId = (await this.publish(threadId, id, scope)).id
+        }
         job.state = 'completed'
         job.message =
           scope === 'text'
@@ -299,7 +407,70 @@ export class CodexPanelJobs {
         error instanceof Error ? error.message : 'The operation did not finish.'
       ).slice(0, 500)
     }
+    delete job.pid
     await atomicJson(file, job)
+    if (job.state === 'completed' && job.action.kind === 'publish')
+      await rm(this.spool(id).directory, {
+        recursive: true,
+        force: true,
+      }).catch(() => {})
+  }
+  private spool(id: string) {
+    return new ArchiveSpool(
+      join(this.directory, z.uuid().parse(id), 'archive'),
+      this.bridge.client.endpoint,
+    )
+  }
+  async discardCapture(id: string) {
+    return this.withCaptureLock(id, async () => {
+      if (!(await optionalJson(this.path(id))))
+        await rm(this.spool(id).directory, { recursive: true, force: true })
+      return {}
+    })
+  }
+  async preparePublish(threadId: string, scope: CodexArchiveScope) {
+    if (!(await this.archives.supported())) return null
+    const id = randomUUID()
+    try {
+      const { manifest } = await this.capture(threadId, id, scope)
+      return {
+        id,
+        bytes: manifest.bytes,
+        records: manifest.records,
+        omittedAttachments: manifest.header.omittedAttachments,
+        unrecognizedItems: manifest.header.unrecognizedItems,
+        interrupted: manifest.header.interrupted,
+      }
+    } catch (error) {
+      await this.discardCapture(id)
+      throw error
+    }
+  }
+  private async capture(
+    threadId: string,
+    id: string,
+    scope: CodexArchiveScope,
+  ) {
+    const spool = this.spool(id)
+    const saved = await spool.saved()
+    if (saved) return captureCodexArchive(spool, threadId, scope)
+    const inherited = await this.bridge.importedContextForThread(threadId)
+    return captureCodexArchive(
+      spool,
+      threadId,
+      scope,
+      this.options.native,
+      inherited,
+    )
+  }
+  async publishChunked(
+    threadId: string,
+    operationId: string,
+    scope: CodexArchiveScope = 'full',
+    progress?: (sent: number, total: number) => Promise<void>,
+  ) {
+    await this.capture(threadId, operationId, scope)
+    return this.spool(operationId).upload(this.archives, progress)
   }
   async publish(
     threadId: string,

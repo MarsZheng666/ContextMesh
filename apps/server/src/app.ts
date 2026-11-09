@@ -1,3 +1,5 @@
+import { registerArchiveRoutes } from './archives.js'
+import { archiveFeature } from '../../../packages/protocol/src/archives.js'
 import Fastify, { type FastifyRequest } from 'fastify'
 import { registerTransferRoutes } from './transfers.js'
 import { registerDeviceRoutes } from './devices.js'
@@ -25,10 +27,15 @@ export interface ServerOptions {
   token: string
   namespace?: string
   logger?: boolean
+  archiveQuotaBytes?: number
 }
 export function buildServer(options: ServerOptions) {
   if (options.token.length < 24)
     throw new Error('CONTEXTMESH_TOKEN must contain at least 24 characters')
+  const archiveQuota = z
+    .int()
+    .positive()
+    .parse(options.archiveQuotaBytes ?? 20 * 1024 ** 3)
   const app = Fastify({
     logger: options.logger ?? false,
     bodyLimit: 8 * 1024 * 1024,
@@ -188,6 +195,13 @@ export function buildServer(options: ServerOptions) {
   registerHandoffRoutes(app, options.store, ns)
   registerModelRelayRoutes(app, options.store, ns)
   registerTransferRoutes(app, options.store, ns)
+  registerArchiveRoutes(
+    app,
+    options.store,
+    ns,
+    (req) => principals.get(req)?.id ?? 'owner',
+    archiveQuota,
+  )
   app.post('/v1/codex-archives', (req) =>
     options.store.publishCodexGuiArchive(ns, codexGuiArchive.parse(req.body)),
   )
@@ -211,6 +225,7 @@ export function buildServer(options: ServerOptions) {
         'cross-agent-takeover-v1',
         'codex-context-return-v1',
         'codex-gui-archive-v1',
+        archiveFeature,
         'maintenance-v1',
         'handoff-v1',
         'takeover-v1',

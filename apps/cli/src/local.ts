@@ -59,7 +59,8 @@ export async function runLocal(input: string[]): Promise<boolean> {
     chosen = option('--model'),
     reasoningEffort = option('--reasoning-effort'),
     operationId = option('--operation-id'),
-    previewId = option('--preview-id')
+    previewId = option('--preview-id'),
+    historyQuery = option('--history-query')
   const allowEstimate = args.includes('--allow-estimate')
   if (allowEstimate) args.splice(args.indexOf('--allow-estimate'), 1)
   const confirmStopped = args.includes('--confirm-stopped')
@@ -74,6 +75,8 @@ export async function runLocal(input: string[]): Promise<boolean> {
     throw new Error('--confirm-stopped is only for import-codex-recover')
   if (cwd && name !== 'import-codex')
     throw new Error('--cwd is only for import-codex')
+  if (historyQuery && name !== 'import-codex')
+    throw new Error('--history-query is only for import-codex')
   if (allowEstimate && name !== 'model-select')
     throw new Error('--allow-estimate applies only to a local model selection')
   if (previewId && name !== 'workspace-apply')
@@ -90,7 +93,7 @@ export async function runLocal(input: string[]): Promise<boolean> {
     case 'import-codex':
       if (!id || !cwd || !confirm)
         throw new Error(
-          'Usage: import-codex SOURCE_SESSION_ID --cwd LOCAL_DIRECTORY --confirm [--operation-id UUID]',
+          'Usage: import-codex SOURCE_SESSION_ID --cwd LOCAL_DIRECTORY --confirm [--history-query TEXT] [--operation-id UUID]',
         )
       if (provider || chosen || reasoningEffort)
         throw new Error(
@@ -104,6 +107,7 @@ export async function runLocal(input: string[]): Promise<boolean> {
         cwd,
         confirmed: true,
         operationId: reference,
+        ...(historyQuery ? { resume: { query: historyQuery } } : {}),
       }
       break
     case 'import-codex-recover':

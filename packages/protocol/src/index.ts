@@ -1,7 +1,7 @@
 import { z } from 'zod'
 
 export const PROTOCOL_VERSION = 1
-export const STORAGE_SCHEMA_VERSION = 8
+export const STORAGE_SCHEMA_VERSION = 9
 export const nativeAdapterId = z
   .string()
   .min(1)

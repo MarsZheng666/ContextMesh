@@ -14,7 +14,7 @@
 
 - 单独安装受支持的官方 Codex CLI，确保 PATH 中可以执行 `codex`。目前使用 **0.154.0** 验证；兼容的新 0.x 版本需要提供相同 app-server 接口。ContextMesh 不捆绑 Codex，也不增加第二个 DSH 插件。
 - 在接收端配置 Codex 登录和模型服务。ContextMesh 通过 Codex 使用本机配置，不上传认证文件，也不复制源端模型密钥。
-- 通过 `contextmesh setup` 连接 schema 8 Server，沿用[服务端指南](deployment.zh.md)中的 HTTPS 连接。
+- 通过 `contextmesh setup` 连接 schema 8 或 schema 9 Server。分块归档需要 schema 9，沿用[服务端指南](deployment.zh.md)中的 HTTPS 连接。
 - 先结束源端当前轮次及工具调用。本预览支持文本和历史工具引用；附件、未确认的工具执行结果、无法解释的投影及过大上下文会在导入前被拒绝，不会静默删减。
 
 ## 导入与继续
@@ -56,7 +56,7 @@ contextmesh codex import CODEX_SESSION_ID --from codex \
 
 私有导入记录与线程绑定保存在 `~/.contextmesh/data/codex-bridge`，可用 `--state-dir` 更换。记录可能含有导入上下文，应保持私有。Server 在 `codex` 适配器下持久化可移植上下文、来源身份与摘要、原生线程、轮次及事件快照。Codex 自己仍维护原生本地历史。远端归档由这些适配器命令产生，不会自动同步其他 Codex 操作。
 
-可移植协议保留源会话 ID、incarnation 和固定事件数量。DSH 通过官方的会话内容投影恢复当前有效历史，包括替换操作。模型服务私有重放状态和隐藏推理不进入可移植文本，源原生日志保持完整。上下文上限为 1 MiB，原生分页和归档也有数量及大小限制；目标模型仍可能拒绝超过自身容量的输入。
+可移植协议保留源会话 ID、incarnation 和固定事件数量。DSH 通过官方的会话内容投影恢复当前有效历史，包括替换操作。模型服务私有重放状态和隐藏推理不进入可移植文本，源原生日志保持完整。旧版导出使用 1 MiB 可移植格式。分块归档可先用 `contextmesh codex archives` 查询，再导入 `archive:…` 编号。用 `--history-query` 指定检索线索，或用 `--context-window` 设置保守的接收端上限。对已保存的 DSH 会话，指定其中一个选项即可启用同一套规划。
 
 ## 操作中断
 

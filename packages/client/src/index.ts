@@ -183,9 +183,10 @@ export class MeshClient {
     offset: number,
     length: number,
     signal?: AbortSignal,
+    fixedEnd?: number,
   ) {
     const events: StoredEvent[] = []
-    let end: number | undefined
+    let end = fixedEnd
     let cursor = offset
     let snapshot = handle.session
     do {

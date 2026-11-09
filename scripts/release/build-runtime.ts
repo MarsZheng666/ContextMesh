@@ -87,7 +87,7 @@ if (!serverOnly) {
     dsh: '0.2.1-rc.3',
     protocol: 1,
     schema: STORAGE_SCHEMA_VERSION,
-    minSchema: STORAGE_SCHEMA_VERSION,
+    minSchema: 8,
     maxSchema: STORAGE_SCHEMA_VERSION,
     sourceCommit:
       process.env.SOURCE_COMMIT ??

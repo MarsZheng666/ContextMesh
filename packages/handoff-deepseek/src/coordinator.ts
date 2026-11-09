@@ -1,3 +1,11 @@
+import { ArchiveClient } from '../../client/src/archives.js'
+import { archiveTerms } from '../../client/src/archive-record.js'
+import {
+  archiveBlockBytes,
+  archiveIdSchema,
+  archiveResumeOptions,
+  type ArchiveResumeOptions,
+} from '../../protocol/src/archives.js'
 import {
   ToolBoundary,
   stageContinuation,
@@ -19,6 +27,7 @@ import {
   inspectModel,
   analyzeModel,
   assertRequestBudget,
+  requestBudget,
   type ModelBudget,
 } from './model-compatibility.js'
 import {
@@ -28,7 +37,12 @@ import {
 } from './model-profile.js'
 import { ModelRelayClient } from '../../client/src/model-relay.js'
 import type { ModelRoute } from '../../protocol/src/model-relay.js'
-import { SessionId, Session, type SessionEvent } from '@deepseek-ai/dsh-session'
+import {
+  SessionId,
+  Session,
+  SESSION_FORMAT_VERSION,
+  type SessionEvent,
+} from '@deepseek-ai/dsh-session'
 import { setSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
 import type {} from '@deepseek-ai/dsh-jobs'
 import type {} from '@deepseek-ai/dsh-tools'
@@ -83,6 +97,7 @@ const stateSchema = z.object({
         capacityMode: capacityMode.optional(),
         maxOutputTokens: z.number().int().positive().optional(),
         toolsAllowed: z.boolean().optional(),
+        archive: z.boolean().optional(),
       }),
     )
     .default({}),
@@ -131,6 +146,26 @@ const commandSchema = z.discriminatedUnion('action', [
     cwd: z.string().min(1).max(4096),
     operationId: z.uuid(),
     confirmed: z.literal(true),
+    resume: archiveResumeOptions.optional(),
+  }),
+  z.object({
+    action: z.literal('preview-codex-archive'),
+    sourceId: archiveIdSchema,
+    cwd: z.string().min(1).max(4096),
+    resume: archiveResumeOptions.optional(),
+  }),
+  z.object({
+    action: z.literal('archive-index'),
+    id: archiveIdSchema,
+    after: z.int().nonnegative().optional(),
+    query: z.string().max(512).optional(),
+  }),
+  z.object({
+    action: z.literal('archive-content'),
+    id: archiveIdSchema,
+    seq: z.int().nonnegative(),
+    offset: z.int().nonnegative().default(0),
+    length: z.int().min(256).max(archiveBlockBytes).default(16384),
   }),
   z.object({ action: z.literal('import-codex-status'), operationId: z.uuid() }),
   z.object({
@@ -430,13 +465,31 @@ export class HandoffCoordinator {
     ctx.on('llm/stream', async function* (options, next) {
       const budget =
         options.sessionId && service.state.modelBudgets[options.sessionId]
-      if (
-        !options.purpose &&
-        budget &&
-        options.provider === budget.route.provider &&
-        options.model === budget.route.model
-      )
-        assertRequestBudget(options, budget)
+      if (!options.purpose && budget) {
+        if (
+          options.provider === budget.route.provider &&
+          options.model === budget.route.model
+        ) {
+          assertRequestBudget(options, budget)
+        } else if (budget.archive && options.sessionId) {
+          const agent = service.ctx.agents.get(SessionId(options.sessionId))
+          const route = modelRoute.parse({
+            provider: options.provider ?? budget.route.provider,
+            model: options.model ?? budget.route.model,
+          })
+          if (agent) {
+            const checked = await analyzeModel(
+              service.ctx.llm,
+              agent.session,
+              route,
+              service.abort.signal,
+              undefined,
+              { profile: service.profile(route) },
+            )
+            assertRequestBudget(options, checked.budget)
+          }
+        }
+      }
       yield* next()
     })
     ctx.on('agent/created', async ({ agent }) => {
@@ -1865,6 +1918,52 @@ export class HandoffCoordinator {
       prepareLocal: async (target) => {
         await this.prepareCodexImport(target)
       },
+      archiveBudget: async (route, cwd, ceiling) => {
+        const id = SessionId('dsh:' + randomUUID())
+        const seed = Session.create(id, undefined, {
+          id,
+          version: SESSION_FORMAT_VERSION,
+          cwd,
+          isSeeded: false,
+          createdAt: Date.now(),
+        })
+        const { budget } = await analyzeModel(
+          this.ctx.llm,
+          seed,
+          route,
+          this.abort.signal,
+          undefined,
+          { profile: this.profile(route) },
+        )
+        const contextWindow = Math.min(
+          budget.contextWindow,
+          ceiling ?? Infinity,
+        )
+        const presets = this.ctx.get('agentPresets')
+        const preset = presets?.defaultId
+          ? await presets.acquireScope()
+          : undefined
+        try {
+          const scope = preset?.key
+          const prompt = await this.ctx
+            .get('systemPrompt')
+            ?.assemble({ scope, signal: this.abort.signal })
+          const tools = this.ctx.get('tools')?.schemas(scope)
+          const base = Math.max(
+            requestBudget(prompt ?? {}),
+            requestBudget({ tools }),
+          )
+          return {
+            route: route.provider + '/' + route.model,
+            contextWindow,
+            outputReserve: budget.outputReserve,
+            fixedTokens: base + Math.min(4096, Math.floor(contextWindow / 8)),
+            messageOverhead: 560,
+          }
+        } finally {
+          await preset?.[Symbol.asyncDispose]()
+        }
+      },
       preflight: async (session, route) => {
         await inspectModel(
           this.ctx.llm,
@@ -1882,6 +1981,7 @@ export class HandoffCoordinator {
     cwd: string
     operationId: string
     confirmed: true
+    resume?: ArchiveResumeOptions
   }) {
     const model = this.receiverModel(),
       importer = this.codexImporter()
@@ -1957,6 +2057,24 @@ export class HandoffCoordinator {
         'Imported history is saved; open its DSH session to continue',
       )
     await this.bindExisting(agent)
+    if (result.archive) {
+      const { budget } = await analyzeModel(
+        this.ctx.llm,
+        agent.session,
+        model,
+        this.abort.signal,
+        undefined,
+        { profile: this.profile(model) },
+      )
+      await this.guardModel(result.sessionId, {
+        ...budget,
+        archive: true,
+        contextWindow: Math.min(
+          budget.contextWindow,
+          result.contextWindow ?? Infinity,
+        ),
+      })
+    }
     await this.publish(agent, mapping.projectId)
     await importer.markPublished(result.operationId)
     return importer.status(result.operationId)
@@ -1974,13 +2092,49 @@ export class HandoffCoordinator {
       this.upgradeControls.clear()
       return { cancelled: true }
     }
-    if (this.upgrading && !['status', 'history'].includes(command.action))
+    if (
+      this.upgrading &&
+      !['status', 'history', 'archive-index', 'archive-content'].includes(
+        command.action,
+      )
+    )
       throw new MeshError(
         'MAINTENANCE',
         'This device is preparing for an upgrade',
         503,
       )
     switch (command.action) {
+      case 'preview-codex-archive':
+        return this.codexImporter().preview(
+          command.sourceId,
+          command.cwd,
+          this.receiverModel(),
+          command.resume,
+        )
+      case 'archive-index': {
+        const archive = new ArchiveClient(this.client.mesh)
+        const [page, info] = await Promise.all([
+          archive.index(command.id, {
+            after: command.after,
+            order: 'asc',
+            limit: 24,
+            terms: archiveTerms(command.query ?? ''),
+          }),
+          archive.info(command.id),
+        ])
+        return {
+          ...page,
+          parent: info.manifest.header.parent,
+          title: info.manifest.header.title,
+        }
+      }
+      case 'archive-content':
+        return new ArchiveClient(this.client.mesh).text(
+          command.id,
+          command.seq,
+          command.offset,
+          command.length,
+        )
       case 'import-codex':
         return this.exclusive('codex-import:' + command.operationId, () =>
           this.importCodex(command),

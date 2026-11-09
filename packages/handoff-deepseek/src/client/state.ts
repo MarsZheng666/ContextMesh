@@ -38,6 +38,8 @@ export const snapshotSchema = z.object({
         createdAt: z.number(),
         busy: z.boolean(),
         recoveryRequired: z.boolean(),
+        format: z.literal(2).optional(),
+        bytes: z.number().optional(),
       }),
     )
     .optional(),
@@ -110,6 +112,11 @@ export class ControlError extends Error {
   ) {
     super(message)
   }
+}
+export function errorText(error: unknown, t: (key: Key) => string) {
+  if (error instanceof ControlError && error.code in en)
+    return t(error.code as Key)
+  return error instanceof Error ? error.message : String(error)
 }
 export interface ProjectSetup {
   sessionId: string

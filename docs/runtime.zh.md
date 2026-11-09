@@ -2,7 +2,7 @@
 
 [English](runtime.md)
 
-0.8.0-dev.9 运行包包含 Node、固定版本的 DeepSeek Harness 和唯一的 `dsh-contextmesh-handoff` 插件，面向 macOS Apple Silicon 与 Linux x64。Linux 包会在清单中记录并检查最低 glibc 版本，发布 CI 使用 Ubuntu 22.04（glibc 2.35）。暂不支持 Windows 和其他架构。普通对话无需全局 Node、pnpm 或 Git；代码项目使用 Git 时仍需安装 Git。
+0.8.0-dev.10 运行包包含 Node、固定版本的 DeepSeek Harness 和唯一的 `dsh-contextmesh-handoff` 插件，面向 macOS Apple Silicon 与 Linux x64。Linux 包会在清单中记录并检查最低 glibc 版本，发布 CI 使用 Ubuntu 22.04（glibc 2.35）。暂不支持 Windows 和其他架构。普通对话无需全局 Node、pnpm 或 Git；代码项目使用 Git 时仍需安装 Git。
 
 运行包由 **Release packages** 工作流构建。工作流产物属于候选包，发布仍是维护者单独执行的步骤。从可信发布获取对应平台压缩包和校验值，核对 SHA-256 后解压。保留校验值与 `manifest.json`；其中记录平台、Node/DSH 版本、协议与数据库兼容范围、源码提交、锁文件和补丁哈希、文件校验值及第三方许可证信息。
 
@@ -110,7 +110,7 @@ contextmesh server resume-upgrade
 contextmesh server maintenance off
 ```
 
-维护模式在 API 和数据库写入申请处阻止新写者，已有写者仍可 append、flush 和 close。租约过期不能证明原进程已停止。备份要求没有活动或未解决的写者，以私有文件保存并通过 PostgreSQL 归档读取器校验。托管服务升级保持 PostgreSQL 18，并要求目标镜像与当前服务的数据库结构版本相同；结构变化会在开启维护或停机前被拒绝。备份记录实际结构版本（6、7 或 8），仍支持恢复已校验的 schema 6、7 备份；中断后维持维护状态，`resume-upgrade` 核对备份及写者状态后继续原来记录的镜像。
+维护模式在 API 和数据库写入申请处阻止新写者，已有写者仍可 append、flush 和 close。租约过期不能证明原进程已停止。备份要求没有活动或未解决的写者，以私有文件保存并通过 PostgreSQL 归档读取器校验。托管服务升级保持 PostgreSQL 18，并要求目标镜像与当前服务的数据库结构版本相同；结构变化会在开启维护或停机前被拒绝。备份记录实际结构版本（6、7、8 或 9），仍支持恢复已校验的 schema 6、7 备份；中断后维持维护状态，`resume-upgrade` 核对备份及写者状态后继续原来记录的镜像。
 
 0.6.1 服务没有维护 API。首次升级它时，先停止并确认所有旧客户端、工具和 API 进程退出，再备份 PostgreSQL、替换 API。不能将租约过期视作停机证明。客户端可以导入已停止的 0.6.1 配置；服务升级命令会拒绝不具备维护接口的旧服务。schema 6/7 → 8 按下方停机迁移流程执行；PostgreSQL 大版本升级仍是独立的管理操作。
 
@@ -145,3 +145,17 @@ contextmesh server restore --backup /path/to/verified-backup --confirm-stopped -
 5. 确认带认证的 `/health/ready` 返回 `schemaVersion: 8` 和 `cross-agent-takeover-v1`，核对原始 header、事件、维护状态及设备运行包后再开放写入。
 
 旧 Server 拒绝 schema 8。回退需停止客户端和 API，明确恢复旧备份与匹配部署；这会丢失备份后的写入。托管 `server upgrade` 和 `resume-upgrade` 仍要求相同结构版本，不自动执行本次迁移。
+
+## 从 schema 8 迁移到 9
+
+schema **9** 新增分块归档目录、记录索引和数据块表，已有 Session 和旧归档沿用原格式。匹配的新客户端可在 schema 8 上使用旧功能，在 schema 9 上使用分块归档。
+
+1. 准备审核通过的 schema 9 API 和客户端包。在 schema 8 Server 上开启维护，停止运行中的客户端和工具，处理未完成的写入，并核实相关进程已退出。
+2. 使用旧部署创建并校验 PostgreSQL 备份，保留与备份匹配的 API 镜像和私有配置。
+3. 停止旧 API，保留现有数据库卷。只替换 API 镜像或程序并单独启动。启动时会在数据库事务中执行增量迁移。
+4. 用带认证的 `/health/ready` 核对 `schemaVersion: 9` 和 `chunked-archives-v2`。维持维护模式，检查已有会话、旧归档和客户端兼容性，再开放写入。
+5. 用测试会话验证分块发布和按预算导入，再用于日常会话。
+
+schema 8 程序无法打开 schema 9 数据库。恢复已验证的 schema 8 备份会丢失备份之后的写入。托管的同版本结构升级命令仍会要求通过迁移流程处理结构变化。
+
+每个命名空间的原始块存储默认配额为 20 GiB，包含未完成上传已预留的空间。可通过 API 环境变量 `CONTEXTMESH_ARCHIVE_QUOTA_BYTES` 调整。暂存上传连续 24 小时无进度后过期并定期清理。已提交的归档纳入 PostgreSQL 备份。

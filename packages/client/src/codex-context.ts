@@ -1,3 +1,9 @@
+import { ArchiveClient } from './archives.js'
+import {
+  archiveFeature,
+  isArchiveId,
+  type ArchiveInfo,
+} from '../../protocol/src/archives.js'
 import { z } from 'zod'
 import { randomUUID } from 'node:crypto'
 import { MeshClient } from './index.js'
@@ -80,17 +86,55 @@ export const codexArchiveSchema = z.object({
   createdAt: z.number(),
   busy: z.boolean(),
   recoveryRequired: z.boolean(),
+  format: z.literal(2).optional(),
+  bytes: z.number().optional(),
 })
-export async function codexArchives(client: MeshClient) {
-  if (
-    !(await client.capabilities()).features?.includes('codex-context-return-v1')
+function chunkedSummary(info: ArchiveInfo): z.infer<typeof codexArchiveSchema> {
+  return {
+    id: info.id,
+    title: info.manifest.header.title,
+    incarnation: info.manifest.header.source.incarnation,
+    nextSeq: info.manifest.records,
+    createdAt: info.createdAt,
+    busy: false,
+    recoveryRequired: false,
+    format: 2,
+    bytes: info.manifest.bytes,
+  }
+}
+async function listChunkedArchives(client: ArchiveClient) {
+  const rows: ArchiveInfo[] = []
+  const cursors = new Set<string>()
+  let after: string | undefined
+  do {
+    const page = await client.list(after)
+    rows.push(...page.archives)
+    after = page.next ?? undefined
+    if (after && cursors.has(after))
+      throw new Error('Archive catalog cursor did not advance')
+    if (after) cursors.add(after)
+  } while (after)
+  return rows
+}
+export async function codexArchives(client: MeshClient, advertised?: string[]) {
+  const features = advertised ?? (await client.capabilities()).features ?? []
+  const [legacy, chunked] = await Promise.all([
+    features.includes('codex-context-return-v1')
+      ? client
+          .request('/v1/codex-archives')
+          .then((value) => z.array(codexArchiveSchema).parse(value))
+      : [],
+    features.includes(archiveFeature)
+      ? listChunkedArchives(new ArchiveClient(client))
+      : [],
+  ])
+  return [...legacy, ...chunked.map(chunkedSummary)].sort(
+    (a, b) => b.createdAt - a.createdAt,
   )
-    return []
-  return z
-    .array(codexArchiveSchema)
-    .parse(await client.request('/v1/codex-archives'))
 }
 export async function settledCodexArchive(client: MeshClient, id: string) {
+  if (isArchiveId(id))
+    return chunkedSummary(await new ArchiveClient(client).info(id))
   const row = codexArchiveSchema.parse(
     await client.request('/v1/codex-archives/' + encodeURIComponent(id)),
   )

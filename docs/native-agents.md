@@ -57,10 +57,16 @@ Exports include the adapter, original header, inherited count and events. Recove
 
 ## Codex archive return
 
-The authenticated `GET /v1/codex-archives` catalog and `GET /v1/codex-archives/:id` return namespace-scoped archive metadata: identity, incarnation, sequence count, creation time, busy and recovery-required flags. They do not return context or credentials. `/health/ready` advertises `codex-context-return-v1`; this additive capability keeps schema 8.
+The authenticated `GET /v1/codex-archives` catalog and `GET /v1/codex-archives/:id` return namespace-scoped archive metadata: identity, incarnation, sequence count, creation time, busy and recovery-required flags. They do not return context or credentials. `/health/ready` advertises `codex-context-return-v1`; the legacy format remains available on schema 9.
 
 The receiving DSH plugin's [explicit archive import](codex-return.md) validates and converts a fixed Codex snapshot into a new DSH log. It does not reinterpret a foreign log through native restore. The target header's `contextmeshImport` records the source cut/digest, operation and expected seed event count. Incomplete imports are excluded before normal list pagination and summaries. Ordinary write-open returns `IMPORT_INCOMPLETE` until the seed is complete; only explicit importer recovery supplies the matching optional `importOperationId` to finish its saved prefix. This is a staging guard within the existing trusted namespace, not an additional authorization boundary.
 
 ## Compatibility
 
-Authenticated `/health/ready` advertises `native-agent-storage-v1` with database schema **8**. An older Server cannot accept other native formats. Schema 8 retains existing DSH headers/events and the native-format boundary, adding a successor-session link, separate Agent endpoint identity and one-time continuation execution records. A transferred DSH session stays readable; write-open and recovery return `SESSION_MOVED`. See the [schema migration procedure](runtime.md#migrate-schema-6-or-7-to-8). The public installation still contains exactly one DSH ContextMesh plugin.
+Authenticated `/health/ready` advertises `native-agent-storage-v1` with database schema **9**. An older Server cannot accept other native formats. Schema 8 retains existing DSH headers/events and the native-format boundary, adding a successor-session link, separate Agent endpoint identity and one-time continuation execution records. A transferred DSH session stays readable; write-open and recovery return `SESSION_MOVED`. See the [schema migration procedure](runtime.md#migrate-schema-8-to-9). The public installation still contains exactly one DSH ContextMesh plugin.
+
+## Chunked archives
+
+`chunked-archives-v2` advertises the separate archive API. Uploaders start with a fixed manifest at `POST /v2/archive-uploads`, post numbered blocks to `/v2/archive-uploads/:id/blocks/:seq`, and commit after all blocks are acknowledged. The Server validates the block checksum, sequence and manifest before publishing it. Repeating a block with the same content is safe, including after restart.
+
+`GET /v2/archives` lists committed manifests. `GET /v2/archives/:id/records` pages through the record index, with filters for role and indexed terms. `GET /v2/archives/:id/records/:seq/content` reads a byte range of one record. A range that crosses a block boundary reads and verifies both blocks. Receivers load only the selected records and ranges into their model context.

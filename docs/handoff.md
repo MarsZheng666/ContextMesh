@@ -79,7 +79,7 @@ Recovery clears the reservation and fences the previous writer; resuming remains
 
 ## Upgrade and transport
 
-The current server uses schema **8**. Migration preserves existing native Session headers and events, retains the native-format boundary and adds linked cross-Agent ownership and execution records. Back up PostgreSQL and stop writers before following the [migration guide](runtime.md#migrate-schema-6-or-7-to-8). Older servers refuse schema 8; rollback requires the backup. The DSH Session format is unchanged.
+For a Server update, back up PostgreSQL, stop writers and follow the [schema migration guide](runtime.md#migrate-schema-8-to-9). The migration retains existing native Session headers and events.
 
 Use HTTPS direct connection by default. [SSH tunneling](deployment.md#optional-ssh-tunnel) is an optional alternative for private access through a loopback address; loopback HTTP alone does not encrypt traffic. Paired devices use separate credentials within the server's shared namespace; device IDs route work and do not replace those credentials. Native DSH Host/Origin and owner authentication protect the browser control endpoint. The local Unix socket is accessible only to its OS user.
 

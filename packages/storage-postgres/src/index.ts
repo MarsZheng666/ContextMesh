@@ -1,5 +1,6 @@
 import { z } from 'zod'
-import { HandoffPostgresStore, type Update } from './handoff-store.js'
+import type { Update } from './handoff-store.js'
+import { ArchivePostgresStore } from './archives.js'
 import { MeshError } from '../../protocol/src/index.js'
 import { contextDigest, validatePortable } from '../../protocol/src/portable.js'
 import { randomUUID } from 'node:crypto'
@@ -8,7 +9,7 @@ import type { HandoffManifest } from '../../protocol/src/handoff.js'
 export type { StoreOptions } from './base.js'
 
 /** Native logs keep their own formats; handoff records link the transferred task. */
-export class PostgresStore extends HandoffPostgresStore {
+export class PostgresStore extends ArchivePostgresStore {
   async publishCodexGuiArchive(
     ns: string,
     request: z.infer<typeof codexGuiArchive>,
@@ -92,7 +93,7 @@ export class PostgresStore extends HandoffPostgresStore {
       (s.recovery_required OR s.active_handoff IS NOT NULL OR
        EXISTS(SELECT 1 FROM cm_handoffs h WHERE h.namespace=s.namespace AND h.target_session=s.id AND h.execution IN ('pending','dispatching','uncertain')) OR
        (s.header::jsonb ? 'handoffId' AND NOT EXISTS(SELECT 1 FROM cm_handoffs h WHERE h.namespace=s.namespace AND h.id::text=s.header::jsonb->>'handoffId' AND h.state='completed' AND h.target_session=s.id))) AS "recoveryRequired"
-      FROM cm_sessions s WHERE s.namespace=$1 AND s.adapter='codex' AND s.materialized AND ($2::text IS NULL OR s.id=$2) ORDER BY "createdAt" DESC,s.id LIMIT 100`,
+      FROM cm_sessions s WHERE s.namespace=$1 AND s.adapter='codex' AND s.materialized AND s.header::jsonb ? 'portable' AND ($2::text IS NULL OR s.id=$2) ORDER BY "createdAt" DESC,s.id LIMIT 100`,
       [ns, id ?? null],
     )
     return result.rows

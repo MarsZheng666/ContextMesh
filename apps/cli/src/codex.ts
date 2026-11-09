@@ -1,3 +1,9 @@
+import { codexArchives } from '../../../packages/client/src/codex-context.js'
+import { MeshClient } from '../../../packages/client/src/index.js'
+import {
+  archiveResumeOptions,
+  isArchiveId,
+} from '../../../packages/protocol/src/archives.js'
 import { resolve, join } from 'node:path'
 import { z } from 'zod'
 import { resolveConnection } from '../../../packages/client/src/config.js'
@@ -25,6 +31,22 @@ export async function runCodex(args: string[]) {
     )
     return true
   }
+  if (command === 'archives') {
+    if (id || flags.length) throw new Error('Use contextmesh codex archives')
+    const { endpoint, token } = await resolveConnection()
+    if (!endpoint || !token)
+      throw new Error('Connect ContextMesh first with contextmesh setup')
+    console.log(
+      JSON.stringify(
+        await codexArchives(
+          new MeshClient({ endpoint, token, adapter: 'codex' }),
+        ),
+        null,
+        2,
+      ),
+    )
+    return true
+  }
   if (command === 'panel-mcp' || command === 'panel-worker') {
     if (flags.length || (command === 'panel-mcp' ? id !== undefined : !id))
       throw new Error('Invalid ContextMesh panel command')
@@ -47,7 +69,7 @@ export async function runCodex(args: string[]) {
   }
   if (!command || command === '--help' || command === 'help') {
     console.log(
-      'ContextMesh Codex\n  codex install-panel [--codex-bin <desktop executable>]\n  codex takeover <DSH-session-id> --cwd <directory> --model <local-model> --confirm [--workspace-write] [--operation <uuid>]\n  codex takeover-status <handoff-id>\n  codex takeover-recover <handoff-id> --confirm-stopped\n  codex import <source-session-id> --cwd <directory> --model <local-model> [--from deepseek|codex] [--workspace-write] [--operation <uuid>]\n  codex run <codex-session-id> --message <new-instruction> [--timeout-seconds <10..3600>]\n  codex status <import-operation-id|codex-session-id>\n  codex reconcile <codex-session-id> --confirm-stopped\nOptions: --state-dir <private-directory>, --codex-home <Codex-directory>, --codex-bin <executable>\nTakeover preflights Codex, then safely stops DSH and continues unfinished work once. --confirm authorizes sending context to the selected provider. Keep this command running until it finishes.\nImport creates a separate Codex conversation from a completed snapshot. It does not stop or take over the source.',
+      'ContextMesh Codex\n  codex install-panel [--codex-bin <desktop executable>]\n  codex takeover <DSH-session-id> --cwd <directory> --model <local-model> --confirm [--workspace-write] [--operation <uuid>]\n  codex takeover-status <handoff-id>\n  codex takeover-recover <handoff-id> --confirm-stopped\n  codex import <source-session-id> --cwd <directory> --model <local-model> [--from deepseek|codex] [--history-query <text>] [--context-window <tokens>] [--workspace-write] [--operation <uuid>]\n  codex run <codex-session-id> --message <new-instruction> [--timeout-seconds <10..3600>]\n  codex status <import-operation-id|codex-session-id>\n  codex reconcile <codex-session-id> --confirm-stopped\nOptions: --state-dir <private-directory>, --codex-home <Codex-directory>, --codex-bin <executable>\nTakeover preflights Codex, then safely stops DSH and continues unfinished work once. --confirm authorizes sending context to the selected provider. Keep this command running until it finishes.\nImport creates a separate Codex conversation from a completed snapshot. It does not stop or take over the source.',
     )
     return true
   }
@@ -96,6 +118,8 @@ export async function runCodex(args: string[]) {
         '--codex-home',
         '--codex-bin',
         '--timeout-seconds',
+        '--history-query',
+        '--context-window',
       ].includes(name) ||
       values.has(name)
     )
@@ -105,6 +129,11 @@ export async function runCodex(args: string[]) {
       throw new Error(`${name} requires a value`)
     values.set(name, value)
   }
+  if (
+    command !== 'import' &&
+    (values.has('--history-query') || values.has('--context-window'))
+  )
+    throw new Error('--history-query and --context-window are only for import')
   const connection = await resolveConnection()
   if (command !== 'status' && (!connection.endpoint || !connection.token))
     throw new Error('Connect ContextMesh first with contextmesh setup')
@@ -176,6 +205,8 @@ export async function runCodex(args: string[]) {
           '--message',
           '--operation',
           '--timeout-seconds',
+          '--history-query',
+          '--context-window',
         ].some((key) => values.has(key))
       )
         throw new Error('Status and recovery use the saved receiver binding')
@@ -204,6 +235,8 @@ export async function runCodex(args: string[]) {
           '--operation',
           '--message',
           '--timeout-seconds',
+          '--history-query',
+          '--context-window',
         ].includes(k),
       )
     )
@@ -232,8 +265,20 @@ export async function runCodex(args: string[]) {
       sourceId: id,
       sourceAdapter: z
         .enum(['deepseek', 'codex'])
-        .parse(values.get('--from') ?? 'deepseek'),
+        .parse(
+          values.get('--from') ?? (isArchiveId(id) ? 'codex' : 'deepseek'),
+        ),
       operationId: values.get('--operation'),
+      ...(values.has('--history-query') || values.has('--context-window')
+        ? {
+            resume: archiveResumeOptions.parse({
+              query: values.get('--history-query'),
+              contextWindow: values.has('--context-window')
+                ? Number(values.get('--context-window'))
+                : undefined,
+            }),
+          }
+        : {}),
       target: {
         cwd: resolve(values.get('--cwd')!),
         model: values.get('--model')!,
