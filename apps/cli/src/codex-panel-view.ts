@@ -21,7 +21,8 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:19rem;overflow:auto}
 code{display:block;user-select:all;margin-block:6px}dialog{margin:auto;max-width:28rem}dialog::backdrop{background:#0007}
 </style>
 <header><h1>ContextMesh</h1><button id="refresh" type="button" disabled>Refresh</button></header>
-<p id="notice" role="status">Connecting to ContextMesh…</p>
+<p id="connection" role="status" data-state="connecting">Connecting to ContextMesh…</p>
+<p id="notice" role="status"></p>
 <section>
 <h2>Receive a shared session</h2>
 <form id="receive">
@@ -97,6 +98,8 @@ const pending = new Map()
 const bytesLabel = (bytes) => bytes >= 1048576 ? (bytes / 1048576).toFixed(1) + ' MiB' : (bytes / 1024).toFixed(1) + ' KiB'
 let seq = 0, action, refreshingJobs = false
 let remote = [], local = [], receiveCapabilities, receiving = false
+let catalogRevision = 0, checkingConnection = false, refreshing = false
+let choicesAvailable = false, publishing = false
 let pickingFolder = false, selectedPath
 let historyArchive, historyCursor, historyParent, activeExcerpt, include = []
 let selectedSourceKey, historyGeneration = 0
@@ -213,6 +216,7 @@ function updateReceive() {
     source.adapter === 'deepseek' && receiveCapabilities?.chunkedArchives)
   $('budgetOptions').hidden = !budgeted
   $('historyOpen').hidden = source?.format !== 2
+  $('historyOpen').disabled = !receiveCapabilities
   if (selectedSourceKey !== $('source').value) {
     selectedSourceKey = $('source').value
     $('history').hidden = true
@@ -220,7 +224,7 @@ function updateReceive() {
     include = []
     updatePicks()
   }
-  $('take').disabled = receiving || pickingFolder || !source || !canReceive(source)
+  $('take').disabled = refreshing || receiving || pickingFolder || !source || !canReceive(source)
   $('take').textContent = source?.status === 'import' ? 'Review import' : source?.status === 'takeover' ? 'Review takeover' : 'Review transfer'
   $('sourceHelp').textContent = source?.status === 'import'
     ? 'Import the saved context into a new Codex conversation.'
@@ -327,35 +331,70 @@ $('browse').addEventListener('click', async () => {
     updateReceive()
   }
 })
-async function refresh() {
-  $('refresh').disabled = $('take').disabled = $('publish').disabled = true
-  $('notice').textContent = 'Checking the server and this Codex device…'
-  const [catalog, choices] = await Promise.allSettled([tool('catalog'), tool('choices')])
-  const messages = []
-  if (choices.status === 'fulfilled') {
-    local = choices.value.threads
-    options('thread', local.map((t) => [t.id, localTitle(t) || t.id]), 'Choose a conversation')
-    options('folders', [...new Set(local.map((t) => t.cwd).filter(Boolean))].map((x) => [x,x]))
-  } else messages.push(choices.reason.message)
-  if (catalog.status === 'fulfilled') {
-    receiveCapabilities = catalog.value
-    remote = catalog.value.sessions
+function updatePublish() {
+  $('publish').disabled = refreshing || publishing || !choicesAvailable || !local.length || !receiveCapabilities?.publishAvailable
+}
+function applyCatalog(catalog, error) {
+  receiveCapabilities = catalog
+  $('source').disabled = !catalog
+  const connection = $('connection')
+  connection.dataset.state = catalog ? 'connected' : 'disconnected'
+  if (catalog) {
+    remote = catalog.sessions
     options('source', remote.map((s) => [
       sourceKey(s),
       [conversationTitle(s.title) || s.id, agentLabels[s.adapter] || s.adapter, s.activeNodeName, sourceLabels[s.status]].filter(Boolean).join(' · '),
       !canReceive(s),
     ]), remote.length ? 'Choose a shared session' : 'No shared sessions found')
-    if (!catalog.value.publishAvailable) messages.push('Upgrade the ContextMesh Server to publish Codex snapshots.')
-    $('publish').disabled = !catalog.value.publishAvailable || choices.status !== 'fulfilled' || !local.length
+    connection.textContent = catalog.publishAvailable
+      ? 'Connected to the ContextMesh Server.'
+      : 'Connected. Upgrade the ContextMesh Server to publish Codex snapshots.'
   } else {
-    receiveCapabilities = undefined
-    remote = []
-    options('source', [], 'Could not load shared sessions')
-    messages.push(catalog.reason.message)
+    if (!remote.length) options('source', [], 'Shared sessions unavailable')
+    connection.textContent = ['Disconnected. Retrying automatically.', error?.message].filter(Boolean).join(' ')
   }
   updateReceive()
-  $('notice').textContent = messages.join(' ') || 'Connected to the ContextMesh Server.'
-  $('refresh').disabled = false
+  updatePublish()
+}
+async function checkConnection() {
+  if (document.hidden || pending.size || checkingConnection || refreshing || receiving || publishing) return
+  checkingConnection = true
+  const revision = catalogRevision
+  try {
+    await tool('connection', {}, 6000)
+    if (revision !== catalogRevision || receiveCapabilities) return
+    const catalog = await tool('catalog')
+    if (revision === catalogRevision) applyCatalog(catalog)
+  } catch (error) {
+    if (revision === catalogRevision && receiveCapabilities) applyCatalog(undefined, error)
+  } finally { checkingConnection = false }
+}
+async function refresh() {
+  if (refreshing) return
+  refreshing = true
+  catalogRevision++
+  $('refresh').disabled = true
+  $('connection').dataset.state = 'connecting'
+  $('connection').textContent = 'Checking the ContextMesh Server…'
+  updateReceive()
+  updatePublish()
+  try {
+    const [catalog, choices] = await Promise.allSettled([tool('catalog'), tool('choices')])
+    choicesAvailable = choices.status === 'fulfilled'
+    if (choices.status === 'fulfilled') {
+      local = choices.value.threads
+      options('thread', local.map((t) => [t.id, localTitle(t) || t.id]), 'Choose a conversation')
+      options('folders', [...new Set(local.map((t) => t.cwd).filter(Boolean))].map((x) => [x,x]))
+      $('notice').textContent = ''
+    } else showError(choices.reason)
+    if (catalog.status === 'fulfilled') applyCatalog(catalog.value)
+    else applyCatalog(undefined, catalog.reason)
+  } finally {
+    refreshing = false
+    $('refresh').disabled = false
+    updateReceive()
+    updatePublish()
+  }
   await refreshJobs()
 }
 function review(kind, text, args, records = []) {
@@ -374,7 +413,7 @@ function review(kind, text, args, records = []) {
 $('receive').addEventListener('submit', async (event) => {
   event.preventDefault()
   const source = remote.find((s) => sourceKey(s) === $('source').value)
-  if (pickingFolder || !source || !canReceive(source)) return
+  if ($('take').disabled || !source) return
   const target = {cwd:selectedPath ?? $('cwd').value.trim(), sandbox:$('write').checked ? 'workspace-write' : 'read-only'}
   const title = conversationTitle(source.title)
   const label = '“' + (title || source.id) + '” in ' + target.cwd + ' with ' + target.sandbox + ' access.'
@@ -407,11 +446,11 @@ $('receive').addEventListener('submit', async (event) => {
 $('send').addEventListener('submit', async (event) => {
   event.preventDefault()
   const thread = local.find((t) => t.id === $('thread').value)
-  if (!thread) return
+  if ($('publish').disabled || !thread) return
   const title = localTitle(thread)
   const scope = $('archiveScope').value
-  const button = $('publish')
-  button.disabled = true
+  publishing = true
+  updatePublish()
   $('notice').textContent = 'Preparing a local copy for review…'
   try {
     const capture = receiveCapabilities?.chunkedArchives
@@ -426,7 +465,7 @@ $('send').addEventListener('submit', async (event) => {
     review('Publish a Codex archive', 'Share ' + contents + ' from “' + (title || thread.id) + '” on the ContextMesh Server.' + details,
       {kind:'publish', threadId:thread.id, title, scope, captureId:capture?.id, confirmed:true})
   } catch (error) { showError(error) }
-  finally { button.disabled = false }
+  finally { publishing = false; updatePublish() }
 })
 $('review').addEventListener('close', async () => {
   const args = action
@@ -435,17 +474,21 @@ $('review').addEventListener('close', async () => {
     if (args?.captureId) tool('discard_capture', {id:args.captureId}).catch(showError)
     return
   }
-  const button = $(args.kind === 'publish' ? 'publish' : 'take')
-  if (args.kind !== 'publish') receiving = true
-  button.disabled = true
+  const isPublish = args.kind === 'publish'
+  if (isPublish) publishing = true
+  else receiving = true
+  updatePublish()
+  updateReceive()
   try {
     await tool('start', args)
     await refreshJobs()
     $('notice').textContent = 'Transfer queued. Watch Recent transfers for the result.'
   } catch (error) { showError(error) }
   finally {
-    if (args.kind === 'publish') button.disabled = false
-    else { receiving = false; updateReceive() }
+    if (isPublish) publishing = false
+    else receiving = false
+    updatePublish()
+    updateReceive()
   }
 })
 $('refresh').addEventListener('click', () => refresh().catch(showError))
@@ -455,6 +498,9 @@ try {
   $('browse').disabled = false
   await refresh()
   setInterval(() => refreshJobs().catch(showError), 2500)
+  setInterval(checkConnection, 6000)
+  window.addEventListener('online', checkConnection)
+  document.addEventListener('visibilitychange', checkConnection)
 } catch (error) { showError(error) }
 </script>
 </html>`
