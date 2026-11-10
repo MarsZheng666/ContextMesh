@@ -62,6 +62,49 @@ export async function installCodexPanel(explicitBin?: string) {
       },
     },
   })
+  const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'"
+  const hookCommand = [
+    'env',
+    'CONTEXTMESH_HOME=' + quote(home),
+    'CODEX_HOME=' + quote(codexHome),
+    'CONTEXTMESH_CODEX_BIN=' + quote(bin),
+    ...(process.env.CONTEXTMESH_CONFIG
+      ? ['CONTEXTMESH_CONFIG=' + quote(resolve(process.env.CONTEXTMESH_CONFIG))]
+      : []),
+    ...(settings.caFile
+      ? ['NODE_EXTRA_CA_CERTS=' + quote(settings.caFile)]
+      : []),
+    quote(launcher),
+    'codex',
+    'sync-hook',
+  ].join(' ')
+  await atomicJson(join(plugin, 'hooks/hooks.json'), {
+    description:
+      'Keep conversations explicitly shared with ContextMesh up to date.',
+    hooks: Object.fromEntries(
+      [
+        'SessionStart',
+        'UserPromptSubmit',
+        'PreToolUse',
+        'PostToolUse',
+        'Stop',
+        'Interrupt',
+      ].map((event) => [
+        event,
+        [
+          {
+            hooks: [
+              {
+                type: 'command',
+                command: hookCommand,
+                timeout: event === 'Interrupt' ? 3 : 10,
+              },
+            ],
+          },
+        ],
+      ]),
+    ),
+  })
   await atomicJson(join(market, '.agents/plugins/marketplace.json'), {
     name: 'contextmesh-local',
     interface: { displayName: 'ContextMesh' },

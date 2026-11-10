@@ -63,7 +63,7 @@ contextmesh recover codex-thread-id --confirm-stopped --adapter codex
 
 ## 版本兼容
 
-带认证的 `/health/ready` 声明 `native-agent-storage-v1`，数据库版本为 **9**。旧 Server 不接受其他原生格式。schema 8 保留原生格式边界和已有 DSH header、事件，增加后继会话关联、独立 Agent 端点身份和一次性续跑记录。已转移的 DSH 历史可读，申请写者或恢复写者返回 `SESSION_MOVED`。请按[结构迁移流程](runtime.zh.md#从-schema-8-迁移到-9)升级。对外仍只安装一个 DSH ContextMesh 插件。
+带认证的 `/health/ready` 声明 `native-agent-storage-v1`，数据库版本为 **10**。旧 Server 不接受其他原生格式。schema 8 保留原生格式边界和已有 DSH header、事件，增加后继会话关联、独立 Agent 端点身份和一次性续跑记录。已转移的 DSH 历史可读，申请写者或恢复写者返回 `SESSION_MOVED`。请按[结构迁移流程](runtime.zh.md#从-schema-8-迁移到-9)升级。对外仍只安装一个 DSH ContextMesh 插件。
 
 ## 分块归档
 

@@ -16,7 +16,7 @@ ContextMesh combines **one shared remote Server** with **integrations on the dev
 flowchart LR
   A["Device A · DSH + ContextMesh plugin"] <-->|"Native session events"| S["Remote ContextMesh Server"]
   B["Device B · DSH + ContextMesh plugin"] <-->|"Native session events"| S
-  C["Device C · Codex Desktop / CLI + ContextMesh"] <-->|"Import context / archive snapshots"| S
+  C["Device C · Codex Desktop / CLI + ContextMesh"] <-->|"Follow shared records / confirmed takeover"| S
   S -->|"Persist shared history"| DB[(PostgreSQL)]
 ```
 
@@ -28,7 +28,11 @@ flowchart LR
 
 Deploy the Server once. Devices share its HTTPS URL and use separate credentials; they need no local PostgreSQL. The service host needs a device integration only if it also executes tasks. Model requests and tools run on the executing device, and model credentials stay there.
 
-**Shared context is persisted remotely in PostgreSQL.** The DSH plugin transports session events. The Codex bridge archives native thread, turn and item snapshots after acknowledged runs; Codex also maintains its native local history. Device-local files retain configuration, credentials, caches and recovery journals. Unrelated Codex activity is not automatically synchronized.
+**Shared context is persisted remotely in PostgreSQL.** The DSH plugin transports session events. The Codex bridge archives native thread, turn and item snapshots after acknowledged runs; Codex also maintains its native local history. Device-local files retain configuration, credentials, caches and recovery journals. Conversations explicitly shared through **Share and sync** also upload future messages and tool records automatically; other Codex conversations remain unshared. See [live synchronization](docs/live-sync.md).
+
+## Share once, follow automatically
+
+Choose **Share and sync** on the source device, then **Receive and follow** once on each receiver. New messages and tool records update in the existing ContextMesh panel, with automatic catch-up after disconnects. Choose **Continue here** to confirm a change of executing device while keeping the same shared conversation. Requires schema 10 and the Codex lifecycle hooks where applicable. [Set up live synchronization →](docs/live-sync.md)
 
 ## What works today
 
@@ -41,11 +45,11 @@ Deploy the Server once. Devices share its HTTPS URL and use separate credentials
 | **Managed Codex → Codex CLI**       | Import an archived snapshot into another local Codex thread with that receiver's model and directory.                                                                            |
 | **Selected workspace files in DSH** | Preview and confirm supported changes and native file attachments before applying them on the receiver.                                                                          |
 
-Codex snapshot imports create a separate conversation and retain source provenance. **DSH → Codex takeover requires explicit receiver confirmation. Codex → DSH copies a settled archive and waits for your next instruction; it does not take over live Codex execution.** See [DSH handoff](docs/handoff.md), [Codex usage](docs/codex.md), [return to DSH](docs/codex-return.md), and [native storage](docs/native-agents.md).
+Codex snapshot imports create a separate conversation and retain source provenance. **DSH → Codex takeover requires explicit receiver confirmation. Codex → DSH can copy a settled archive or transfer a live-shared conversation after its current turn and tools finish; the receiving DSH waits for your next instruction.** See [DSH handoff](docs/handoff.md), [Codex usage](docs/codex.md), [return to DSH](docs/codex-return.md), and [native storage](docs/native-agents.md).
 
 ## Before you install
 
-**0.8.0-dev.16 is an unreleased source preview.** The plugin requires this repository's pinned **DSH 0.2.1-rc.3 and compatibility patches**. Use the pinned source build below; installing the plugin into an arbitrary global DSH is not supported.
+**0.8.0-dev.17 is an unreleased source preview.** The plugin requires this repository's pinned **DSH 0.2.1-rc.3 and compatibility patches**. Use the pinned source build below; installing the plugin into an arbitrary global DSH is not supported.
 
 Use the same reviewed source version for the Server and device clients. The instructions below use the source installation path. Self-contained macOS Apple Silicon and Linux x64 packages are also built by CI, but are currently **candidate artifacts, not published releases**. Their installation and upgrade commands are covered in the [runtime guide](docs/runtime.md).
 

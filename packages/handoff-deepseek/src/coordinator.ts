@@ -1,4 +1,8 @@
+import { atomicJson, optionalJson } from '../../runtime-manager/src/files.js'
+import { prepareSharedArchive } from './shared-archive.js'
 import { ArchiveClient } from '../../client/src/archives.js'
+import { SharedClient } from '../../client/src/shared.js'
+import { SharedFollowers } from '../../client/src/shared-follow.js'
 import { archiveTerms } from '../../client/src/archive-record.js'
 import {
   archiveBlockBytes,
@@ -313,6 +317,8 @@ export class HandoffCoordinator {
   readonly files: WorkspaceTransfers
   readonly relay: ModelRelayController
   readonly client: HandoffClient
+  readonly shared: SharedClient
+  readonly followers: SharedFollowers
   private readonly abort = new AbortController()
   private readonly controls = new Map<string, AgentControl>()
   private readonly transfers = new Map<string, LocalTransfer>()
@@ -343,6 +349,11 @@ export class HandoffCoordinator {
     private readonly state: z.infer<typeof stateSchema>,
   ) {
     this.client = new HandoffClient(ctx.contextmesh.client, state.nodeId)
+    this.shared = new SharedClient(ctx.contextmesh.client)
+    this.followers = new SharedFollowers(
+      this.shared,
+      join(config.stateDir, 'shared-following'),
+    )
     this.files = new WorkspaceTransfers(ctx, this.client, config.stateDir, {
       source: async (id) => {
         const agent = ctx.agents.get(SessionId(id))
@@ -536,6 +547,7 @@ export class HandoffCoordinator {
       void service.heartbeat()
     }, config.heartbeatMs)
     service.heartbeatTimer.unref()
+    service.followers.start()
     return service
   }
   private profile(route: ModelRoute) {
@@ -1915,6 +1927,16 @@ export class HandoffCoordinator {
     return new CodexContextImport({
       mesh: this.client.mesh,
       stateDir: this.config.stateDir,
+      beforeWrite: async (operationId) => {
+        const transfer = await this.sharedReturn(operationId)
+        if (transfer)
+          await this.shared.reserve(transfer.id, {
+            generation: transfer.generation,
+            cut: transfer.cut,
+            archiveId: transfer.archiveId,
+            operationId,
+          })
+      },
       prepareLocal: async (target) => {
         await this.prepareCodexImport(target)
       },
@@ -1976,6 +1998,31 @@ export class HandoffCoordinator {
       },
     })
   }
+  private sharedReturnPath(operationId: string) {
+    return join(
+      this.config.stateDir,
+      'shared-returns',
+      z.uuid().parse(operationId) + '.json',
+    )
+  }
+  private async sharedReturn(operationId: string) {
+    const value = await optionalJson(this.sharedReturnPath(operationId))
+    if (!value) return
+    const parsed = z
+      .object({
+        endpoint: z.string(),
+        id: z.uuid(),
+        generation: z.number().int(),
+        cut: z.number().int(),
+        archiveId: archiveIdSchema,
+      })
+      .parse(value)
+    if (parsed.endpoint !== this.client.mesh.endpoint)
+      throw new Error(
+        'Use the original Server connection to complete this transfer',
+      )
+    return parsed
+  }
   async importCodex(command: {
     sourceId: string
     cwd: string
@@ -2019,6 +2066,14 @@ export class HandoffCoordinator {
   ) {
     const importer = this.codexImporter(),
       model = result.model
+    const transfer = await this.sharedReturn(result.operationId)
+    if (transfer) {
+      await this.shared.commitDsh(transfer.id, {
+        operationId: result.operationId,
+        targetSessionId: result.sessionId,
+      })
+      await this.followers.follow(transfer.id)
+    }
     if (result.phase === 'published') return result
     const { mapping, workspace } = await this.prepareCodexImport({
       ...result,
@@ -2080,6 +2135,89 @@ export class HandoffCoordinator {
     return importer.status(result.operationId)
   }
   async command(input: unknown): Promise<unknown> {
+    const action = z.object({ action: z.string() }).parse(input).action
+    if (action === 'shared-preview') {
+      const { id } = z.object({ id: z.uuid() }).parse(input)
+      return this.exclusive('shared-preview:' + id, () =>
+        prepareSharedArchive(
+          this.shared,
+          join(this.config.stateDir, 'shared-previews'),
+          id,
+        ),
+      )
+    }
+    if (action === 'shared-takeover') {
+      const command = z
+        .object({
+          id: z.uuid(),
+          generation: z.number().int().nonnegative(),
+          cut: z.number().int().nonnegative(),
+          sourceId: archiveIdSchema,
+          cwd: z.string(),
+          operationId: z.uuid(),
+          confirmed: z.literal(true),
+          resume: archiveResumeOptions.optional(),
+        })
+        .parse(input)
+      return this.exclusive('codex-import:' + command.operationId, async () => {
+        const value = {
+          endpoint: this.client.mesh.endpoint,
+          id: command.id,
+          generation: command.generation,
+          cut: command.cut,
+          archiveId: command.sourceId,
+        }
+        const old = await this.sharedReturn(command.operationId)
+        if (old && JSON.stringify(old) !== JSON.stringify(value))
+          throw new Error('This transfer already uses a different shared cut')
+        await atomicJson(this.sharedReturnPath(command.operationId), value)
+        return this.importCodex(command)
+      })
+    }
+    if (action === 'shared-status')
+      return {
+        shares: await this.shared.list(),
+        following: await this.followers.list(),
+      }
+    if (action === 'shared-follow')
+      return this.followers.follow(z.object({ id: z.uuid() }).parse(input).id)
+    if (action === 'shared-content') {
+      const value = z
+        .object({
+          id: z.uuid(),
+          seq: z.number().int().nonnegative(),
+          offset: z.number().int().nonnegative().default(0),
+        })
+        .parse(input)
+      return this.shared.text(value.id, value.seq, value.offset)
+    }
+    if (action === 'shared-publish') {
+      if (this.upgrading)
+        throw new Error('Wait for the device upgrade to finish')
+      const value = z
+        .object({
+          sessionId: z.string(),
+          title: z.string().min(1).max(160),
+          scope: z.enum(['full', 'text']).default('full'),
+          confirmed: z.literal(true),
+        })
+        .parse(input)
+      const session = await this.client.mesh.stat(value.sessionId)
+      if (!session) throw new Error('Open the conversation before sharing')
+      const share = await this.shared.create({
+        id: randomUUID(),
+        title: value.title,
+        scope: value.scope,
+        source: {
+          adapter: 'deepseek',
+          id: session.id,
+          incarnation: session.incarnation,
+        },
+        writerToken: randomUUID(),
+      })
+      await this.followers.follow(share.id)
+      return share
+    }
     const command = commandSchema.parse(input)
     if (command.action === 'prepare-upgrade') return this.prepareUpgrade()
     if (command.action === 'cancel-upgrade') {
@@ -2399,6 +2537,7 @@ export class HandoffCoordinator {
   }
   async close() {
     this.closing = true
+    await this.followers.close()
     this.abort.abort(new Error('ContextMesh plugin stopping'))
     clearInterval(this.pollTimer)
     clearInterval(this.heartbeatTimer)

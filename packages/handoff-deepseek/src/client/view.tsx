@@ -1,4 +1,5 @@
 import { ArchiveHistory, archiveSize } from './archive-history.js'
+import { SharedConversations } from './shared.js'
 import type { ArchiveResumeOptions } from '../../../protocol/src/archives.js'
 import { ConnectionSetup } from './connection.js'
 import { FilesPanel } from './files.js'
@@ -430,14 +431,15 @@ function text(data: unknown) {
   return JSON.stringify(data, null, 2)
 }
 export function CodexImportPanel({
+  initialSource,
   data,
   request,
   refresh,
   open,
   browse,
   t,
-}: Actions & Locale & { data: Snapshot }) {
-  const [source, setSource] = useState(''),
+}: Actions & Locale & { data: Snapshot; initialSource?: string }) {
+  const [source, setSource] = useState(initialSource ?? ''),
     [directory, setDirectory] = useState(''),
     [browsing, setBrowsing] = useState(false),
     [busy, setBusy] = useState(false),
@@ -714,6 +716,13 @@ export function RemotePanelView({
   browse,
   t,
 }: Actions & Locale & { data?: Snapshot; error?: Error }) {
+  const [sharedImport, setSharedImport] = useState<{
+    id: string
+    generation: number
+    cut: number
+    archiveId: string
+    entry: NonNullable<Snapshot['codexArchives']>[number]
+  }>()
   const [busy, setBusy] = useState(false),
     [failure, setFailure] = useState(''),
     [notice, setNotice] = useState('')
@@ -786,6 +795,51 @@ export function RemotePanelView({
         {t('device')}: {data.name}
       </div>
       <DeviceSetup connection={data.connection} request={request} t={t} />
+      <SharedConversations
+        request={request}
+        t={t}
+        continueHere={async (id) => {
+          const status = (await request({ action: 'shared-status' })) as {
+            shares: { id: string; source: { adapter: string; id: string } }[]
+          }
+          const share = status.shares.find((item) => item.id === id)
+          if (share?.source.adapter === 'deepseek') {
+            if (takeover) await takeover(share.source.id)
+            else open(share.source.id)
+            return
+          }
+          setSharedImport(
+            (await request({ action: 'shared-preview', id })) as NonNullable<
+              typeof sharedImport
+            >,
+          )
+        }}
+      />
+      {sharedImport && (
+        <CodexImportPanel
+          key={sharedImport.archiveId}
+          initialSource={sharedImport.archiveId}
+          data={{ ...data, codexArchives: [sharedImport.entry] }}
+          request={(value) => {
+            const command = value as { action: string }
+            return request(
+              command.action === 'import-codex'
+                ? {
+                    ...command,
+                    action: 'shared-takeover',
+                    id: sharedImport.id,
+                    generation: sharedImport.generation,
+                    cut: sharedImport.cut,
+                  }
+                : value,
+            )
+          }}
+          refresh={refresh}
+          open={open}
+          browse={browse}
+          t={t}
+        />
+      )}
       {data.workspaceTransfer && (
         <FilesPanel data={data} request={request} t={t} />
       )}
@@ -931,6 +985,25 @@ export function RemotePanelView({
                     {last?.error && <p className="cm-error">{last.error}</p>}
                   </div>
                   <div className="cm-actions">
+                    <button
+                      disabled={busy}
+                      onClick={() => {
+                        if (window.confirm(t('liveConfirm')))
+                          void run(
+                            () =>
+                              request({
+                                action: 'shared-publish',
+                                sessionId: session.id,
+                                title: session.title || session.id,
+                                scope: 'full',
+                                confirmed: true,
+                              }),
+                            t('liveFollowing'),
+                          )
+                      }}
+                    >
+                      {t('liveShare')}
+                    </button>
                     <button
                       disabled={busy}
                       onClick={() => void run(() => load(session.id))}

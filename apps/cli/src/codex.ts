@@ -13,6 +13,7 @@ import { installCodexPanel } from './codex-panel-install.js'
 import { CodexPanelJobs } from './codex-panel-jobs.js'
 import { serveCodexPanel } from './codex-panel-mcp.js'
 import { CodexBridge } from '../../../packages/adapter-codex/src/bridge.js'
+import { sharedHook } from '../../../packages/adapter-codex/src/shared-sync.js'
 
 export async function runCodex(args: string[]) {
   if (args[0] !== 'codex') return false
@@ -47,8 +48,13 @@ export async function runCodex(args: string[]) {
     )
     return true
   }
-  if (command === 'panel-mcp' || command === 'panel-worker') {
-    if (flags.length || (command === 'panel-mcp' ? id !== undefined : !id))
+  if (
+    command === 'panel-mcp' ||
+    command === 'panel-worker' ||
+    command === 'sync-worker' ||
+    command === 'sync-hook'
+  ) {
+    if (flags.length || (command === 'panel-worker' ? !id : id !== undefined))
       throw new Error('Invalid ContextMesh panel command')
     const connection = await resolveConnection()
     const jobs = new CodexPanelJobs({
@@ -64,7 +70,43 @@ export async function runCodex(args: string[]) {
       },
     })
     if (command === 'panel-mcp') await serveCodexPanel(jobs)
-    else await jobs.run(id!)
+    else if (command === 'sync-worker') {
+      const abort = new AbortController()
+      const stop = () => abort.abort()
+      process.once('SIGTERM', stop)
+      process.once('SIGINT', stop)
+      try {
+        await jobs.shared.run(abort.signal)
+      } finally {
+        process.off('SIGTERM', stop)
+        process.off('SIGINT', stop)
+      }
+    } else if (command === 'sync-hook') {
+      const chunks: Buffer[] = []
+      let bytes = 0
+      for await (const chunk of process.stdin) {
+        bytes += chunk.length
+        if (bytes > 32 * 1024 * 1024)
+          throw new Error('Hook input exceeds the local transport limit')
+        chunks.push(chunk)
+      }
+      const input = sharedHook.parse(
+        JSON.parse(Buffer.concat(chunks).toString('utf8')),
+      )
+      try {
+        const result = await jobs.shared.captureHook(input)
+        if (result.shared || input.hook_event_name === 'SessionStart')
+          await jobs.startSync()
+        console.log('{}')
+      } catch (error) {
+        console.error(
+          error instanceof Error
+            ? error.message
+            : 'ContextMesh could not confirm this shared conversation',
+        )
+        process.exitCode = 2
+      }
+    } else await jobs.run(id!)
     return true
   }
   if (!command || command === '--help' || command === 'help') {

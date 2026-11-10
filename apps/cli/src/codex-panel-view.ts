@@ -176,6 +176,7 @@ dd { margin: 0; overflow-wrap: anywhere; }
 </header>
 <nav aria-label="ContextMesh">
   <button type="button" data-view="receive" aria-controls="receivePage" aria-pressed="true" data-copy="receive"></button>
+  <button type="button" data-view="shared" aria-controls="sharedPage" aria-pressed="false" data-copy="liveShared"></button>
   <button type="button" data-view="publish" aria-controls="publishPage" aria-pressed="false" data-copy="publish"></button>
   <button type="button" data-view="activity" aria-controls="activityPage" aria-pressed="false"><span data-copy="activity"></span><span id="activityCount" class="badge" hidden></span></button>
 </nav>
@@ -255,8 +256,20 @@ dd { margin: 0; overflow-wrap: anywhere; }
       </fieldset>
       <p class="notice" data-copy="publishHelp"></p>
       <button id="publish" class="primary main-action" type="button" data-copy="reviewPublish" disabled></button>
+      <button id="livePublish" class="secondary main-action" type="button" data-copy="liveShare" disabled></button>
+      <p class="muted" data-copy="liveHook"></p>
       <p id="publishResult" class="notice" role="status"></p>
     </form>
+  </section>
+  <section id="sharedPage" class="page" data-page="shared" hidden>
+    <h2 data-copy="liveShared"></h2><p data-copy="liveHelp"></p>
+    <select id="sharedChoice" aria-label="Shared conversation"></select>
+    <button id="sharedContinue" data-copy="liveContinue"></button>
+    <button id="sharedFollow" type="button" class="primary" data-copy="liveFollow"></button>
+    <p id="sharedNotice" role="status"></p><div id="sharedRecords"></div>
+    <button id="sharedEarlier" class="quiet" type="button" data-copy="moreRecords" hidden></button>
+    <pre id="sharedText" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre>
+    <button id="sharedMore" type="button" data-copy="liveMore" hidden></button>
   </section>
   <section id="activityPage" class="page" data-page="activity" aria-labelledby="activityHeading" hidden>
     <h2 id="activityHeading" data-copy="activityHeading"></h2>
@@ -265,6 +278,7 @@ dd { margin: 0; overflow-wrap: anywhere; }
     <div id="jobs"></div>
   </section>
 </main>
+<dialog id="liveReview"><h2 data-copy="liveShare"></h2><p data-copy="liveConfirm"></p><button id="liveCancel" type="button" data-copy="cancel"></button><button id="liveConfirm" type="button" data-copy="liveShare"></button></dialog>
 <dialog id="review" aria-labelledby="reviewTitle" aria-describedby="reviewNote">
   <h2 id="reviewTitle"></h2>
   <dl id="reviewFields"></dl>
@@ -581,6 +595,7 @@ function threadChoice() {
 }
 function updatePublish() {
   const thread = threadChoice()
+  $('livePublish').disabled = preparing || starting || refreshing || !thread
   $('threadValue').textContent = thread ? localTitle(thread) || fallbackTitle(thread.id) : t('chooseThread')
   $('publish').disabled = preparing || starting || refreshing || !catalog?.publishAvailable || !thread
   for (const row of $('threads').children) row.setAttribute('aria-pressed', String(row.dataset.thread === selectedThread))
@@ -927,6 +942,69 @@ $('viewActivity').addEventListener('click', () => showPage('activity', true))
 $('refresh').addEventListener('click', () => refresh().catch(error => notice('receiveNotice', error.message, true)))
 
 localize()
+let sharedData, sharedBusy = false, sharedCount = 100, sharedExcerpt, sharedRenderKey
+function renderShared() {
+  const selected=$('sharedChoice').value
+  const key=JSON.stringify({selected,language,sharedCount,sharedData})
+  if(key===sharedRenderKey)return
+  sharedRenderKey=key
+  $('sharedChoice').replaceChildren()
+  for(const share of sharedData?.shares || []) {
+    const option=document.createElement('option');option.value=share.id;option.textContent=share.title;$('sharedChoice').append(option)
+  }
+  if(sharedData?.shares.some(value=>value.id===selected))$('sharedChoice').value=selected
+  const followed=sharedData?.following.find(value=>value.share.id===$('sharedChoice').value)
+  const current=sharedData?.shares.find(value=>value.id===$('sharedChoice').value)
+  $('sharedContinue').hidden=current?.source.adapter!=='deepseek'
+  $('sharedFollow').hidden=!!followed
+  $('sharedFollow').disabled=!$('sharedChoice').value
+  $('sharedRecords').replaceChildren()
+  notice('sharedNotice',followed?t(followed.error?'liveOffline':'liveFollowing'):t('liveEmpty'))
+  for(const record of (followed?.records || []).slice(-sharedCount)) {
+    const article=document.createElement('article'),title=document.createElement('strong'),text=document.createElement('p'),button=document.createElement('button')
+    title.textContent=t({user:'liveUser',assistant:'liveAssistant',reference:'liveReference'}[record.role])+' '+(record.status?t({running:'liveRunning',completed:'liveCompleted',failed:'liveFailed',declined:'liveDeclined'}[record.status]||''): '');text.textContent=record.preview;button.textContent=t('liveOpen');button.type='button'
+    button.addEventListener('click',()=>readShared(record.seq,0))
+    article.append(title,text,button);$('sharedRecords').append(article)
+  }
+  $('sharedEarlier').hidden=(followed?.records.length||0)<=sharedCount
+}
+async function refreshShared() {
+  if(sharedBusy)return
+  sharedBusy=true
+  try {sharedData=await tool('shared_status');renderShared()}catch(error){sharedRenderKey=undefined;notice('sharedNotice',t('liveOffline')+' '+error.message,true)}finally{sharedBusy=false}
+}
+async function readShared(seq,offset) {
+  const id=$('sharedChoice').value
+  try {
+    const value=await tool('shared_content',{id,seq,offset})
+    if(id!==$('sharedChoice').value)return
+    $('sharedText').textContent=(offset?$('sharedText').textContent:'')+value.text
+    sharedExcerpt={seq,offset:value.next};$('sharedMore').hidden=value.next==null
+  }catch(error){notice('sharedNotice',error.message,true)}
+}
+$('sharedContinue').addEventListener('click',async()=>{
+  const current=sharedData?.shares.find(value=>value.id===$('sharedChoice').value)
+  if(!current)return
+  await refresh()
+  const source=remote.find(value=>value.adapter==='deepseek'&&value.id===current.source.id)
+  if(source?.status!=='takeover'||!catalog?.takeoverAvailable){notice('sharedNotice',t('liveSourceUnavailable'),true);return}
+  selectedSource='deepseek:'+current.source.id
+  renderSources();updateReceive();showPage('receive')
+})
+$('sharedChoice').addEventListener('change',()=>{sharedCount=100;$('sharedText').textContent='';$('sharedMore').hidden=true;renderShared()})
+$('sharedEarlier').addEventListener('click',()=>{sharedCount+=100;renderShared()})
+$('sharedMore').addEventListener('click',()=>readShared(sharedExcerpt.seq,sharedExcerpt.offset))
+$('sharedFollow').addEventListener('click',async()=>{try{await tool('shared_follow',{id:$('sharedChoice').value});await refreshShared()}catch(error){notice('sharedNotice',error.message,true)}})
+$('livePublish').addEventListener('click',()=>$('liveReview').showModal())
+$('liveCancel').addEventListener('click',()=>$('liveReview').close())
+$('liveConfirm').addEventListener('click',async()=>{
+  const thread=threadChoice();if(!thread)return
+  $('liveConfirm').disabled=true
+  try {
+    await tool('shared_publish',{threadId:thread.id,title:(localTitle(thread)||fallbackTitle(thread.id)).slice(0,160),scope:document.querySelector('input[name="archiveScope"]:checked').value,confirmed:true})
+    $('liveReview').close();notice('publishResult',t('liveLoading'));await refreshShared()
+  }catch(error){notice('publishResult',error.message,true);$('liveReview').close()}finally{$('liveConfirm').disabled=false}
+})
 updateFolder()
 notice('activityNotice', t('loadingActivity'))
 try {
@@ -936,6 +1014,8 @@ try {
   await refresh()
   setInterval(refreshJobs, 2500)
   setInterval(checkConnection, 6000)
+  await refreshShared()
+  setInterval(refreshShared, 1000)
   window.addEventListener('online', checkConnection)
   document.addEventListener('visibilitychange', checkConnection)
 } catch (error) {

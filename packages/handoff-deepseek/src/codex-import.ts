@@ -106,6 +106,7 @@ export interface ImportOptions {
     cwd: string,
     ceiling?: number,
   ): Promise<ArchiveBudget>
+  beforeWrite?(operationId: string): Promise<void>
   prepareLocal?(target: {
     sessionId: string
     operationId: string
@@ -439,6 +440,7 @@ export class CodexContextImport {
       j.closeOp = randomUUID()
       delete j.recovery
       await atomicJson(this.file(operationId), j)
+      await this.options.beforeWrite?.(operationId)
       await this.write(j)
       return this.result(j)
     } finally {
@@ -603,6 +605,7 @@ export class CodexContextImport {
           'IMPORT_RECOVERY_REQUIRED',
           'Confirm the previous importing process and tools stopped, then use import-codex-recover with this operation ID',
         )
+      await this.options.beforeWrite?.(operationId)
       await this.write(j)
       const current = await this.options.mesh.stat(j.header.id)
       if (!current || current.incarnation !== j.incarnation)
