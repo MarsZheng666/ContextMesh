@@ -25,9 +25,10 @@ export class CodexRpc extends EventEmitter {
   constructor(readonly options: CodexOptions = {}) {
     super()
     this.child = spawn(
-      options.executable ?? 'codex',
+      options.executable ??
+        (process.platform === 'win32' ? 'codex.exe' : 'codex'),
       [...(options.args ?? []), 'app-server'],
-      { env: options.env ?? process.env, stdio: 'pipe' },
+      { windowsHide: true, env: options.env ?? process.env, stdio: 'pipe' },
     )
     this.child.stdout.setEncoding('utf8')
     this.child.stderr.resume()

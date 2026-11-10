@@ -4,6 +4,8 @@
 
 本指南在**每台运行 DSH 的设备上**使用。先部署一个 [ContextMesh Server](deployment.zh.md)，设备只需配置服务地址和凭据，无需安装 PostgreSQL 或启动本地 ContextMesh API。
 
+Windows Codex 桌面版请使用 [Windows 安装指南](runtime.zh.md#windows-codex-设备)。
+
 ## 选择安装方式
 
 - **源码安装：** 按下方步骤操作，需要 Git、Node.js 24.9+ 和 pnpm 11.25.0。

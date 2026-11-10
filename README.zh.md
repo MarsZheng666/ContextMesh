@@ -4,7 +4,7 @@
 
 **让上下文跨设备、跨模型、跨 Coding Agent 延续。**
 
-将对话和工具历史保存在共享 Server，在另一台设备继续 DSH 任务，或确认转移至 Codex CLI，使用接收端自己的模型和工作区自动继续未完成的任务。在 Mac 上，也可以从 Codex 桌面侧栏接管任务或发布已保存的会话与工具历史。接收端会按本机模型的上下文预算加载记录。
+将对话和工具历史保存在共享 Server，在另一台设备继续 DSH 任务，或确认转移至 Codex CLI，使用接收端自己的模型和工作区自动继续未完成的任务。在 macOS 或 Windows 上，也可以从 Codex 桌面侧栏接管任务或发布已保存的会话与工具历史。接收端会按本机模型的上下文预算加载记录。
 
 ContextMesh 由**一个共享远端 Server**和**执行任务设备上的集成组件**组成：唯一的 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 插件，以及内置于 ContextMesh CLI 的可选 Codex 适配器。
 
@@ -49,9 +49,9 @@ Codex 快照导入会创建独立会话并保留来源。**DSH → Codex 接管�
 
 ## 安装前了解
 
-**0.8.0-dev.17 为尚未发布的源码预览版。** 插件依赖本仓库锁定的 **DSH 0.2.1-rc.3 和兼容补丁**。请使用下方锁定版本的源码构建，不支持直接装入任意全局 DSH。
+**0.8.0-dev.18 为尚未发布的源码预览版。** 插件依赖本仓库锁定的 **DSH 0.2.1-rc.3 和兼容补丁**。请使用下方锁定版本的源码构建，不支持直接装入任意全局 DSH。
 
-Server 与设备客户端请使用同一经审核的源码版本。以下采用源码安装方式。CI 也会构建包含运行环境的 macOS Apple Silicon 和 Linux x64 安装包，但目前它们是**候选产物，尚未作为正式 Release 发布**。候选包的安装与升级方式见[运行包指南](docs/runtime.zh.md)。
+Server 与设备客户端请使用同一经审核的源码版本。以下采用源码安装方式。CI 也会构建包含运行环境的 macOS Apple Silicon、Linux x64 运行包，以及 Windows x64 Codex 安装包，但目前它们是**候选产物，尚未作为正式 Release 发布**。候选包的安装与升级方式见[运行包指南](docs/runtime.zh.md)。
 
 ## 1. 部署 Server
 
@@ -87,6 +87,8 @@ API 地址为**服务器本机**的 `http://127.0.0.1:8787`。PostgreSQL 仅在 
 自行管理的 PostgreSQL、数据存放位置和升级步骤见[服务端安装与配置](docs/deployment.zh.md)。
 
 ## 2. 安装设备客户端
+
+**Windows Codex 桌面版：**请使用[原生 Windows 安装包和 PowerShell 配置步骤](docs/runtime.zh.md#windows-codex-设备)。下方源码步骤同时覆盖 macOS、Linux 客户端。
 
 **在每台要执行任务的设备上执行。** 源码 CLI 需要 Git、**Node.js 24.9+** 和 **pnpm 11.25.0**。即使 Server 与 DSH 在同一台机器，也使用独立的客户端目录，避免服务端 `.env` 覆盖设备凭据。
 
@@ -208,7 +210,7 @@ pnpm cli codex status CODEX_SESSION_ID
 
 ### 使用 Codex 桌面侧栏
 
-在 Mac 上[安装托管运行时](docs/runtime.zh.md)，用 `contextmesh setup` 连接各设备共享的 Server，然后启用侧栏。
+在 macOS 或 Windows 上[安装托管运行时](docs/runtime.zh.md)，用 `contextmesh setup` 连接各设备共享的 Server，然后启用侧栏。
 
 ```sh
 contextmesh codex install-panel

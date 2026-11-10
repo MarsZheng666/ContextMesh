@@ -1,4 +1,9 @@
-import { mkdir, readFile, lstat, open, link, unlink } from 'node:fs/promises'
+import {
+  privateDirectory,
+  syncDirectory,
+} from '../../runtime-manager/src/files.js'
+import { windowsPrivatePath } from '../../platform/src/windows.js'
+import { readFile, lstat, open, link, unlink } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
 import { randomUUID } from 'node:crypto'
@@ -27,11 +32,12 @@ export async function readConnection(
     !info.isFile() ||
     info.isSymbolicLink() ||
     info.nlink !== 1 ||
-    (info.mode & 0o077) !== 0
+    (process.platform !== 'win32' && (info.mode & 0o077) !== 0)
   )
     throw new Error(
       'Connection config must be a private regular file (mode 600)',
     )
+  if (process.platform === 'win32') await windowsPrivatePath(path)
   return deviceConnection.parse(JSON.parse(await readFile(path, 'utf8')))
 }
 export async function writeConnection(
@@ -40,12 +46,7 @@ export async function writeConnection(
 ) {
   const config = deviceConnection.parse(value),
     dir = dirname(path)
-  await mkdir(dir, { recursive: true, mode: 0o700 })
-  const info = await lstat(dir)
-  if (!info.isDirectory() || info.isSymbolicLink() || (info.mode & 0o077) !== 0)
-    throw new Error(
-      'Connection directory must be private (mode 700), without symlinks',
-    )
+  await privateDirectory(dir)
   const tmp = join(dir, '.connection-' + randomUUID() + '.tmp')
   const file = await open(tmp, 'wx', 0o600)
   try {
@@ -54,12 +55,7 @@ export async function writeConnection(
     await file.close()
     // Atomic no-clobber publication; another setup cannot replace an existing credential.
     await link(tmp, path)
-    const directory = await open(dir, 'r')
-    try {
-      await directory.sync()
-    } finally {
-      await directory.close()
-    }
+    await syncDirectory(dir)
   } finally {
     await file.close().catch(() => {})
     await unlink(tmp).catch(() => {})

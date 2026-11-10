@@ -1,3 +1,5 @@
+import { findDesktopCodex } from './codex-executable.js'
+import { powershellCommand } from '../../../packages/platform/src/windows.js'
 import { execFile } from 'node:child_process'
 import { constants } from 'node:fs'
 import { access } from 'node:fs/promises'
@@ -12,20 +14,18 @@ import { runtimeHome } from '../../../packages/runtime-manager/src/install.js'
 import { runtimeSettings } from '../../../packages/runtime-manager/src/supervisor.js'
 
 const execute = promisify(execFile)
-const desktopCodex =
-  '/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex'
-
 export async function installCodexPanel(explicitBin?: string) {
-  if (process.platform !== 'darwin')
-    throw new Error('The ContextMesh desktop panel is available on macOS')
-  const bin = resolve(explicitBin ?? desktopCodex)
-  await access(bin, constants.X_OK).catch(() => {
+  if (!['darwin', 'win32'].includes(process.platform))
     throw new Error(
-      'Install the Codex desktop app or use --codex-bin with its bundled Codex executable',
+      'The ContextMesh desktop panel is available on macOS and Windows',
     )
-  })
+  const windows = process.platform === 'win32'
+  const bin = await findDesktopCodex(explicitBin)
   const home = resolve(runtimeHome())
-  const launcher = join(home, 'bin/contextmesh')
+  const launcher = windows
+    ? join(home, 'bootstrap/node.exe')
+    : join(home, 'bin/contextmesh')
+  const launchArgs = windows ? [join(home, 'bootstrap/launch.mjs')] : []
   await access(launcher, constants.X_OK).catch(() => {
     throw new Error(
       'Install the ContextMesh runtime before enabling the Codex panel',
@@ -50,7 +50,7 @@ export async function installCodexPanel(explicitBin?: string) {
     mcpServers: {
       contextmesh: {
         command: launcher,
-        args: ['codex', 'panel-mcp'],
+        args: [...launchArgs, 'codex', 'panel-mcp'],
         env: {
           CODEX_HOME: codexHome,
           CONTEXTMESH_CODEX_BIN: bin,
@@ -62,6 +62,29 @@ export async function installCodexPanel(explicitBin?: string) {
       },
     },
   })
+  const psQuote = (value: string) => "'" + value.replaceAll("'", "''") + "'"
+  const windowsHook = powershellCommand(
+    [
+      ...Object.entries({
+        CONTEXTMESH_HOME: home,
+        CODEX_HOME: codexHome,
+        CONTEXTMESH_CODEX_BIN: bin,
+        ...(process.env.CONTEXTMESH_CONFIG
+          ? { CONTEXTMESH_CONFIG: resolve(process.env.CONTEXTMESH_CONFIG) }
+          : {}),
+        ...(settings.caFile ? { NODE_EXTRA_CA_CERTS: settings.caFile } : {}),
+      }).map(([key, value]) => '$env:' + key + '=' + psQuote(value)),
+      '$reader = [System.IO.StreamReader]::new([Console]::OpenStandardInput(), [System.Text.UTF8Encoding]::new($false))',
+      '$payload = $reader.ReadToEnd()',
+      '$OutputEncoding = [System.Text.UTF8Encoding]::new($false)',
+      '$payload | & ' +
+        [launcher, ...launchArgs, 'codex', 'sync-hook'].map(psQuote).join(' '),
+      'exit $LASTEXITCODE',
+    ].join('\n'),
+  )
+  // Encoded content contains paths as PowerShell literals, not shell fragments.
+  const windowsHookCommand =
+    '"' + windowsHook.executable + '" ' + windowsHook.args.join(' ')
   const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'"
   const hookCommand = [
     'env',
@@ -96,7 +119,8 @@ export async function installCodexPanel(explicitBin?: string) {
             hooks: [
               {
                 type: 'command',
-                command: hookCommand,
+                command: windows ? windowsHookCommand : hookCommand,
+                ...(windows ? { commandWindows: windowsHookCommand } : {}),
                 timeout: event === 'Interrupt' ? 3 : 10,
               },
             ],
@@ -121,6 +145,7 @@ export async function installCodexPanel(explicitBin?: string) {
     execute(bin, ['plugin', ...args, '--json'], {
       env: { ...process.env, CODEX_HOME: codexHome },
       timeout: 30000,
+      windowsHide: true,
     }).catch(() => {
       throw new Error(
         'Codex could not register the ContextMesh panel. Check that the desktop app is up to date and local plugins are allowed.',

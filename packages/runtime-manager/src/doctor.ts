@@ -54,7 +54,9 @@ export async function diagnose(
       configuration: 'invalid',
       code: 'CONFIG_INVALID',
       advice:
-        'Check the connection file format and private file permissions (600).',
+        process.platform === 'win32'
+          ? 'Check the connection file format and Windows account permissions.'
+          : 'Check the connection file format and private file permissions (600).',
     }
   }
   const base = {

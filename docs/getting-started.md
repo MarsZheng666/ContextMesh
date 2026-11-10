@@ -4,6 +4,8 @@
 
 Use this guide on **each device running DSH**. Deploy one [ContextMesh Server](deployment.md) first. Devices need a service URL and a credential; they do not need PostgreSQL or a local ContextMesh API process.
 
+For Codex Desktop on Windows, use the [Windows installation guide](runtime.md#windows-codex-device).
+
 ## Choose an installation method
 
 - **Source:** follow the steps below. Requires Git, Node.js 24.9+, and pnpm 11.25.0.

@@ -69,19 +69,28 @@ export async function installBundle(
   await privateDirectory(join(home, 'data'))
   await privateDirectory(join(home, 'bin'))
   await privateDirectory(join(home, 'bootstrap'))
+  const nodeName = process.platform === 'win32' ? 'node.exe' : 'node'
   await cp(
-    join(home, 'releases', manifest.version, 'bin/node'),
-    join(home, 'bootstrap/node'),
+    join(home, 'releases', manifest.version, 'bin', nodeName),
+    join(home, 'bootstrap', nodeName),
   )
   await writeFile(
     join(home, 'bootstrap/launch.mjs'),
-    `import {readFileSync} from 'node:fs';import {spawn} from 'node:child_process';import {fileURLToPath} from 'node:url';import {dirname,resolve,join} from 'node:path';const home=resolve(dirname(fileURLToPath(import.meta.url)),'..');const {version}=JSON.parse(readFileSync(join(home,'current.json'),'utf8'));if(!/^[0-9][a-z0-9.-]*$/.test(version))throw Error('Invalid version');const bundle=join(home,'releases',version);const child=spawn(join(bundle,'bin/node'),[join(bundle,'app/dist/cli.js'),...process.argv.slice(2)],{stdio:'inherit',env:{...process.env,CONTEXTMESH_HOME:home,CONTEXTMESH_BUNDLE:bundle}});for(const signal of ['SIGINT','SIGTERM'])process.on(signal,()=>child.kill(signal));child.on('exit',(code)=>{process.exitCode=code??1});child.on('error',()=>{process.exitCode=1});`,
+    `import {readFileSync} from 'node:fs';import {spawn} from 'node:child_process';import {fileURLToPath} from 'node:url';import {dirname,resolve,join} from 'node:path';const home=resolve(dirname(fileURLToPath(import.meta.url)),'..');const {version}=JSON.parse(readFileSync(join(home,'current.json'),'utf8'));if(!/^[0-9][a-z0-9.-]*$/.test(version))throw Error('Invalid version');const bundle=join(home,'releases',version);const child=spawn(join(bundle,'bin',process.platform==='win32'?'node.exe':'node'),[join(bundle,'app/dist/cli.js'),...process.argv.slice(2)],{stdio:'inherit',windowsHide:true,env:{...process.env,CONTEXTMESH_HOME:home,CONTEXTMESH_BUNDLE:bundle}});for(const signal of ['SIGINT','SIGTERM'])process.on(signal,()=>child.kill(signal));child.on('exit',(code)=>{process.exitCode=code??1});child.on('error',()=>{process.exitCode=1});`,
     { mode: 0o600 },
   )
-  await writeFile(
-    join(home, 'bin/contextmesh'),
-    '#!/bin/sh\nCM_HOME=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)\nexec "$CM_HOME/bootstrap/node" "$CM_HOME/bootstrap/launch.mjs" "$@"\n',
-    { mode: 0o755 },
-  )
+  if (process.platform === 'win32') {
+    await writeFile(
+      join(home, 'bin/contextmesh.cmd'),
+      '@echo off\r\nsetlocal DisableDelayedExpansion\r\n"%~dp0..\\bootstrap\\node.exe" "%~dp0..\\bootstrap\\launch.mjs" %*\r\nexit /b %errorlevel%\r\n',
+    )
+  } else {
+    await writeFile(
+      join(home, 'bin/contextmesh'),
+      '#!/bin/sh\nCM_HOME=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)\nexec "$CM_HOME/bootstrap/node" "$CM_HOME/bootstrap/launch.mjs" "$@"\n',
+      { mode: 0o755 },
+    )
+  }
+
   return { version: manifest.version, home }
 }

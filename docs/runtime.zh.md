@@ -2,11 +2,40 @@
 
 [English](runtime.md)
 
-0.8.0-dev.16 运行包包含 Node、固定版本的 DeepSeek Harness 和唯一的 `dsh-contextmesh-handoff` 插件，面向 macOS Apple Silicon 与 Linux x64。Linux 包会在清单中记录并检查最低 glibc 版本，发布 CI 使用 Ubuntu 22.04（glibc 2.35）。暂不支持 Windows 和其他架构。普通对话无需全局 Node、pnpm 或 Git；代码项目使用 Git 时仍需安装 Git。
+0.8.0-dev.18 运行包包含 Node。macOS Apple Silicon 与 Linux x64 包还包含固定版本的 DeepSeek Harness 和唯一的 ContextMesh 插件。**Windows x64 包提供相同的 Codex 桌面面板和 Codex 功能**，使用 Windows 原生路径、目录选择和进程，无需 WSL，不包含 Windows 版 DSH 或 Server。Linux 包会记录最低 glibc 版本，发布 CI 使用 Ubuntu 22.04（glibc 2.35）。普通对话无需全局 Node、pnpm 或 Git；Git 项目仍需 Git。该包暂未覆盖 Windows ARM64。
 
 运行包由 **Release packages** 工作流构建。工作流产物属于候选包，发布仍是维护者单独执行的步骤。从可信发布获取对应平台压缩包和校验值，核对 SHA-256 后解压。保留校验值与 `manifest.json`；其中记录平台、Node/DSH 版本、协议与数据库兼容范围、源码提交、锁文件和补丁哈希、文件校验值及第三方许可证信息。
 
-## 第一台设备
+## Windows Codex 设备
+
+使用 Windows 11 x64、[原生 Codex 桌面版](https://learn.chatgpt.com/docs/windows/windows-app)，以及与桌面版共用 `CODEX_HOME`（通常为 `$HOME\.codex`）的原生 `codex.exe`。Windows 检查和桌面验收完成前，安装包仍属于候选包。它与 macOS 插件共用页面、操作、确认流程和自动同步功能。
+
+先用 `Get-FileHash -Algorithm SHA256` 核对 ZIP 校验值并解压，在解压目录打开 PowerShell：
+
+```powershell
+.\bin\contextmesh.cmd install "$PWD"
+$env:Path = "$HOME\.contextmesh\bin;$env:Path"
+contextmesh.cmd setup
+contextmesh.cmd codex install-panel
+```
+
+设置时输入其他设备使用的同一个 **HTTPS Server 地址**和设备配对码，无需本地 PostgreSQL 或 SSH 隧道。重新打开 Codex 桌面版，在左侧栏选择 **ContextMesh**，然后在 **Settings → Hooks** 审核并信任插件钩子，以便自动同步你主动共享的会话。
+
+安装器依次检查 `CODEX_INSTALL_DIR`、`%LOCALAPPDATA%\Programs\OpenAI\Codex\bin` 和 `PATH` 中的原生程序。也可执行 `contextmesh.cmd codex install-panel --codex-bin 'C:\path\to\codex.exe'` 指定路径。不会替换为 WSL 或 `.cmd` 启动脚本。使用自定义 `CODEX_HOME` 时，请在安装前将它设为桌面版使用的同一个 Windows 目录。
+
+**选择文件夹…** 打开 Windows 系统目录选择窗口，可选择有权访问的本地目录或 UNC 目录；取消时保留原选择，接续使用接收端 Codex 的模型。运行时应放在私有 NTFS 目录，凭据和恢复数据由 Windows 账户访问权限保护。项目仍受原生 Codex 的沙箱和文件权限约束。
+
+升级前等待执行中的任务和传输完成，关闭 Codex 桌面版，然后使用新版本的 Windows 解压目录：
+
+```powershell
+contextmesh.cmd upgrade 'C:\Downloads\contextmesh-new' --check
+contextmesh.cmd upgrade 'C:\Downloads\contextmesh-new'
+contextmesh.cmd codex install-panel
+```
+
+重新打开桌面版，审核发生变化的钩子。固定启动入口会选择新版本，保留设备凭据、本地记录和 Server 历史；旧版本和私有升级备份可用于恢复。共享上下文仍由 Server 持久化，本机保留原生 Codex 历史。
+
+## macOS 或 Linux DSH 设备
 
 先按下方说明部署带默认 HTTPS 入口的服务端，再在每台设备的解压目录执行：
 
