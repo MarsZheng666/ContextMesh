@@ -16,21 +16,21 @@ The runtime registers one ContextMesh sidebar entry and supplies its local servi
 
 The panel checks the Server while it is visible. When the connection returns, it refreshes the shared session list and keeps the current selection if the session is still available.
 
-1. In **Receive a shared session**, select a conversation and a project directory on your Mac. New conversations use the receiving Codex default model. Use **Choose Folder…** to browse any accessible folder with the macOS picker, or enter its absolute path. Enable project writes only if the task should edit files.
+1. In **Receive**, select a shared conversation. **Choose Folder…** opens the macOS folder picker for any accessible folder. If you cancel, your previous selection is kept. New conversations use the receiving Codex model. Enable project writes when the task should edit files.
 2. Choose the action shown for the session.
    - **Review import** previews the records that fit the receiving Codex model. Use the optional next instruction to find relevant history, or use **Browse full archive** to select an excerpt. Confirm the import, then send the next message in Codex.
    - **Review takeover** transfers ownership of a live session from a supported source. ContextMesh checks the model and workspace before requesting that the source stop. Codex then continues any unfinished work.
-3. Find the conversation title in **Recent transfers**, then select **Open in Codex**. Sessions that need recovery or have a transfer in progress show their status in the list.
+3. In **Activity**, find the conversation by title, then select **Open in Codex**. The activity count includes pending and unresolved transfers.
 
 For live takeover, ordinary directories are supported. A Git task needs clean workspaces at the same commit on both devices. See [takeover and recovery](confirmed-takeover.md) for source support, permissions and interrupted transfers.
 
 ## Publish a conversation
 
-1. Wait for the Codex conversation and any tools to finish. Under **Publish a conversation**, select the saved conversation and choose **Archive contents**.
-   - **Full archive** includes saved messages and supported tool records, including recorded logs from interrupted turns after tools have settled. The review shows the record count, size and any parts the adapter could not export.
+1. Wait for the Codex conversation and any tools to finish. In **Publish**, select the saved conversation and choose **Archive contents**.
+   - **Conversation and tool history** includes saved messages and supported tool records, including recorded logs from interrupted turns after tools have settled. The review shows the record count, size and any parts the adapter could not export.
    - **Conversation text only** shares saved user and assistant messages, including text saved before an interruption.
 2. Review the scope and confirm publication. In DSH, select **Continue a Codex archive**, find it by title or archive reference, choose the receiving directory and confirm. Send your next instruction in the new conversation.
 
-The Server stores complete exported records in PostgreSQL as blocks of up to 512 KiB. Each record has a byte-range index, and large logs have searchable anchors for errors and paths. Full history stays available to devices in the same namespace even when a receiving model uses only a subset. Interrupted uploads can resume from **Recent transfers → Retry publication**. Archives published by an older Server use its legacy 1 MiB format.
+The Server stores complete exported records in PostgreSQL as blocks of up to 512 KiB. Each record has a byte-range index, and large logs have searchable anchors for errors and paths. Full history stays available to devices in the same namespace even when a receiving model uses only a subset. Interrupted uploads can resume from **Activity → Retry publication**. Archives published by an older Server use its legacy 1 MiB format. When Activity offers **Use conversation text only**, it opens Publish with the original conversation and text-only scope selected for review.
 
 Codex resolves the model from the receiving project. ContextMesh reads the available window from the effective Codex configuration or a matching local model profile. If it cannot determine a window, set a conservative token window under **Advanced context settings**. The estimate reserves space for the receiving prompt, tools, user input and output. For a different model after import, use the panel to prepare a new import. [Archive format and recovery](codex-return.md)

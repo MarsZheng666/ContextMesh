@@ -24,6 +24,7 @@ import { MeshClient } from '../../packages/client/src/index.js'
 import { codexModel } from '../helpers/codex-model.js'
 import { codexPanel } from '../helpers/codex-panel.js'
 import { MeshError } from '../../packages/protocol/src/index.js'
+import { atomicJson } from '../../packages/runtime-manager/src/files.js'
 
 it('rechecks the Server after an interruption from the same Codex panel process', async () => {
   const f = await fixture()
@@ -361,9 +362,36 @@ it('publishes saved conversation text when native tool history exceeds the archi
     },
   })
   await save()
-  await expect(panel.publish(threadId, randomUUID())).rejects.toThrow(
-    'The full archive exceeds 1 MiB. Choose Conversation text only',
-  )
+  const jobs = join(home, 'bridge', 'panel-jobs')
+  const id = randomUUID()
+  const job = {
+    id,
+    action: { kind: 'publish', threadId, scope: 'full', confirmed: true },
+    createdAt: Date.now(),
+    state: 'queued',
+    message: '',
+  }
+  await atomicJson(join(jobs, id + '.json'), job)
+  vi.spyOn(panel.archives, 'supported').mockResolvedValue(false)
+  await panel.run(id)
+  expect(await panel.list()).toMatchObject([
+    {
+      id,
+      state: 'failed',
+      suggestion: 'publish-text',
+      message: expect.stringContaining('The full archive exceeds 1 MiB'),
+    },
+  ])
+  const legacyId = randomUUID()
+  await atomicJson(join(jobs, legacyId + '.json'), {
+    ...job,
+    id: legacyId,
+    state: 'failed',
+    message: 'Native snapshot exceeds the archive limit',
+  })
+  expect(
+    (await panel.list()).find((entry) => entry.id === legacyId),
+  ).toMatchObject({ suggestion: 'publish-text' })
 
   turn.status = 'inProgress'
   await save()

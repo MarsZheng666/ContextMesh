@@ -15,6 +15,7 @@ import {
   type BridgeOptions,
 } from '../../../packages/adapter-codex/src/bridge.js'
 import {
+  CodexArchiveTextFallback,
   NativeCodex,
   startTargetSchema,
 } from '../../../packages/adapter-codex/src/native.js'
@@ -89,6 +90,7 @@ const jobSchema = z.object({
   createdAt: z.number(),
   state: z.enum(['queued', 'running', 'completed', 'failed', 'attention']),
   message: z.string(),
+  suggestion: z.literal('publish-text').optional(),
   pid: z.number().int().positive().optional(),
   threadId: z.uuid().optional(),
   archiveId: z.string().optional(),
@@ -201,6 +203,18 @@ export class CodexPanelJobs {
   }
   private async read(id: string): Promise<Job> {
     const job = jobSchema.parse(await optionalJson(this.path(id)))
+    // Older installed runtimes only recorded the recovery hint in the message.
+    if (
+      !job.suggestion &&
+      job.state === 'failed' &&
+      job.action.kind === 'publish' &&
+      job.action.scope !== 'text' &&
+      (job.message === 'Native snapshot exceeds the archive limit' ||
+        job.message.endsWith(
+          'Choose Conversation text only to share the saved conversation.',
+        ))
+    )
+      return { ...job, suggestion: 'publish-text' }
     if (job.state === 'running' && job.pid) {
       try {
         process.kill(job.pid, 0)
@@ -328,6 +342,7 @@ export class CodexPanelJobs {
     )
       throw new Error('This panel operation has already started')
     job.state = 'running'
+    delete job.suggestion
     job.message =
       job.action.kind === 'takeover'
         ? 'Checking the receiver and transferring the task…'
@@ -412,6 +427,11 @@ export class CodexPanelJobs {
       }
     } catch (error) {
       job.state = job.action.kind === 'publish' ? 'failed' : 'attention'
+      if (
+        job.action.kind === 'publish' &&
+        error instanceof CodexArchiveTextFallback
+      )
+        job.suggestion = 'publish-text'
       job.message = (
         error instanceof Error ? error.message : 'The operation did not finish.'
       ).slice(0, 500)
