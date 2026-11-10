@@ -38,6 +38,8 @@ export const targetSchema = z
 export const startTargetSchema = targetSchema.partial({ model: true })
 export type StartTarget = z.infer<typeof startTargetSchema>
 
+export class CodexArchiveTextFallback extends Error {}
+
 export class NativeCodex {
   readonly rpc: CodexRpc
   constructor(options: CodexOptions = {}) {
@@ -354,16 +356,18 @@ export class NativeCodex {
         'Wait for the active Codex turn to settle before publishing',
       )
     if (scope === 'full' && latest !== 'completed')
-      throw new Error(
+      throw new CodexArchiveTextFallback(
         'A full archive needs a completed latest turn. Choose Conversation text only to share the saved conversation.',
       )
 
     const tooLarge = (limit = '1 MiB') =>
-      new Error(
-        scope === 'full'
-          ? `The full archive exceeds ${limit}. Choose Conversation text only to share the saved conversation.`
-          : `The conversation text exceeds the archive limit of ${limit}.`,
-      )
+      scope === 'full'
+        ? new CodexArchiveTextFallback(
+            `The full archive exceeds ${limit}. Choose Conversation text only to share the saved conversation.`,
+          )
+        : new Error(
+            `The conversation text exceeds the archive limit of ${limit}.`,
+          )
     const messages: PortableContext['messages'] = []
     let messageBytes = 0
     const append = (message: PortableContext['messages'][number]) => {
@@ -389,7 +393,7 @@ export class NativeCodex {
         message = projectCodexMessage(item, scope)
       } catch (error) {
         if (scope === 'full')
-          throw new Error(
+          throw new CodexArchiveTextFallback(
             'The full archive contains unsupported items. Choose Conversation text only to share the saved conversation.',
             { cause: error },
           )

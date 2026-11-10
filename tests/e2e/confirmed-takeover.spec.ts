@@ -815,7 +815,13 @@ it('the sidebar distinguishes saved sessions from unavailable sources and lists 
     const resource = await panel.request('resources/read', {
       uri: 'ui://contextmesh/panel.html',
     })
-    expect(JSON.stringify(resource)).toContain('Receive a shared session')
+    expect(resource).toMatchObject({
+      contents: [
+        expect.objectContaining({
+          text: expect.stringContaining('data-view="activity"'),
+        }),
+      ],
+    })
     expect(JSON.stringify(resource)).toContain('Choose Folder…')
     expect(JSON.stringify(resource)).not.toContain('Local Codex model')
     expect(JSON.stringify(resource)).not.toContain('remote DSH')
