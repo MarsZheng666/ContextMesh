@@ -57,6 +57,63 @@ const openTool = {
 export function codexPanelRequest(jobs: CodexPanelJobs, signal?: AbortSignal) {
   const folderPicker = panelFolderPicker(undefined, signal)
   const actions = {
+    shared_status: {
+      schema: empty,
+      run: () => jobs.shared.status(),
+      readOnly: true,
+    },
+    shared_follow: {
+      schema: id,
+      run: async (input: unknown) => {
+        const result = await jobs.shared.followers.follow(id.parse(input).id)
+        await jobs.startSync()
+        return result
+      },
+      readOnly: false,
+    },
+    shared_publish: {
+      schema: z
+        .object({
+          threadId: z.uuid(),
+          title: z.string().min(1).max(160),
+          scope: archiveScope,
+          confirmed: z.literal(true),
+        })
+        .strict(),
+      run: async (input: unknown) => {
+        const request = z
+          .object({
+            threadId: z.uuid(),
+            title: z.string(),
+            scope: archiveScope,
+          })
+          .parse(input)
+        const result = await jobs.shared.share(
+          request.threadId,
+          request.title,
+          request.scope,
+        )
+        await jobs.startSync()
+        return result
+      },
+      readOnly: false,
+    },
+    shared_content: {
+      schema: z
+        .object({
+          id: z.uuid(),
+          seq: z.number().int().nonnegative(),
+          offset: z.number().int().nonnegative().default(0),
+        })
+        .strict(),
+      run: (input: unknown) => {
+        const request = z
+          .object({ id: z.uuid(), seq: z.number(), offset: z.number() })
+          .parse(input)
+        return jobs.shared.client.text(request.id, request.seq, request.offset)
+      },
+      readOnly: true,
+    },
     folder_picker: {
       schema: folderPickerAction,
       run: folderPicker,
@@ -208,6 +265,7 @@ export function codexPanelRequest(jobs: CodexPanelJobs, signal?: AbortSignal) {
 }
 
 export async function serveCodexPanel(jobs: CodexPanelJobs) {
+  await jobs.startSync().catch(() => {})
   const lifecycle = new AbortController()
   const request = codexPanelRequest(jobs, lifecycle.signal)
   const lines = createInterface({ input: process.stdin })

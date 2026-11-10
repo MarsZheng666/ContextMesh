@@ -204,6 +204,38 @@ export class NativeCodex {
         }),
       ).data
   }
+  async scanShared(
+    threadId: string,
+    scope: 'full' | 'text',
+    visit: (
+      key: string,
+      record: import('../../client/src/archive-record.js').ArchiveRecord,
+    ) => Promise<void>,
+  ) {
+    for await (const page of this.pages(
+      'thread/items/list',
+      threadId,
+      1,
+      Number.MAX_SAFE_INTEGER,
+    )) {
+      for (const value of page) {
+        const entry = nativeSnapshot.shape.items.element.parse(value)
+        const key = z.string().min(1).parse(entry.item.id)
+        if (
+          entry.item.status &&
+          !['completed', 'failed', 'declined'].includes(
+            String(entry.item.status),
+          )
+        )
+          continue
+        const record = archiveItem(entry, scope, {
+          omittedAttachments: 0,
+          unrecognizedItems: 0,
+        })
+        if (record) await visit(key, record)
+      }
+    }
+  }
   private async readThread(threadId: string) {
     return z.object({ thread: nativeSnapshot.shape.thread }).parse(
       await this.rpc.request('thread/read', {

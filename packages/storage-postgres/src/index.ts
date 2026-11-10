@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import type { Update } from './handoff-store.js'
-import { ArchivePostgresStore } from './archives.js'
+import { SharedPostgresStore } from './shared.js'
 import { MeshError } from '../../protocol/src/index.js'
 import { contextDigest, validatePortable } from '../../protocol/src/portable.js'
 import { randomUUID } from 'node:crypto'
@@ -9,7 +9,7 @@ import type { HandoffManifest } from '../../protocol/src/handoff.js'
 export type { StoreOptions } from './base.js'
 
 /** Native logs keep their own formats; handoff records link the transferred task. */
-export class PostgresStore extends ArchivePostgresStore {
+export class PostgresStore extends SharedPostgresStore {
   async publishCodexGuiArchive(
     ns: string,
     request: z.infer<typeof codexGuiArchive>,

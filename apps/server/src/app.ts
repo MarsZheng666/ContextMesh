@@ -1,4 +1,6 @@
 import { registerArchiveRoutes } from './archives.js'
+import { registerSharedRoutes } from './shared.js'
+import { sharedFeature } from '../../../packages/protocol/src/shared.js'
 import { archiveFeature } from '../../../packages/protocol/src/archives.js'
 import Fastify, { type FastifyRequest } from 'fastify'
 import { registerTransferRoutes } from './transfers.js'
@@ -150,6 +152,13 @@ export function buildServer(options: ServerOptions) {
       )
   })
   registerDeviceRoutes(app, options.store, ns, options.token)
+  registerSharedRoutes(
+    app,
+    options.store,
+    ns,
+    (req) => principals.get(req)?.id ?? 'owner',
+    archiveQuota,
+  )
   app.setErrorHandler((error, req, reply) => {
     if (error instanceof MeshError)
       return reply
@@ -221,6 +230,7 @@ export function buildServer(options: ServerOptions) {
       protocolVersion: PROTOCOL_VERSION,
       leaseMs: options.store.leaseMs,
       features: [
+        sharedFeature,
         'native-agent-storage-v1',
         'cross-agent-takeover-v1',
         'codex-context-return-v1',

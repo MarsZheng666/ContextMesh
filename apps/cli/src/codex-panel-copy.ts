@@ -1,4 +1,6 @@
+import { sharedCopy } from '../../../packages/client/src/shared-copy.js'
 const en = {
+  ...sharedCopy.en,
   receive: 'Receive',
   publish: 'Publish',
   activity: 'Activity',
@@ -110,6 +112,7 @@ const en = {
 }
 
 const zh: Record<keyof typeof en, string> = {
+  ...sharedCopy.zh,
   receive: '接收',
   publish: '发布',
   activity: '记录',

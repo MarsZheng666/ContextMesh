@@ -1,0 +1,56 @@
+export const sharedCopy = {
+  en: {
+    liveUser: 'You',
+    liveAssistant: 'Assistant',
+    liveReference: 'Tool / reference',
+    liveRunning: 'Running',
+    liveCompleted: 'Completed',
+    liveFailed: 'Failed',
+    liveDeclined: 'Declined',
+    liveSourceUnavailable:
+      'Open this conversation on its source device before confirming takeover.',
+    liveShared: 'Live conversations',
+    liveShare: 'Share and sync',
+    liveFollow: 'Receive and follow',
+    liveFollowing: 'Following automatically',
+    liveHelp:
+      'New messages and tool records appear automatically after following.',
+    liveConfirm:
+      'Share this conversation and future messages with your paired devices? The selected sharing scope applies to future records.',
+    liveLoading: 'Preparing shared history…',
+    liveSynced: 'Up to date',
+    liveOffline: 'Reconnecting and keeping your saved position…',
+    liveOpen: 'Read record',
+    liveMore: 'Read more',
+    liveEmpty: 'Choose a shared conversation to follow.',
+    liveHook:
+      'Review and trust ContextMesh in the native Codex hook settings (CLI: /hooks) for tool events and shared ownership.',
+    liveContinue: 'Continue here',
+  },
+  zh: {
+    liveUser: '用户',
+    liveAssistant: '助手',
+    liveReference: '工具与参考记录',
+    liveRunning: '执行中',
+    liveCompleted: '已完成',
+    liveFailed: '失败',
+    liveDeclined: '已拒绝',
+    liveSourceUnavailable: '请先在源设备打开此会话，再确认接管。',
+    liveShared: '持续同步的会话',
+    liveShare: '共享并同步',
+    liveFollow: '接收并跟随',
+    liveFollowing: '自动跟随中',
+    liveHelp: '首次跟随后，新消息和工具执行记录会自动更新。',
+    liveConfirm:
+      '将此会话及后续消息共享给已配对设备？选定的共享范围会持续生效。',
+    liveLoading: '正在准备共享历史…',
+    liveSynced: '已同步',
+    liveOffline: '正在重连，将从上次位置补齐…',
+    liveOpen: '查看记录',
+    liveMore: '继续读取',
+    liveEmpty: '选择一条共享会话开始跟随。',
+    liveHook:
+      '在 Codex 原生钩子设置中审阅并信任 ContextMesh（CLI：/hooks），以同步工具事件并协调共享归属。',
+    liveContinue: '在此继续',
+  },
+}

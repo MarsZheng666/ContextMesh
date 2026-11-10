@@ -33,7 +33,7 @@ it('upgrades schema 1 transactionally, retains old sessions, and rejects future 
     // The previous release's schema 6 migrates without changing raw history.
     await db.query('DROP INDEX cm_sessions_adapter')
     await db.query(
-      'DROP TABLE cm_archive_entries, cm_archive_blocks, cm_archives',
+      'DROP TABLE cm_archive_entries, cm_archive_blocks, cm_archives, cm_shared_events, cm_shared_bindings, cm_shared_sessions, cm_shared_blocks',
     )
     await db.query('DELETE FROM cm_schema WHERE version>=7')
     await migrate(db)
@@ -48,7 +48,7 @@ it('upgrades schema 1 transactionally, retains old sessions, and rejects future 
     await db.query('DROP TABLE IF EXISTS cm_workspace_transfers')
     await db.query('DROP INDEX IF EXISTS cm_sessions_adapter')
     await db.query(
-      'DROP TABLE cm_archive_entries, cm_archive_blocks, cm_archives',
+      'DROP TABLE cm_archive_entries, cm_archive_blocks, cm_archives, cm_shared_events, cm_shared_bindings, cm_shared_sessions, cm_shared_blocks',
     )
     await db.query('DELETE FROM cm_schema WHERE version>=6')
     await db.query('DROP TABLE IF EXISTS cm_pairings,cm_device_credentials')
@@ -65,7 +65,7 @@ it('upgrades schema 1 transactionally, retains old sessions, and rejects future 
     await db.query('DROP TABLE IF EXISTS cm_workspace_transfers')
     await db.query('DROP INDEX IF EXISTS cm_sessions_adapter')
     await db.query(
-      'DROP TABLE cm_archive_entries, cm_archive_blocks, cm_archives',
+      'DROP TABLE cm_archive_entries, cm_archive_blocks, cm_archives, cm_shared_events, cm_shared_bindings, cm_shared_sessions, cm_shared_blocks',
     )
     await db.query('DELETE FROM cm_schema WHERE version>=6')
     await db.query('DROP TABLE IF EXISTS cm_pairings,cm_device_credentials')
@@ -104,7 +104,7 @@ it('upgrades schema 7 with existing device identities and preserves native histo
   try {
     await migrate(db)
     await db.query(
-      'DROP TABLE cm_archive_entries, cm_archive_blocks, cm_archives',
+      'DROP TABLE cm_archive_entries, cm_archive_blocks, cm_archives, cm_shared_events, cm_shared_bindings, cm_shared_sessions, cm_shared_blocks',
     )
     await db.query('DELETE FROM cm_schema WHERE version>=8')
     await db.query('ALTER TABLE cm_sessions DROP COLUMN successor_session')
@@ -155,9 +155,9 @@ it('migrates schema 8 to chunked archives without rewriting existing archive bod
   try {
     await migrate(db)
     await db.query(
-      'DROP TABLE cm_archive_entries, cm_archive_blocks, cm_archives',
+      'DROP TABLE cm_archive_entries, cm_archive_blocks, cm_archives, cm_shared_events, cm_shared_bindings, cm_shared_sessions, cm_shared_blocks',
     )
-    await db.query('DELETE FROM cm_schema WHERE version=9')
+    await db.query('DELETE FROM cm_schema WHERE version>=9')
     const id = 'codex:gui:legacy-fixture'
     const header = JSON.stringify({
       id,

@@ -169,3 +169,14 @@ Schema **9** adds the chunked archive catalog, record index and block tables. Ex
 A schema-8 binary cannot open a schema-9 database. Restoring a verified schema-8 backup discards writes made after that backup. The managed same-schema upgrade command keeps its explicit migration boundary.
 
 The API defaults to 20 GiB of raw chunk storage per namespace, counting reserved space for unfinished uploads. Set `CONTEXTMESH_ARCHIVE_QUOTA_BYTES` in the API environment to change this capacity. Staging uploads expire after 24 hours without progress and are cleaned up periodically. Committed archives are included in PostgreSQL backups.
+
+## Migrate schema 9 to 10
+
+Live sharing adds shared identities, source generations, append-only updates and verified content blocks. Existing native events and chunked archives remain unchanged.
+
+1. Prepare the reviewed schema-10 Server and matching clients. Enable maintenance; stop clients, Codex sync workers and tools, and resolve pending transfers before proceeding.
+2. Take and verify a PostgreSQL backup and retain the schema-9 deployment and private configuration.
+3. Stop the API. Replace only its reviewed image/binary while retaining the database volume, then start that API alone. Startup migrates to schema 10 in a transaction.
+4. Verify authenticated `/health/ready` reports `schemaVersion: 10` and `live-session-sync-v1`, and existing records remain readable. Update clients, refresh the existing Codex plugin, and review its lifecycle hooks before resuming shared work.
+
+Managed same-schema upgrades do not perform this migration automatically. A rollback to schema 9 requires an explicitly approved restore of the corresponding backup; a binary replacement cannot undo the migration. Shared Codex blocks use a separate pool with the same configured `CONTEXTMESH_ARCHIVE_QUOTA_BYTES` capacity; include that pool when planning disk usage. Both archive and live data are covered by PostgreSQL backups.

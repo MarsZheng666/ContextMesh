@@ -1,4 +1,6 @@
 import { captureCodexArchive } from '../../../packages/adapter-codex/src/archive-export.js'
+import { CodexSharedSync } from '../../../packages/adapter-codex/src/shared-sync.js'
+import { callLocal } from '../../../packages/handoff-deepseek/src/local-control.js'
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { ArchiveSpool } from '../../../packages/adapter-codex/src/archive-spool.js'
@@ -99,13 +101,36 @@ const jobSchema = z.object({
 type Job = z.infer<typeof jobSchema>
 
 export class CodexPanelJobs {
+  readonly shared: CodexSharedSync
   readonly bridge: CodexBridge
   private readonly directory: string
   readonly archives: ArchiveClient
   constructor(readonly options: BridgeOptions & { deviceId?: string }) {
+    this.shared = new CodexSharedSync(options)
     this.bridge = new CodexBridge(options)
     this.archives = new ArchiveClient(this.bridge.client)
     this.directory = join(options.stateDir, 'panel-jobs')
+  }
+  async startSync() {
+    if (
+      !(await this.shared.sources()).length &&
+      !(await this.shared.followers.list()).length
+    )
+      return
+    try {
+      await callLocal(join(this.shared.directory, 'worker'), {}, 500)
+      return
+    } catch {}
+    const worker = spawn(
+      process.execPath,
+      [...process.execArgv, process.argv[1]!, 'codex', 'sync-worker'],
+      { detached: true, stdio: 'ignore' },
+    )
+    await new Promise<void>((resolve, reject) => {
+      worker.once('spawn', resolve)
+      worker.once('error', reject)
+    })
+    worker.unref()
   }
   private path(id: string) {
     return join(this.directory, z.uuid().parse(id) + '.json')

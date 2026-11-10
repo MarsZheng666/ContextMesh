@@ -1,4 +1,6 @@
+import { sharedCopy } from '../../../client/src/shared-copy.js'
 export const en = {
+  ...sharedCopy.en,
   codexImportRetry: 'Retry this import',
   codexImportRecover: 'Recover saved import',
   codexImportInterrupted:
@@ -331,6 +333,7 @@ export const en = {
 } as const
 export type Key = keyof typeof en
 export const zh: Record<Key, string> = {
+  ...sharedCopy.zh,
   codexImportRetry: '重试本次导入',
   codexImportRecover: '恢复已保存的导入',
   codexImportInterrupted:

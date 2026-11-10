@@ -148,6 +148,34 @@ CREATE TABLE cm_archive_entries (
 CREATE INDEX cm_archive_entry_terms ON cm_archive_entries USING gin(terms);
 INSERT INTO cm_schema(version) VALUES(9);
 `
+const v10 = `
+CREATE TABLE cm_shared_sessions (
+ namespace text NOT NULL, id uuid NOT NULL, title text NOT NULL, scope text NOT NULL,
+ source_adapter text NOT NULL, source_id text NOT NULL, incarnation uuid NOT NULL,
+ generation bigint NOT NULL DEFAULT 0, next_seq bigint NOT NULL DEFAULT 0,
+ source_offset bigint NOT NULL DEFAULT 0, writer_hash text NOT NULL, publisher text NOT NULL,
+ activity text NOT NULL DEFAULT 'unknown', active_turn text, reservation uuid, reservation_archive text,
+ active_tools text[] NOT NULL DEFAULT '{}', stop_requested boolean NOT NULL DEFAULT false,
+ PRIMARY KEY(namespace,id)
+);
+CREATE TABLE cm_shared_bindings (
+ namespace text NOT NULL, adapter text NOT NULL, source_id text NOT NULL, incarnation uuid NOT NULL,
+ share_id uuid NOT NULL, generation bigint NOT NULL,
+ PRIMARY KEY(namespace,adapter,source_id,incarnation),
+ FOREIGN KEY(namespace,share_id) REFERENCES cm_shared_sessions(namespace,id) ON DELETE CASCADE
+);
+CREATE TABLE cm_shared_events (
+ namespace text NOT NULL, share_id uuid NOT NULL, seq bigint NOT NULL, event_id text NOT NULL,
+ item jsonb NOT NULL, content jsonb NOT NULL, bytes bigint NOT NULL,
+ PRIMARY KEY(namespace,share_id,seq), UNIQUE(namespace,share_id,event_id),
+ FOREIGN KEY(namespace,share_id) REFERENCES cm_shared_sessions(namespace,id) ON DELETE CASCADE
+);
+CREATE TABLE cm_shared_blocks (
+ namespace text NOT NULL, digest text NOT NULL, data bytea NOT NULL CHECK(octet_length(data) BETWEEN 1 AND 524288),
+ PRIMARY KEY(namespace,digest)
+);
+INSERT INTO cm_schema(version) VALUES(10);
+`
 export async function migrate(pool: Pool): Promise<void> {
   const client = await pool.connect()
   try {
@@ -190,7 +218,11 @@ export async function migrate(pool: Pool): Promise<void> {
       await client.query(v8)
       version = 8
     }
-    if (version === 8) await client.query(v9)
+    if (version === 8) {
+      await client.query(v9)
+      version = 9
+    }
+    if (version === 9) await client.query(v10)
     await client.query('COMMIT')
   } catch (error) {
     await client.query('ROLLBACK')

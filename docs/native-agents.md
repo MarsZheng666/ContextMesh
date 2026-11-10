@@ -63,7 +63,7 @@ The receiving DSH plugin's [explicit archive import](codex-return.md) validates 
 
 ## Compatibility
 
-Authenticated `/health/ready` advertises `native-agent-storage-v1` with database schema **9**. An older Server cannot accept other native formats. Schema 8 retains existing DSH headers/events and the native-format boundary, adding a successor-session link, separate Agent endpoint identity and one-time continuation execution records. A transferred DSH session stays readable; write-open and recovery return `SESSION_MOVED`. See the [schema migration procedure](runtime.md#migrate-schema-8-to-9). The public installation still contains exactly one DSH ContextMesh plugin.
+Authenticated `/health/ready` advertises `native-agent-storage-v1` with database schema **10**. An older Server cannot accept other native formats. Schema 8 retains existing DSH headers/events and the native-format boundary, adding a successor-session link, separate Agent endpoint identity and one-time continuation execution records. A transferred DSH session stays readable; write-open and recovery return `SESSION_MOVED`. See the [schema migration procedure](runtime.md#migrate-schema-8-to-9). The public installation still contains exactly one DSH ContextMesh plugin.
 
 ## Chunked archives
 

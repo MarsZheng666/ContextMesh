@@ -12,7 +12,7 @@ To continue a settled managed archive in DSH, use the [Codex → DSH import](cod
 
 - Install the supported official Codex CLI separately and make `codex` available on PATH. The adapter was validated with **0.154.0**; a compatible newer 0.x version must provide the same app-server methods. ContextMesh does not bundle Codex or install a second DSH plugin.
 - Configure the receiving machine's Codex login and model provider locally. ContextMesh uses that configuration through Codex, without uploading its authentication files or copying source model credentials.
-- Connect ContextMesh with `contextmesh setup` and use a schema-8 or schema-9 Server. Chunked archives require schema 9. Keep the HTTPS connection described in the [server guide](deployment.md).
+- Connect ContextMesh with `contextmesh setup` and use a schema-8 or newer Server. Chunked archives require schema 9. Keep the HTTPS connection described in the [server guide](deployment.md).
 - Finish the source turn, including tool calls. This preview supports text and historical tool references. Unresolved tool outcomes and unsupported projections require review. Chunked archive imports preview the records that fit the receiving model before creating a local thread.
 
 ## Import and continue
@@ -78,3 +78,5 @@ Reconciliation checks native terminal state and remote identity, recovers the st
 ## Compatibility and validation
 
 The bridge uses the documented [Codex app-server protocol](https://learn.chatgpt.com/docs/app-server): initialization, thread start/resume, context injection, paginated history and turn lifecycle. Integration tests cover lost replies and writer protection. Set `CONTEXTMESH_TEST_CODEX_BIN` to an installed CLI to enable the isolated end-to-end test; it uses a disposable home and local scripted Responses provider, without paid model credentials. This validates native protocol and context continuity, not the quality of a live model's reasoning.
+
+For ongoing shared conversations, use [live synchronization](live-sync.md). First share/follow establishes automatic updates; a confirmed shared handoff preserves followers. The snapshot workflows above remain separate.

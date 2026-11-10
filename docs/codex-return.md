@@ -56,3 +56,5 @@ contextmesh import-codex-recover YOUR_OPERATION_UUID --confirm-stopped
 ```
 
 Recovery checks the existing log against the exact saved seed, closes/reconciles that operation's writer and appends only its missing prefix remainder. It never replays a native task. Changed history or identity is blocked for inspection rather than overwritten. A committed complete copy can be published again without creating a new session. The UI also offers retry and confirmed recovery while an import is pending.
+
+For ongoing shared conversations, use [live synchronization](live-sync.md). First share/follow establishes automatic updates; a confirmed shared handoff preserves followers. The snapshot workflows above remain separate.

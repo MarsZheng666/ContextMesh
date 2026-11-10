@@ -14,7 +14,7 @@
 
 - 单独安装受支持的官方 Codex CLI，确保 PATH 中可以执行 `codex`。目前使用 **0.154.0** 验证；兼容的新 0.x 版本需要提供相同 app-server 接口。ContextMesh 不捆绑 Codex，也不增加第二个 DSH 插件。
 - 在接收端配置 Codex 登录和模型服务。ContextMesh 通过 Codex 使用本机配置，不上传认证文件，也不复制源端模型密钥。
-- 通过 `contextmesh setup` 连接 schema 8 或 schema 9 Server。分块归档需要 schema 9，沿用[服务端指南](deployment.zh.md)中的 HTTPS 连接。
+- 通过 `contextmesh setup` 连接 schema 8 或更新版本的 Server。分块归档需要 schema 9，沿用[服务端指南](deployment.zh.md)中的 HTTPS 连接。
 - 先结束源端当前轮次及工具调用。本预览支持文本和历史工具引用；附件、未确认的工具执行结果、无法解释的投影及过大上下文会在导入前被拒绝，不会静默删减。
 
 ## 导入与继续
@@ -80,3 +80,5 @@ contextmesh codex reconcile CODEX_SESSION_ID --confirm-stopped
 ## 兼容性与验证
 
 适配器使用官方 [Codex app-server 协议](https://learn.chatgpt.com/docs/app-server)，包括初始化、线程创建与恢复、上下文注入、分页历史和轮次生命周期。集成测试覆盖响应丢失及写者保护。设置 `CONTEXTMESH_TEST_CODEX_BIN` 指向已安装 CLI 可启用隔离端到端测试；测试使用临时原生目录和本地受控 Responses 模型服务，无需付费模型凭据。这验证原生协议与上下文传递，不代表真实模型的推理质量评测。
+
+需要持续共享时，使用[自动同步流程](live-sync.zh.md)：首次共享和跟随后自动更新，确认接管后保留原有跟随关系。上文的快照流程仍是独立功能。

@@ -28,6 +28,8 @@ import {
 } from '../../handoff-deepseek/src/workspace.js'
 import { NativeCodex, type StartTarget, type Target } from './native.js'
 import { CodexBridge } from './bridge.js'
+import { CodexSharedSync } from './shared-sync.js'
+import { sharedFeature } from '../../protocol/src/shared.js'
 import { deepSeekContext } from './context.js'
 import type { CodexOptions } from './rpc.js'
 
@@ -388,6 +390,16 @@ export class ConfirmedCodexTakeover {
               operationId: record.id,
               handoffId: record.id,
             })
+            if (
+              (await this.bridge.client.capabilities()).features?.includes(
+                sharedFeature,
+              )
+            )
+              await new CodexSharedSync(this.options).prepareAdoption(
+                record.sessionId,
+                imported.threadId,
+                imported.sessionId,
+              )
             record = recordSchema.parse(
               await client.mesh.request(
                 `/v1/handoffs/${record.id}/codex/accept`,
@@ -412,7 +424,18 @@ export class ConfirmedCodexTakeover {
         }
         if (record.state !== 'completed')
           throw new Error('Takeover timed out; source state needs review')
+        const shared = new CodexSharedSync(this.options)
+        await shared.tick()
         const result = await this.continue(client, record)
+        const targetSession = await this.bridge.client.stat(
+          record.targetSessionId!,
+        )
+        const nativeId = targetSession?.header.nativeThreadId
+        if (typeof nativeId === 'string')
+          await shared.confirmManagedCompletion(
+            nativeId,
+            result.execution?.turnId ?? 'import:' + record.id,
+          )
         record = result.handoff
         await save('completed')
         return result
