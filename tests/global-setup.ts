@@ -28,7 +28,10 @@ export default async function setup(project: TestProject) {
     persistent: true,
     createPostgresUser: false,
     postgresFlags: ['-h', '127.0.0.1'],
-    onLog: () => {},
+    onLog: (message) => {
+      errors.push(String(message))
+      if (errors.length > 50) errors.shift()
+    },
     onError: (e) => errors.push(String(e)),
   })
   try {
@@ -36,9 +39,10 @@ export default async function setup(project: TestProject) {
     await db.start()
   } catch (error) {
     await rm(dir, { recursive: true, force: true })
-    throw new Error(`test PostgreSQL startup failed: ${errors.join('\n')}`, {
-      cause: error,
-    })
+    throw new Error(
+      `test PostgreSQL startup failed: ${String(error)}\n${errors.join('\n')}`,
+      { cause: error },
+    )
   }
   project.provide(
     'databaseUrl',
