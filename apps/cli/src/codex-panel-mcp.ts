@@ -62,6 +62,11 @@ export function codexPanelRequest(jobs: CodexPanelJobs, signal?: AbortSignal) {
       run: folderPicker,
       readOnly: true,
     },
+    connection: {
+      schema: empty,
+      run: () => jobs.checkConnection(),
+      readOnly: true,
+    },
     catalog: { schema: empty, run: () => jobs.catalog(), readOnly: true },
     choices: { schema: empty, run: () => jobs.localChoices(), readOnly: true },
     jobs: { schema: empty, run: () => jobs.list(), readOnly: true },

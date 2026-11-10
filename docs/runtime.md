@@ -84,6 +84,16 @@ contextmesh tunnel configure --host my-ssh-alias --local-port 18793 --remote-por
 
 The tunnel binds only to loopback, sends keepalives, retries transient exits up to eight times with bounded backoff, and stops retrying on authentication, host-key or port errors. After attention is required, fix the cause and restart the managed instance. It never kills a process that it did not start. A running SSH process alone is not proof of a healthy service; `doctor` also checks the service and authentication.
 
+If both DSH and Codex Desktop use the same forward on macOS, let a user LaunchAgent own the port independently of either client. Set `RunAtLoad` and `KeepAlive` to true, and use the following command as its `ProgramArguments`, with each argument in a separate element.
+
+```sh
+/usr/bin/ssh -N -T -o BatchMode=yes -o StrictHostKeyChecking=yes \
+  -o ExitOnForwardFailure=yes -o ServerAliveInterval=10 -o ServerAliveCountMax=2 \
+  -L 127.0.0.1:18793:127.0.0.1:8787 my-ssh-alias
+```
+
+Use a verified host key and a dedicated SSH identity with access to the required loopback destinations only. Point both clients at the forwarded address. When the link becomes unreachable, SSH exits after failed keepalives and launchd starts a new connection. Keep the forwarded endpoint's HTTPS scheme and trusted CA when the Server uses TLS.
+
 ## Client upgrades
 
 Download and verify the target platform package first, then unpack it:

@@ -1,4 +1,5 @@
 import { CodexPanelJobs } from '../../apps/cli/src/codex-panel-jobs.js'
+import { buildServer } from '../../apps/server/src/app.js'
 import { readCodexContext } from '../../packages/client/src/codex-context.js'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -21,7 +22,40 @@ import { CodexBridge } from '../../packages/adapter-codex/src/bridge.js'
 import { CodexContextImport } from '../../packages/handoff-deepseek/src/codex-import.js'
 import { MeshClient } from '../../packages/client/src/index.js'
 import { codexModel } from '../helpers/codex-model.js'
+import { codexPanel } from '../helpers/codex-panel.js'
 import { MeshError } from '../../packages/protocol/src/index.js'
+
+it('rechecks the Server after an interruption from the same Codex panel process', async () => {
+  const f = await fixture()
+  const home = await mkdtemp(join(tmpdir(), 'contextmesh-panel-reconnect-'))
+  f.defer(() => rm(home, { recursive: true, force: true }))
+  const panel = codexPanel(
+    {
+      connection: { endpoint: f.endpoint, token: TOKEN },
+      stateDir: join(home, 'panel-state'),
+    },
+    home,
+  )
+  try {
+    expect(await panel.tool('connection')).toEqual({ connected: true })
+    await f.app.close()
+    await expect(panel.tool('connection')).rejects.toThrow()
+    const restarted = buildServer({
+      store: f.store,
+      token: TOKEN,
+      namespace: f.namespace,
+    })
+    f.defer(() => restarted.close())
+    await restarted.listen({
+      host: '127.0.0.1',
+      port: Number(new URL(f.endpoint).port),
+    })
+    expect(await panel.tool('connection')).toEqual({ connected: true })
+    expect(await panel.tool('catalog')).toMatchObject({ sessions: [] })
+  } finally {
+    panel.close()
+  }
+})
 
 async function setup(real = false) {
   const f = await environment(),

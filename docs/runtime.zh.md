@@ -84,6 +84,16 @@ contextmesh tunnel configure --host my-ssh-alias --local-port 18793 --remote-por
 
 隧道仅监听回环地址，自动保活；短暂断开采用有限退避，最多重试八次。鉴权失败、主机密钥异常或端口占用时停止重试。修复原因后重启实例。管理器只停止自己创建的进程。SSH 进程存在并不代表服务健康，`doctor` 还会检查服务和凭据。
 
+如果 macOS 上的 DSH 和 Codex Desktop 共用一条转发，可以用独立的用户 LaunchAgent 管理端口。将 `RunAtLoad` 和 `KeepAlive` 设为 true，并把下列命令逐项填入 `ProgramArguments` 数组。
+
+```sh
+/usr/bin/ssh -N -T -o BatchMode=yes -o StrictHostKeyChecking=yes \
+  -o ExitOnForwardFailure=yes -o ServerAliveInterval=10 -o ServerAliveCountMax=2 \
+  -L 127.0.0.1:18793:127.0.0.1:8787 my-ssh-alias
+```
+
+使用已验证的主机密钥，并将专用 SSH 身份的转发权限限制在所需的回环地址和端口。两个客户端都指向同一个转发地址。网络中断时，SSH 在保活失败后退出，由 launchd 重新建立连接。Server 使用 TLS 时，客户端继续使用 HTTPS 地址和可信 CA。
+
 ## 客户端升级
 
 先下载、校验并解压新运行包：

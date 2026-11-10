@@ -14,6 +14,8 @@ The runtime registers one ContextMesh sidebar entry and supplies its local servi
 
 ## Receive a shared session
 
+The panel checks the Server while it is visible. When the connection returns, it refreshes the shared session list and keeps the current selection if the session is still available.
+
 1. In **Receive a shared session**, select a conversation and a project directory on your Mac. New conversations use the receiving Codex default model. Use **Choose Folder…** to browse any accessible folder with the macOS picker, or enter its absolute path. Enable project writes only if the task should edit files.
 2. Choose the action shown for the session.
    - **Review import** previews the records that fit the receiving Codex model. Use the optional next instruction to find relevant history, or use **Browse full archive** to select an excerpt. Confirm the import, then send the next message in Codex.

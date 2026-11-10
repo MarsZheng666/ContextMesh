@@ -114,6 +114,15 @@ export class CodexPanelJobs {
         'Connect this device to the ContextMesh Server with contextmesh setup, then reopen the panel.',
       )
   }
+  async checkConnection() {
+    this.requireConnection()
+    await this.bridge.client.request(
+      '/health/ready',
+      undefined,
+      AbortSignal.timeout(3500),
+    )
+    return { connected: true }
+  }
   async catalog() {
     this.requireConnection()
     const { features = [] } = await this.bridge.client.capabilities()
