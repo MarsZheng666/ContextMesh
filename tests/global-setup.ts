@@ -42,9 +42,9 @@ export default async function setup(project: TestProject) {
   // directly fails under the GitHub runner's administrator account.
   const pgCtl: string | undefined =
     process.platform === 'win32'
-      ? createRequire(import.meta.resolve('embedded-postgres'))(
-          '@embedded-postgres/windows-x64',
-        ).pg_ctl
+      ? createRequire(
+          createRequire(import.meta.url).resolve('embedded-postgres'),
+        )('@embedded-postgres/windows-x64').pg_ctl
       : undefined
   const log = join(dir, 'postgres.log')
   const stop = async () => {
