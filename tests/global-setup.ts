@@ -5,8 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:net'
 import { createRequire } from 'node:module'
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
+import { spawn } from 'node:child_process'
 export default async function setup(project: TestProject) {
   if (process.env.TEST_DATABASE_URL) {
     project.provide('databaseUrl', process.env.TEST_DATABASE_URL)
@@ -47,32 +46,40 @@ export default async function setup(project: TestProject) {
         )('@embedded-postgres/windows-x64').pg_ctl
       : undefined
   const log = join(dir, 'postgres.log')
+  const control = (args: string[]) =>
+    new Promise<void>((accept, reject) => {
+      // Descendant postgres processes inherit handles on Windows. Do not wait
+      // for their inherited stdout/stderr pipes to close after pg_ctl exits.
+      const child = spawn(pgCtl!, args, {
+        windowsHide: true,
+        stdio: 'ignore',
+        timeout: 70000,
+      })
+      child.once('error', reject)
+      child.once('exit', (code, signal) =>
+        code === 0
+          ? accept()
+          : reject(new Error(`pg_ctl exited with ${code ?? signal}`)),
+      )
+    })
   const stop = async () => {
     if (pgCtl) {
-      await promisify(execFile)(
-        pgCtl,
-        ['-D', join(dir, 'db'), '-m', 'fast', '-w', 'stop'],
-        { windowsHide: true },
-      )
+      await control(['-D', join(dir, 'db'), '-m', 'fast', '-w', 'stop'])
     } else await db.stop()
   }
   try {
     await db.initialise()
     if (pgCtl) {
-      await promisify(execFile)(
-        pgCtl,
-        [
-          '-D',
-          join(dir, 'db'),
-          '-l',
-          log,
-          '-o',
-          `-h 127.0.0.1 -p ${port}`,
-          '-w',
-          'start',
-        ],
-        { windowsHide: true },
-      )
+      await control([
+        '-D',
+        join(dir, 'db'),
+        '-l',
+        log,
+        '-o',
+        `-h 127.0.0.1 -p ${port}`,
+        '-w',
+        'start',
+      ])
     } else await db.start()
   } catch (error) {
     if (pgCtl) errors.push(await readFile(log, 'utf8').catch(() => ''))
