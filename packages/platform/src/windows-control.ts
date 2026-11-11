@@ -94,7 +94,9 @@ export async function callWindowsLocal(
           throw new Error('Local controller authentication failed')
         const payload = JSON.stringify(command)
         authenticated = true
-        socket.end(
+        // Named pipes cannot reliably half-close while an asynchronous
+        // handler is still working. The newline frames the request.
+        socket.write(
           JSON.stringify({
             payload,
             proof: mac(key, 'client:' + challenge.nonce + ':' + payload),

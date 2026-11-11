@@ -315,24 +315,20 @@ it('stops its native connection and keeps recovery required when lease renewal f
 
 it('provides the import, run and status flow through the public CLI', async () => {
   const f = await setup()
-  const executable = join(f.root, 'fixture-codex.mjs')
-  await writeFile(
-    executable,
-    '#!' +
-      process.execPath +
-      '\nimport ' +
-      JSON.stringify(
-        pathToFileURL(resolve('tests/helpers/codex-rpc-fixture.mjs')).href,
-      ) +
-      '\n',
-    { mode: 0o700 },
-  )
+  const executable = process.execPath
   const env = {
     ...process.env,
     CONTEXTMESH_ENDPOINT: f.endpoint,
     CONTEXTMESH_TOKEN: TOKEN,
     CODEX_HOME: join(f.root, 'home'),
     CODEX_FIXTURE_FAULT: '',
+    NODE_OPTIONS: [
+      process.env.NODE_OPTIONS,
+      '--import ' +
+        pathToFileURL(resolve('tests/helpers/codex-cli-fixture.mjs')).href,
+    ]
+      .filter(Boolean)
+      .join(' '),
   }
   const run = promisify(execFile),
     common = [
@@ -414,7 +410,7 @@ it('does not let a resumed import overwrite the pending state of an executing lo
 it('uses the installed runtime connection without requiring endpoint or token environment variables', async () => {
   const f = await setup(),
     managed = join(f.root, 'managed'),
-    executable = join(f.root, 'installed-fixture-codex.mjs')
+    executable = process.execPath
   await mkdir(managed, { mode: 0o700 })
   await writeFile(
     join(managed, 'current.json'),
@@ -430,17 +426,6 @@ it('uses the installed runtime connection without requiring endpoint or token en
     },
     join(managed, 'data/dsh/contextmesh/connection.json'),
   )
-  await writeFile(
-    executable,
-    '#!' +
-      process.execPath +
-      '\nimport ' +
-      JSON.stringify(
-        pathToFileURL(resolve('tests/helpers/codex-rpc-fixture.mjs')).href,
-      ) +
-      '\n',
-    { mode: 0o700 },
-  )
   const env = {
     ...process.env,
     CONTEXTMESH_HOME: managed,
@@ -450,6 +435,13 @@ it('uses the installed runtime connection without requiring endpoint or token en
     DSH_HOME: join(f.root, 'unconfigured-dsh'),
     CODEX_HOME: join(f.root, 'home'),
     CODEX_FIXTURE_FAULT: '',
+    NODE_OPTIONS: [
+      process.env.NODE_OPTIONS,
+      '--import ' +
+        pathToFileURL(resolve('tests/helpers/codex-cli-fixture.mjs')).href,
+    ]
+      .filter(Boolean)
+      .join(' '),
   }
   const result = await promisify(execFile)(
     process.execPath,

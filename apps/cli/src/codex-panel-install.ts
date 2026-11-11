@@ -146,9 +146,10 @@ export async function installCodexPanel(explicitBin?: string) {
       env: { ...process.env, CODEX_HOME: codexHome },
       timeout: 30000,
       windowsHide: true,
-    }).catch(() => {
+    }).catch((cause: unknown) => {
       throw new Error(
         'Codex could not register the ContextMesh panel. Check that the desktop app is up to date and local plugins are allowed.',
+        { cause },
       )
     })
   await run(['marketplace', 'add', market])

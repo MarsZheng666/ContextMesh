@@ -26,6 +26,7 @@ it('protects the Windows control protocol against unauthorized commands and a fo
   let calls = 0
   const listener = await listenWindowsLocal(dir, path, async (command) => {
     calls++
+    await new Promise((resolve) => setTimeout(resolve, 150))
     return command
   })
   try {

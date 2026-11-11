@@ -16,6 +16,7 @@ import { installCodexPanel } from '../../apps/cli/src/codex-panel-install.js'
 import { it, expect, vi } from 'vitest'
 import { mkdtemp, rm, readFile, writeFile, mkdir, cp } from 'node:fs/promises'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { tmpdir } from 'node:os'
 import { createConnection } from 'node:net'
 import {
@@ -163,12 +164,12 @@ windowsTest(
         preload = join(root, 'register.cjs')
       await writeFile(
         preload,
-        `if(process.argv[1]==='plugin'){require('fs').appendFileSync(process.env.CM_REGISTRY,JSON.stringify(process.argv.slice(2))+'\\n');console.log('{}');process.exit(0)}`,
+        `if(require('path').basename(process.argv[1]??'')==='plugin'){require('fs').appendFileSync(process.env.CM_REGISTRY,JSON.stringify(process.argv.slice(2))+'\\n');console.log('{}');process.exit(0)}`,
       )
       vi.stubEnv('CONTEXTMESH_HOME', home)
       vi.stubEnv('CODEX_HOME', codexHome)
       vi.stubEnv('CM_REGISTRY', registry)
-      vi.stubEnv('NODE_OPTIONS', '--require ' + JSON.stringify(preload))
+      vi.stubEnv('NODE_OPTIONS', '--import ' + pathToFileURL(preload).href)
       await installCodexPanel(process.execPath)
       const plugin = join(home, 'data/codex-panel/plugins/contextmesh')
       const mcp = JSON.parse(await readFile(join(plugin, '.mcp.json'), 'utf8'))
