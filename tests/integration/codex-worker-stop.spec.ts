@@ -24,12 +24,16 @@ it('drains an in-flight synchronization before releasing the worker for upgrade'
   const abort = new AbortController()
   const running = sync.run(abort.signal)
   try {
-    await expect.poll(() => entered).toBe(true)
+    // Native ACL initialization may start several system processes on Windows.
+    await expect.poll(() => entered, { timeout: 15000 }).toBe(true)
     let stopped = false
     const stopping = stopCodexSync(home).then(() => {
       stopped = true
     })
-    await new Promise((accept) => setTimeout(accept, 100))
+    // Prove the controller received the stop request while work is still held.
+    await expect
+      .poll(() => (sync as any).stopped, { timeout: 15000 })
+      .toBe(true)
     expect(stopped).toBe(false)
     finish()
     await stopping
