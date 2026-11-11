@@ -68,10 +68,11 @@ foreach ($rule in $acl.GetAccessRules($true, $true, [System.Security.Principal.S
 }
 `,
     { CM_PRIVATE_PATH: path, CM_PRIVATE_CREATE: create ? '1' : '0' },
-  ).catch(() => {
+  ).catch((cause: unknown) => {
     throw new Error(
       'ContextMesh needs a private NTFS directory accessible only to your Windows account, SYSTEM and Administrators: ' +
         path,
+      { cause },
     )
   })
 }
