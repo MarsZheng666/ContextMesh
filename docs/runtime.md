@@ -2,11 +2,40 @@
 
 [中文](runtime.zh.md)
 
-The 0.8.0-dev.16 runtime packages contain Node, the pinned DeepSeek Harness runtime and the **single** `dsh-contextmesh-handoff` plugin. They are built for macOS Apple Silicon and Linux x64. Linux packages record and check their minimum glibc version in the manifest; release CI builds against Ubuntu 22.04 (glibc 2.35). Windows and additional architectures are not supported yet. A global Node, pnpm or Git installation is unnecessary for ordinary conversations; Git is needed when working with Git projects.
+The 0.8.0-dev.18 packages include Node. macOS Apple Silicon and Linux x64 bundles also include the pinned DeepSeek Harness runtime and its **single** ContextMesh plugin. The **Windows x64 bundle provides the same Codex Desktop panel and Codex workflows**, using native Windows paths, folder selection and processes. It does not require WSL and does not bundle a Windows DSH or Server. Linux packages record their minimum glibc version; release CI uses Ubuntu 22.04 (glibc 2.35). Ordinary conversations do not need a global Node, pnpm or Git installation; Git projects require Git. Windows ARM64 is not covered by this package.
 
 Packages are produced by the **Release packages** workflow. Publication is a separate maintainer action: a workflow artifact is a candidate, not a published release. Obtain a platform archive and its checksum from the same trusted release, verify the SHA-256 value, then unpack it. Keep the original checksum and `manifest.json`. The manifest records platform, Node/DSH versions, protocol and schema compatibility, source commit, lockfile/patch hashes, file checksums and bundled third-party license information.
 
-## First device
+## Windows Codex device
+
+Use Windows 11 x64 with [native Codex Desktop](https://learn.chatgpt.com/docs/windows/windows-app) and a native `codex.exe` sharing the desktop app's `CODEX_HOME` (normally `$HOME\.codex`). Windows packages are candidates until their Windows checks and desktop acceptance are complete. The page, actions, confirmation steps and automatic sharing are shared with the macOS plugin.
+
+Verify the ZIP checksum with `Get-FileHash -Algorithm SHA256`, then extract it. In PowerShell, from the extracted directory:
+
+```powershell
+.\bin\contextmesh.cmd install "$PWD"
+$env:Path = "$HOME\.contextmesh\bin;$env:Path"
+contextmesh.cmd setup
+contextmesh.cmd codex install-panel
+```
+
+Setup asks for the same **HTTPS Server URL** as your other devices and a device pairing code. No local PostgreSQL or SSH tunnel is required. Reopen Codex Desktop and choose **ContextMesh** in the sidebar. Review and trust the plugin's lifecycle hooks in **Settings → Hooks** to enable automatic sharing of conversations you select.
+
+The installer searches `CODEX_INSTALL_DIR`, the native Codex installation in `%LOCALAPPDATA%\Programs\OpenAI\Codex\bin`, and `PATH`. If needed, run `contextmesh.cmd codex install-panel --codex-bin 'C:\path\to\codex.exe'`. It never substitutes WSL or a `.cmd` shim. If you use a custom `CODEX_HOME`, set it before installation to the same Windows directory used by Desktop.
+
+**Choose Folder…** opens the Windows system folder dialog. It accepts accessible local or UNC folders, preserves cancellation and uses the receiving Codex model. Store the managed runtime on a private NTFS directory: Windows account ACLs protect credentials and recovery data. Native Codex sandbox and filesystem permissions still apply to the chosen project.
+
+For an upgrade, finish active transfers and turns, close Codex Desktop, then use the newly extracted Windows bundle:
+
+```powershell
+contextmesh.cmd upgrade 'C:\Downloads\contextmesh-new' --check
+contextmesh.cmd upgrade 'C:\Downloads\contextmesh-new'
+contextmesh.cmd codex install-panel
+```
+
+Reopen Desktop and review changed hooks. The stable launcher selects the new release; credentials, local journals and Server history are preserved. Keep the previous release and private upgrade backup for recovery. The shared Server still owns persistent shared context. Native Codex history remains on this device.
+
+## macOS or Linux DSH device
 
 First deploy the server with the default HTTPS entry point described below. Then, inside the unpacked directory on each device:
 

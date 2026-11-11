@@ -13,6 +13,41 @@ on:
 permissions:
   contents: read
 jobs:
+  windows-codex:
+    timeout-minutes: 20
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.15.0'
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm format:check
+      - run: pnpm verify:upstream
+      - run: pnpm typecheck
+      - run: pnpm build
+      - name: Verify native Windows filesystem, IPC and Codex workflows
+        run: node --import tsx scripts/test.ts tests/integration/windows-platform.spec.ts tests/integration/windows-native.spec.ts tests/integration/windows-control-protocol.spec.ts tests/integration/codex-worker-stop.spec.ts tests/integration/codex-panel-folder.spec.ts tests/integration/codex.spec.ts tests/integration/codex-return.spec.ts tests/integration/shared.spec.ts
+      - name: Locate Node license
+        run: |
+          Invoke-WebRequest https://raw.githubusercontent.com/nodejs/node/v24.15.0/LICENSE -OutFile "$env:RUNNER_TEMP/NODE-LICENSE"
+          "NODE_LICENSE_PATH=$env:RUNNER_TEMP/NODE-LICENSE" >> $env:GITHUB_ENV
+      - run: pnpm exec tsx scripts/release/build-runtime.ts "$env:RUNNER_TEMP/runtime"
+      - name: Verify extracted portable ZIP
+        run: |
+          New-Item -ItemType Directory -Path artifacts | Out-Null
+          Compress-Archive -Path "$env:RUNNER_TEMP/runtime/*" -DestinationPath artifacts/contextmesh-win32-x64.zip
+          Expand-Archive artifacts/contextmesh-win32-x64.zip "$env:RUNNER_TEMP/extracted"
+          node scripts/release/smoke-windows.mjs "$env:RUNNER_TEMP/extracted"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $hash = (Get-FileHash artifacts/contextmesh-win32-x64.zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  contextmesh-win32-x64.zip" | Set-Content artifacts/contextmesh-win32-x64.zip.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: contextmesh-win32-x64
+          path: artifacts/*
+          if-no-files-found: error
   runtime:
     permissions:
       contents: read

@@ -10,6 +10,7 @@ const execute = promisify(execFile)
 export async function git(root: string, args: string[], signal?: AbortSignal) {
   return (
     await execute('git', ['-C', root, ...args], {
+      windowsHide: true,
       encoding: 'utf8',
       maxBuffer: 4 * 1024 * 1024,
       signal,

@@ -2,9 +2,9 @@
 
 [English](codex-desktop.md) · [安装并连接设备](getting-started.zh.md) · [部署服务端](deployment.zh.md)
 
-在 Codex 左侧栏点击 **ContextMesh**，即可打开独立面板。Mac 上的 Codex 桌面版可以通过共享的 ContextMesh Server 接收会话和发布快照。面板会显示 DeepSeek Harness 会话和 Codex 归档，具体可执行的操作取决于源端 Agent 和会话状态。
+在 Codex 左侧栏点击 **ContextMesh**，即可打开独立面板。macOS 或 Windows 上的 Codex 桌面版可以通过共享的 ContextMesh Server 接收会话和发布快照。面板会显示 DeepSeek Harness 会话和 Codex 归档，具体可执行的操作取决于源端 Agent 和会话状态。
 
-## 在 Mac 上启用面板
+## 启用面板
 
 1. 安装或升级 [ContextMesh 托管运行时](runtime.zh.md)。运行 `contextmesh setup`，连接另一台设备使用的同一个 HTTPS Server。新设备可以用配对码加入。
 2. 登录 Codex 桌面版，确认准备使用的本机模型可用。
@@ -12,11 +12,13 @@
 
 运行时注册一个 ContextMesh 侧栏入口，并提供面板所需的本地服务。远程 DSH 沿用现有的单个 ContextMesh 插件。分块归档需要支持 `chunked-archives-v2` 的 schema 9 Server。旧 Server 和旧归档可通过旧版接口访问。
 
+Windows 用户请先按[Windows 安装步骤](runtime.zh.md#windows-codex-设备)使用原生 `codex.exe` 安装。两端共用同一个面板和功能，不增加第二个插件入口。
+
 ## 接收共享会话
 
 面板可见时会检查 Server 连接。恢复连接后会自动刷新共享会话列表，并保留仍可用的会话选择。
 
-1. 在 **接收（Receive）** 中选择共享会话。点击 **选择文件夹…（Choose Folder…）** 会打开 macOS 系统弹窗，可选任意有权访问的文件夹。取消时保留上一次选择。新会话使用接收端 Codex 的模型，需要改项目文件时再开启写权限。
+1. 在 **接收（Receive）** 中选择共享会话。点击 **选择文件夹…（Choose Folder…）** 会打开 macOS 或 Windows 系统弹窗，可选任意有权访问的文件夹。取消时保留上一次选择。新会话使用接收端 Codex 的模型，需要改项目文件时再开启写权限。
 2. 根据会话状态选择操作。
    - **Review import** 预览本机 Codex 模型可载入的记录。可以输入下一条指令作为检索线索，或点击 **Browse full archive**（浏览完整归档）选取片段。确认后打开新会话，在 Codex 发送下一条消息即可接续。
    - **Review takeover** 转移受支持的在线会话。ContextMesh 先检查接收端模型和工作区，再请求源端停止，随后由 Codex 自动续跑未完成的任务。

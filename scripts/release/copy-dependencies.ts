@@ -6,13 +6,27 @@ import {
   symlink,
   access,
 } from 'node:fs/promises'
-import { dirname, join, relative, resolve } from 'node:path'
+import { dirname, join, relative, resolve, sep } from 'node:path'
 import { createHash } from 'node:crypto'
 export async function copyDependencies(
   repo: string,
   destination: string,
   roots: string[],
 ) {
+  // The Windows Codex client only needs zod at runtime. Materialize it without
+  // junctions/symlinks so ZIP extraction needs neither admin nor Developer Mode.
+  if (process.platform === 'win32') {
+    if (roots.length !== 1 || roots[0] !== 'zod')
+      throw new Error('Unsupported Windows dependency set')
+    const source = await realpath(join(repo, 'node_modules/zod'))
+    await mkdir(destination, { recursive: true })
+    await cp(source, join(destination, 'zod'), {
+      recursive: true,
+      dereference: true,
+    })
+    const p = JSON.parse(await readFile(join(source, 'package.json'), 'utf8'))
+    return [{ name: p.name, version: p.version, license: p.license }]
+  }
   const visited = new Map<string, string>()
   const shared = new Map<string, Set<string>>()
   const licenses: Array<{ name: string; version: string; license: unknown }> =
@@ -56,7 +70,7 @@ export async function copyDependencies(
       dereference: false,
       filter: (path) =>
         !['node_modules', '.git', 'tests', 'test'].includes(
-          relative(source, path).split('/')[0] ?? '',
+          relative(source, path).split(sep)[0] ?? '',
         ),
     })
     licenses.push({

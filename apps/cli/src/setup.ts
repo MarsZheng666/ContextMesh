@@ -1,9 +1,11 @@
+import { privateDirectory } from '../../../packages/runtime-manager/src/files.js'
+import { windowsPrivatePath } from '../../../packages/platform/src/windows.js'
 import { MeshClient } from '../../../packages/client/src/index.js'
 import { createInterface } from 'node:readline/promises'
 import { stdin, stdout } from 'node:process'
 import { randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
-import { mkdir, readFile, open, unlink, lstat } from 'node:fs/promises'
+import { readFile, open, unlink, lstat } from 'node:fs/promises'
 import {
   connectionPath,
   readConnection,
@@ -20,20 +22,18 @@ export async function connectDevice(
     throw new Error(
       'A connection already exists. Keep its backup before configuring another device.',
     )
-  await mkdir(dirname(path), { recursive: true, mode: 0o700 })
-  const directory = await lstat(dirname(path))
-  if (
-    !directory.isDirectory() ||
-    directory.isSymbolicLink() ||
-    (directory.mode & 0o077) !== 0
-  )
-    throw new Error('Connection directory must be private without symlinks')
+  await privateDirectory(dirname(path))
   const attempt = join(dirname(path), '.pairing-attempt.json')
   let claimId: string
   try {
     const info = await lstat(attempt)
-    if (!info.isFile() || info.isSymbolicLink() || (info.mode & 0o077) !== 0)
+    if (
+      !info.isFile() ||
+      info.isSymbolicLink() ||
+      (process.platform !== 'win32' && (info.mode & 0o077) !== 0)
+    )
       throw new Error('Pairing retry file must be private')
+    if (process.platform === 'win32') await windowsPrivatePath(attempt)
     const saved = z
       .object({ endpoint: z.string(), code: z.string(), claimId: z.uuid() })
       .parse(JSON.parse(await readFile(attempt, 'utf8')))
@@ -81,14 +81,20 @@ export async function setup(input: string[]) {
       if (identity.role !== 'owner')
         throw new Error('This file is not an owner connection')
       await writeConnection(config)
-      stdout.write('Connected. Run contextmesh dsh, then contextmesh open.\n')
+      stdout.write(
+        process.platform === 'win32'
+          ? 'Connected. Run contextmesh codex install-panel.\n'
+          : 'Connected. Run contextmesh dsh, then contextmesh open.\n',
+      )
       return true
     }
     const endpoint = (await prompt.question('ContextMesh service URL: ')).trim()
     const code = (await prompt.question('One-time pairing code: ')).trim()
     const result = await connectDevice(endpoint, code)
     stdout.write(
-      `Connected as ${result.name}. Open Connection setup in DSH and retry, or run contextmesh dsh.\n`,
+      process.platform === 'win32'
+        ? `Connected as ${result.name}. Run contextmesh codex install-panel.\n`
+        : `Connected as ${result.name}. Open Connection setup in DSH and retry, or run contextmesh dsh.\n`,
     )
   } finally {
     prompt.close()

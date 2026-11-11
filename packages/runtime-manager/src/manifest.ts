@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto'
 import { readFile, readdir, lstat, readlink, realpath } from 'node:fs/promises'
-import { join, resolve, relative, isAbsolute } from 'node:path'
+import { join, resolve, relative, isAbsolute, sep } from 'node:path'
 import { z } from 'zod'
 export const releaseManifest = z.object({
   format: z.literal(1),
   version: z.string().regex(/^\d+\.\d+\.\d+(?:-[a-z0-9.-]+)?$/),
-  platform: z.enum(['darwin-arm64', 'linux-x64']),
+  platform: z.enum(['darwin-arm64', 'linux-x64', 'win32-x64']),
+  components: z.array(z.enum(['codex', 'dsh'])).default(['codex', 'dsh']),
   minimumGlibc: z
     .string()
     .regex(/^\d+\.\d+$/)
@@ -33,7 +34,7 @@ export const sha256 = (data: string | Uint8Array) =>
   createHash('sha256').update(data).digest('hex')
 export function inside(root: string, path: string) {
   const r = relative(resolve(root), resolve(path))
-  return r !== '..' && !r.startsWith('../') && !isAbsolute(r)
+  return r !== '..' && !r.startsWith('..' + sep) && !isAbsolute(r)
 }
 export async function inventory(root: string) {
   root = await realpath(root)
@@ -41,7 +42,7 @@ export async function inventory(root: string) {
   async function visit(dir: string) {
     for (const name of (await readdir(dir)).sort()) {
       const path = join(dir, name),
-        rel = relative(root, path),
+        rel = relative(root, path).split(sep).join('/'),
         info = await lstat(path)
       if (rel === 'manifest.json') continue
       if (!info.isSymbolicLink() && info.mode & 0o7000)
@@ -55,7 +56,7 @@ export async function inventory(root: string) {
       else if (info.isFile())
         entries[rel] = {
           sha256: sha256(await readFile(path)),
-          mode: info.mode & 0o777,
+          mode: process.platform === 'win32' ? 0o644 : info.mode & 0o777,
         }
       else throw new Error('Unsupported bundle entry: ' + rel)
     }
@@ -100,7 +101,10 @@ export async function verifyBundle(
     JSON.stringify(Object.entries(m.files).sort())
   )
     throw new Error('Release files failed integrity verification')
-  for (const required of ['bin/node', 'bin/contextmesh', 'app/dist/cli.js'])
+  const requiredFiles = m.platform.startsWith('win32-')
+    ? ['bin/node.exe', 'bin/contextmesh.cmd', 'app/dist/cli.js']
+    : ['bin/node', 'bin/contextmesh', 'app/dist/cli.js']
+  for (const required of requiredFiles)
     if (!m.files[required]) throw new Error('Incomplete runtime: ' + required)
   return m
 }

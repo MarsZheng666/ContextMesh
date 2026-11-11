@@ -44,6 +44,21 @@ export async function runRuntime(args: string[]) {
     )
     return true
   }
+  if (
+    process.platform === 'win32' &&
+    [
+      'dsh',
+      'runtime-supervise',
+      'open',
+      'adopt',
+      'autostart',
+      'tunnel',
+      'server',
+    ].includes(command ?? '')
+  )
+    throw new Error(
+      'This Windows runtime provides the Codex plugin. Run DSH or Server on its supported host and connect this device over HTTPS.',
+    )
   if (command === 'install') {
     const path = rest[0] ?? process.env.CONTEXTMESH_BUNDLE
     if (!path) throw new Error('Provide the unpacked runtime directory')

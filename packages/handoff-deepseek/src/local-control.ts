@@ -1,3 +1,7 @@
+import {
+  callWindowsLocal,
+  listenWindowsLocal,
+} from '../../platform/src/windows-control.js'
 import { createServer, createConnection, type Socket } from 'node:net'
 import { chmod, unlink, mkdir, lstat, realpath } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -7,6 +11,11 @@ import { createHash } from 'node:crypto'
 export async function controlSocketPath(stateDir: string) {
   const root = await realpath(stateDir),
     direct = join(root, 'control.sock')
+  if (process.platform === 'win32')
+    return (
+      '\\\\.\\pipe\\contextmesh-' +
+      createHash('sha256').update(root.toLowerCase()).digest('hex')
+    )
   if (Buffer.byteLength(direct) < 100) return direct
   const directory = join(
     process.platform === 'darwin' ? '/private/tmp' : '/tmp',
@@ -37,6 +46,8 @@ export async function callLocal(
   timeoutMs = 45000,
 ): Promise<unknown> {
   const path = await controlSocketPath(stateDir)
+  if (process.platform === 'win32')
+    return callWindowsLocal(stateDir, path, command, timeoutMs)
   return new Promise((accept, reject) => {
     const socket = createConnection(path)
     let body = ''
@@ -64,6 +75,12 @@ export async function listenLocal(
   stateDir: string,
   handle: (command: unknown) => Promise<unknown>,
 ) {
+  if (process.platform === 'win32')
+    return listenWindowsLocal(
+      stateDir,
+      await controlSocketPath(stateDir),
+      handle,
+    )
   const sockets = new Set<Socket>(),
     path = await controlSocketPath(stateDir)
   const server = createServer({ allowHalfOpen: true }, (socket) => {

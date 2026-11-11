@@ -1,3 +1,4 @@
+import { chooseWindowsFolder } from './codex-panel-windows-folder.js'
 import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { stat } from 'node:fs/promises'
@@ -28,9 +29,9 @@ async function chooseNativeFolder(
   initialDirectory?: string,
   signal?: AbortSignal,
 ) {
-  if (process.platform !== 'darwin')
+  if (!['darwin', 'win32'].includes(process.platform))
     throw new Error(
-      'The native folder picker is available on macOS. Enter the project path manually.',
+      'The native folder picker is available on macOS and Windows. Enter the project path manually.',
     )
   const initial =
     initialDirectory &&
@@ -38,10 +39,14 @@ async function chooseNativeFolder(
     (await stat(initialDirectory).catch(() => undefined))?.isDirectory()
       ? [initialDirectory]
       : []
-  const { stdout } = await execute(
-    '/usr/bin/osascript',
-    ['-l', 'JavaScript', '-e', folderScript, '--', ...initial],
-    { timeout: 5 * 60 * 1000, maxBuffer: 32 * 1024, signal },
+  const { stdout } = await (
+    process.platform === 'win32'
+      ? chooseWindowsFolder(initial[0], signal)
+      : execute(
+          '/usr/bin/osascript',
+          ['-l', 'JavaScript', '-e', folderScript, '--', ...initial],
+          { timeout: 5 * 60 * 1000, maxBuffer: 32 * 1024, signal },
+        )
   ).catch(() => {
     throw new Error(
       'Could not finish choosing a folder. Reopen the picker or enter the project path manually.',

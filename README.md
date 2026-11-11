@@ -4,7 +4,7 @@ English | [中文](README.zh.md)
 
 **Your context, across devices, models and coding agents.**
 
-Keep conversation and tool history on a shared server. Continue a DSH task on another device, or confirm takeover into Codex CLI and continue unfinished work with that device's own model and workspace. On Mac, use the ContextMesh sidebar in Codex Desktop to receive tasks and publish saved conversations and tool history. A compatible receiver loads the records and excerpts that fit its model.
+Keep conversation and tool history on a shared server. Continue a DSH task on another device, or confirm takeover into Codex CLI and continue unfinished work with that device's own model and workspace. On macOS or Windows, use the ContextMesh sidebar in Codex Desktop to receive tasks and publish saved conversations and tool history. A compatible receiver loads the records and excerpts that fit its model.
 
 ContextMesh combines **one shared remote Server** with **integrations on the devices that execute tasks**: a single [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugin and an optional Codex bridge built into the ContextMesh CLI.
 
@@ -49,9 +49,9 @@ Codex snapshot imports create a separate conversation and retain source provenan
 
 ## Before you install
 
-**0.8.0-dev.17 is an unreleased source preview.** The plugin requires this repository's pinned **DSH 0.2.1-rc.3 and compatibility patches**. Use the pinned source build below; installing the plugin into an arbitrary global DSH is not supported.
+**0.8.0-dev.18 is an unreleased source preview.** The plugin requires this repository's pinned **DSH 0.2.1-rc.3 and compatibility patches**. Use the pinned source build below; installing the plugin into an arbitrary global DSH is not supported.
 
-Use the same reviewed source version for the Server and device clients. The instructions below use the source installation path. Self-contained macOS Apple Silicon and Linux x64 packages are also built by CI, but are currently **candidate artifacts, not published releases**. Their installation and upgrade commands are covered in the [runtime guide](docs/runtime.md).
+Use the same reviewed source version for the Server and device clients. The instructions below use the source installation path. Self-contained macOS Apple Silicon, Linux x64 and Windows x64 Codex packages are also built by CI, but are currently **candidate artifacts, not published releases**. Their installation and upgrade commands are covered in the [runtime guide](docs/runtime.md).
 
 ## 1. Deploy the server
 
@@ -87,6 +87,8 @@ The API is available on the **server's** `http://127.0.0.1:8787`. PostgreSQL sta
 See [server installation and configuration](docs/deployment.md) for an existing PostgreSQL database, persistent data, and upgrades.
 
 ## 2. Install a device client
+
+**Windows Codex Desktop:** use the [native Windows package and PowerShell setup](docs/runtime.md#windows-codex-device). The source steps below also cover macOS and Linux clients.
 
 **Run on each device that will execute tasks.** The source CLI requires Git, **Node.js 24.9+**, and **pnpm 11.25.0**. Use a separate client checkout even if the server is on the same machine, so its `.env` does not override device credentials.
 
@@ -208,7 +210,7 @@ The default native sandbox is **read-only**; select `--workspace-write` on impor
 
 ### Use the Codex Desktop sidebar
 
-On your Mac, [install the managed runtime](docs/runtime.md), connect it to the Server shared by your devices using `contextmesh setup`, then enable the sidebar.
+On macOS or Windows, [install the managed runtime](docs/runtime.md), connect it to the Server shared by your devices using `contextmesh setup`, then enable the sidebar.
 
 ```sh
 contextmesh codex install-panel

@@ -16,7 +16,10 @@ import { STORAGE_SCHEMA_VERSION } from '../../packages/protocol/src/index.js'
 import { copyDependencies } from './copy-dependencies.js'
 const repo = process.cwd(),
   out = resolve(process.argv[2] ?? 'artifacts/runtime'),
-  serverOnly = process.argv.includes('--server-only')
+  serverOnly = process.argv.includes('--server-only'),
+  windows = process.platform === 'win32'
+if (windows && (process.arch !== 'x64' || serverOnly))
+  throw new Error('The Windows bundle supports native Codex on x64')
 await mkdir(out, { recursive: false })
 const app = serverOnly ? out : join(out, 'app')
 await mkdir(app, { recursive: true })
@@ -25,9 +28,11 @@ await writeFile(
   join(app, 'package.json'),
   JSON.stringify({ type: 'module', private: true }),
 )
-const roots = serverOnly
-  ? ['fastify', 'pg', 'zod']
-  : ['fastify', 'pg', 'zod', '@deepseek-ai/dsh', 'dsh-contextmesh-handoff']
+const roots = windows
+  ? ['zod']
+  : serverOnly
+    ? ['fastify', 'pg', 'zod']
+    : ['fastify', 'pg', 'zod', '@deepseek-ai/dsh', 'dsh-contextmesh-handoff']
 const licenses = await copyDependencies(repo, join(app, 'node_modules'), roots)
 await writeFile(
   join(out, 'THIRD-PARTY.json'),
@@ -56,13 +61,20 @@ if (!serverOnly) {
     join(out, 'NODE-LICENSE'),
   )
   await mkdir(join(out, 'bin'))
-  await cp(process.execPath, join(out, 'bin/node'))
-  await chmod(join(out, 'bin/node'), 0o755)
-  await writeFile(
-    join(out, 'bin/contextmesh'),
-    '#!/bin/sh\nCM_BUNDLE=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)\nexport CONTEXTMESH_BUNDLE="$CM_BUNDLE"\nexec "$CM_BUNDLE/bin/node" "$CM_BUNDLE/app/dist/cli.js" "$@"\n',
-    { mode: 0o755 },
-  )
+  const nodeName = windows ? 'node.exe' : 'node'
+  await cp(process.execPath, join(out, 'bin', nodeName))
+  if (!windows) await chmod(join(out, 'bin/node'), 0o755)
+  if (windows)
+    await writeFile(
+      join(out, 'bin/contextmesh.cmd'),
+      '@echo off\r\nsetlocal DisableDelayedExpansion\r\nset "CONTEXTMESH_BUNDLE=%~dp0.."\r\n"%~dp0node.exe" "%~dp0..\\app\\dist\\cli.js" %*\r\nexit /b %errorlevel%\r\n',
+    )
+  else
+    await writeFile(
+      join(out, 'bin/contextmesh'),
+      '#!/bin/sh\nCM_BUNDLE=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)\nexport CONTEXTMESH_BUNDLE="$CM_BUNDLE"\nexec "$CM_BUNDLE/bin/node" "$CM_BUNDLE/app/dist/cli.js" "$@"\n',
+      { mode: 0o755 },
+    )
   const p = JSON.parse(
     await readFile('packages/handoff-deepseek/package.json', 'utf8'),
   )
@@ -74,6 +86,7 @@ if (!serverOnly) {
     format: 1,
     version: p.version,
     platform: process.platform + '-' + process.arch,
+    components: windows ? ['codex'] : ['codex', 'dsh'],
     ...(process.platform === 'linux'
       ? {
           minimumGlibc: (

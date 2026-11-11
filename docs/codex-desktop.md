@@ -2,9 +2,9 @@
 
 [中文](codex-desktop.zh.md) · [Install and connect a device](getting-started.md) · [Server setup](deployment.md)
 
-The **ContextMesh** entry in the Codex sidebar opens its own panel. A Mac running Codex Desktop can receive sessions and publish snapshots through a ContextMesh Server shared with other devices. The panel shows DeepSeek Harness sessions and Codex archives. Available actions depend on the source agent and session state.
+The **ContextMesh** entry in the Codex sidebar opens its own panel. A macOS or Windows device running Codex Desktop can receive sessions and publish snapshots through a ContextMesh Server shared with other devices. The panel shows DeepSeek Harness sessions and Codex archives. Available actions depend on the source agent and session state.
 
-## Enable the panel on the Mac
+## Enable the panel
 
 1. Install or upgrade the [managed ContextMesh runtime](runtime.md). Run `contextmesh setup` and connect to the same HTTPS Server as the other device. Use a pairing code for a new device.
 2. Sign in to Codex Desktop and make sure the local model you intend to use works.
@@ -12,11 +12,13 @@ The **ContextMesh** entry in the Codex sidebar opens its own panel. A Mac runnin
 
 The runtime registers one ContextMesh sidebar entry and supplies its local service. On the remote DSH device, use the existing single ContextMesh plugin. Chunked archives require a schema 9 Server that advertises `chunked-archives-v2`. Existing servers and archives remain accessible through the older interface.
 
+Windows users should follow the [Windows installation steps](runtime.md#windows-codex-device) with native `codex.exe`. Both platforms use the same panel and features, with one plugin entry.
+
 ## Receive a shared session
 
 The panel checks the Server while it is visible. When the connection returns, it refreshes the shared session list and keeps the current selection if the session is still available.
 
-1. In **Receive**, select a shared conversation. **Choose Folder…** opens the macOS folder picker for any accessible folder. If you cancel, your previous selection is kept. New conversations use the receiving Codex model. Enable project writes when the task should edit files.
+1. In **Receive**, select a shared conversation. **Choose Folder…** opens the native macOS or Windows folder picker for any accessible folder. If you cancel, your previous selection is kept. New conversations use the receiving Codex model. Enable project writes when the task should edit files.
 2. Choose the action shown for the session.
    - **Review import** previews the records that fit the receiving Codex model. Use the optional next instruction to find relevant history, or use **Browse full archive** to select an excerpt. Confirm the import, then send the next message in Codex.
    - **Review takeover** transfers ownership of a live session from a supported source. ContextMesh checks the model and workspace before requesting that the source stop. Codex then continues any unfinished work.

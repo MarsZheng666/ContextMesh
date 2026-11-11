@@ -396,10 +396,27 @@ export class CodexSharedSync {
     }
   }
   async run(signal: AbortSignal) {
+    const shutdown = new AbortController()
+    signal = AbortSignal.any([signal, shutdown.signal])
     await privateDirectory(join(this.directory, 'worker'))
     const lock = await listenLocal(
       join(this.directory, 'worker'),
-      async () => ({ running: true }),
+      async (command) => {
+        if (
+          command &&
+          typeof command === 'object' &&
+          'action' in command &&
+          command.action === 'stop'
+        ) {
+          this.stopped = true
+          clearTimeout(this.timer)
+          await this.working?.catch(() => {})
+          // Flush the control reply before closing the pipe and exiting.
+          setTimeout(() => shutdown.abort(), 50)
+          return { stopped: true }
+        }
+        return { running: !this.stopped }
+      },
     )
     const next = async () => {
       if (this.stopped) return

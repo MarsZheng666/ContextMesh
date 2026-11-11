@@ -458,7 +458,7 @@ function updateReceive() {
   for (const row of $('readySources').children) row.setAttribute('aria-pressed', String(row.dataset.source === selectedSource))
 }
 function updateFolder() {
-  const split = selectedPath?.lastIndexOf('/') ?? -1
+  const split = Math.max(selectedPath?.lastIndexOf('/') ?? -1, selectedPath?.lastIndexOf(String.fromCharCode(92)) ?? -1)
   $('folderName').textContent = selectedPath ? selectedPath.slice(split + 1) || selectedPath : t('noFolder')
   $('folderParent').textContent = split > 0 ? selectedPath.slice(0, split) : ''
 }

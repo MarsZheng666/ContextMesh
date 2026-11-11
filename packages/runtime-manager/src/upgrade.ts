@@ -1,3 +1,4 @@
+import { setTimeout as delay } from 'node:timers/promises'
 import { cp, readFile, writeFile, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -106,6 +107,35 @@ export async function checkUpgrade(
       schema >= previous.minSchema && schema <= previous.maxSchema,
   }
 }
+/** Windows has no graceful POSIX signals; drain the sync worker over its authenticated pipe. */
+export async function stopCodexSync(home: string) {
+  const directory = join(home, 'data/codex-bridge/shared/worker')
+  const missing = (error: unknown) =>
+    ['ENOENT', 'ECONNREFUSED'].includes(
+      (error as NodeJS.ErrnoException).code ?? '',
+    )
+  try {
+    z.object({
+      ok: z.literal(true),
+      value: z.object({ stopped: z.literal(true) }),
+    }).parse(await callLocal(directory, { action: 'stop' }))
+  } catch (error) {
+    if (missing(error)) return
+    throw error
+  }
+  for (let attempt = 0; attempt < 100; attempt++) {
+    await delay(100)
+    try {
+      await callLocal(directory, {}, 1000)
+    } catch (error) {
+      if (missing(error)) return
+      throw error
+    }
+  }
+  throw new Error(
+    'The Codex sync worker is still draining; the active release has not changed',
+  )
+}
 export async function upgrade(
   source: string,
   home = runtimeHome(),
@@ -165,6 +195,7 @@ export async function upgrade(
     }
     try {
       if (journal.phase === 'prepared') {
+        if (process.platform === 'win32') await stopCodexSync(home)
         if (await hooks.running()) await hooks.stop()
         await save('stopped')
       }
@@ -247,6 +278,7 @@ export async function rollback(home = runtimeHome(), hooks = hooksFor(home)) {
     if (!current?.previous) throw new Error('No previous version recorded')
     const target = join(home, 'releases', current.previous)
     await checkUpgrade(target, home)
+    if (process.platform === 'win32') await stopCodexSync(home)
     const running = await hooks.running()
     if (running) await hooks.stop()
     await atomicJson(join(home, 'current.json'), {

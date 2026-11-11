@@ -1,3 +1,4 @@
+import { powershell } from '../../../packages/platform/src/windows.js'
 import { captureCodexArchive } from '../../../packages/adapter-codex/src/archive-export.js'
 import { CodexSharedSync } from '../../../packages/adapter-codex/src/shared-sync.js'
 import { callLocal } from '../../../packages/handoff-deepseek/src/local-control.js'
@@ -124,7 +125,7 @@ export class CodexPanelJobs {
     const worker = spawn(
       process.execPath,
       [...process.execArgv, process.argv[1]!, 'codex', 'sync-worker'],
-      { detached: true, stdio: 'ignore' },
+      { detached: true, windowsHide: true, stdio: 'ignore' },
     )
     await new Promise<void>((resolve, reject) => {
       worker.once('spawn', resolve)
@@ -328,7 +329,7 @@ export class CodexPanelJobs {
     const worker = spawn(
       process.execPath,
       [...process.execArgv, process.argv[1]!, 'codex', 'panel-worker', job.id],
-      { detached: true, stdio: 'ignore' },
+      { detached: true, windowsHide: true, stdio: 'ignore' },
     )
     try {
       await new Promise<void>((resolve, reject) => {
@@ -572,7 +573,13 @@ export class CodexPanelJobs {
     const job = await this.read(id)
     if (!job.threadId || !['completed', 'failed'].includes(job.state))
       throw new Error('The Codex thread is not available yet')
-    const url = 'codex://threads/' + job.threadId
+    const url = 'codex://threads/' + encodeURIComponent(job.threadId)
+    if (process.platform === 'win32') {
+      await powershell('Start-Process -FilePath $env:CM_OPEN_URL', {
+        CM_OPEN_URL: url,
+      })
+      return { opened: true }
+    }
     await new Promise<void>((resolve, reject) => {
       const child = spawn('/usr/bin/open', [url], { stdio: 'ignore' })
       child.once('error', reject)
