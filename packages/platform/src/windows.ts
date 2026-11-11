@@ -19,7 +19,7 @@ export function powershellCommand(script: string) {
       '-STA',
       '-EncodedCommand',
       Buffer.from(
-        "$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false);\n" +
+        "$ErrorActionPreference='Stop'; $env:PSModulePath=[System.IO.Path]::Combine($PSHOME, 'Modules'); [Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false);\n" +
           script,
         'utf16le',
       ).toString('base64'),
