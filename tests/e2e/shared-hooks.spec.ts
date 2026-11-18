@@ -84,6 +84,8 @@ it.skipIf(!process.env.CONTEXTMESH_TEST_CODEX_BIN)(
       },
       messages: [{ role: 'user', text: 'Synthetic saved baseline' }],
     })
+    const originalTitle = '原有标题 · API review'
+    await native.setThreadName(target.threadId, originalTitle)
     const sync = new CodexSharedSync(options)
     const share = await sync.share(
       target.threadId,
@@ -91,6 +93,8 @@ it.skipIf(!process.env.CONTEXTMESH_TEST_CODEX_BIN)(
       'full',
     )
     await sync.tick()
+    await new CodexSharedSync(options).tick()
+    expect(await native.threadName(target.threadId)).toBe('🔗 ' + originalTitle)
     const follower = new SharedFollowers(sync.client, join(root, 'receiver'))
     await follower.follow(share.id)
     follower.start()
@@ -130,6 +134,17 @@ it.skipIf(!process.env.CONTEXTMESH_TEST_CODEX_BIN)(
       )
       .toBe(true)
     expect((await turn).stdout).toContain('turn.completed')
+    // Codex lists saved conversations after their first native turn.
+    const reader = new NativeCodex(options.native)
+    f.defer(() => reader.close())
+    await reader.init()
+    await expect
+      .poll(
+        async () =>
+          (await reader.savedThreads()).find((t) => t.id === target.threadId)
+            ?.name,
+      )
+      .toBe('🔗 ' + originalTitle)
     await expect
       .poll(async () => (await sync.client.pull(share.id)).share.activity, {
         timeout: 15000,

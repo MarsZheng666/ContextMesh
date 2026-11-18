@@ -4,6 +4,8 @@
 
 Share a conversation once on its source device, then choose **Receive and follow** once on each receiving device. Future messages and recorded tool executions update automatically in **Live conversations**. The existing ContextMesh plugin provides this view in both DSH and the Codex sidebar.
 
+DSH shows 🔗 in the sidebar row and **Shared** above the composer. Codex shows 🔗 before the native conversation title. The marker follows the current publishing conversation after a confirmed cross-agent takeover. Importing a one-time snapshot leaves the conversation unmarked.
+
 ## Set up
 
 1. Use matching clients and a schema **10** Server advertising `live-session-sync-v1`. Devices need credentials for the same Server namespace; sharing follows that existing access boundary.

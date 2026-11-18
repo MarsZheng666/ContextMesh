@@ -81,6 +81,10 @@ createInterface({ input: process.stdin }).on('line', (line) => {
         },
         approvalPolicy: 'never',
       })
+    case 'thread/name/set':
+      t.thread.name = p.name
+      save()
+      return reply({})
     case 'thread/read':
       return reply({ thread: t.thread })
     case 'thread/turns/list':

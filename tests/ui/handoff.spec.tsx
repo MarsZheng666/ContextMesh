@@ -104,6 +104,7 @@ for (const [language, locale] of [
     Object.assign(data.sessions[0]!, {
       activeNodeId: 'B',
       activeNodeName: 'Server',
+      liveShared: true,
     })
     const t = (key: string) =>
       new Map<string, string>(Object.entries(locale)).get(key) ?? key
@@ -113,6 +114,8 @@ for (const [language, locale] of [
     const hover = renderToStaticMarkup(
       <SessionDeviceView data={data} sessionId="session" t={t} detail />,
     )
+    expect(icon).toContain(`aria-label="${locale.sharedBadge}"`)
+    expect(hover).toContain(locale.sharedBadge)
     expect(icon).toContain(`aria-label="${locale.remote}: Server"`)
     expect(hover).toContain(`${locale.remote}: Server`)
     expect(
@@ -126,6 +129,7 @@ for (const owner of ['A', 'B'])
   it(`keeps only device handoff controls in the dock for owner ${owner}`, async () => {
     const data = structuredClone(snapshot)
     data.sessions[0]!.activeNodeId = owner
+    data.sessions[0]!.liveShared = owner === 'A'
     data.models = [{ provider: 'local', model: 'local-model' }]
     data.nodes[1]!.models = [{ provider: 'remote', model: 'remote-model' }]
     vi.stubGlobal(
@@ -144,6 +148,7 @@ for (const owner of ['A', 'B'])
           }
         />,
       )
+      expect(html.includes(en.sharedBadge)).toBe(owner === 'A')
       expect(html).not.toContain('Continue with model')
       expect(html).not.toContain('local-model')
       expect(html).not.toContain('remote-model')

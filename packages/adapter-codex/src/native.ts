@@ -244,6 +244,15 @@ export class NativeCodex {
       }),
     ).thread
   }
+  async threadName(threadId: string) {
+    const thread = await this.readThread(threadId)
+    if (thread.id !== threadId)
+      throw new Error('Codex returned a different thread')
+    return z.string().nullish().parse(thread.name)
+  }
+  async setThreadName(threadId: string, name: string) {
+    await this.rpc.request('thread/name/set', { threadId, name })
+  }
   async snapshot(threadId: string): Promise<NativeSnapshot> {
     const thread = await this.readThread(threadId)
     if (thread.id !== threadId || thread.status.type !== 'idle')

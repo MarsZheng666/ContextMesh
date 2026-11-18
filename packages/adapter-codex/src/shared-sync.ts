@@ -25,6 +25,7 @@ const binding = z.object({
   writerToken: z.string(),
   generation: z.number(),
   registered: z.boolean(),
+  markedTitle: z.string().optional(),
   seen: z.record(z.string(), z.string()),
   error: z.string().optional(),
   adoption: z
@@ -58,6 +59,7 @@ export class CodexSharedSync {
   readonly client: SharedClient
   readonly followers: SharedFollowers
   readonly directory: string
+  private titleChecks = new Map<string, { active: boolean; next: number }>()
   private working?: Promise<void>
   private timer?: ReturnType<typeof setTimeout>
   private stopped = false
@@ -242,6 +244,35 @@ export class CodexSharedSync {
     )
     if (!found) throw new Error('Waiting for Codex to persist the final reply')
   }
+  private async updateTitle(
+    source: Binding,
+    native: NativeCodex,
+    active: boolean,
+  ) {
+    if (!active && !source.markedTitle) return
+    const last = this.titleChecks.get(source.threadId)
+    if (last?.active === active && last.next > Date.now()) return
+    this.titleChecks.set(source.threadId, { active, next: Date.now() + 30000 })
+    const current = await native.threadName(source.threadId)
+    if (active) {
+      if (current?.startsWith('🔗')) return
+      if (!current && source.title.startsWith('🔗')) {
+        await native.setThreadName(source.threadId, source.title)
+        return
+      }
+      const title = '🔗 ' + (current || source.title)
+      // Record exactly what we own before the RPC, including across lost replies.
+      source.markedTitle = title
+      await atomicJson(this.path(source.threadId), source)
+      await native.setThreadName(source.threadId, title)
+    } else {
+      // A user may have renamed the old conversation since its last sync.
+      if (current === source.markedTitle && current)
+        await native.setThreadName(source.threadId, current.slice('🔗 '.length))
+      delete source.markedTitle
+      await atomicJson(this.path(source.threadId), source)
+    }
+  }
   private async sync() {
     const sources = await this.sources()
     if (!sources.length) {
@@ -282,13 +313,15 @@ export class CodexSharedSync {
           }
           await this.followers.follow(source.id)
           const current = await this.client.find('codex', source.threadId)
-          if (
-            current &&
-            (current.source.adapter !== 'codex' ||
-              current.source.id !== source.threadId ||
-              current.generation !== source.generation)
-          )
-            continue
+          if (!current) continue
+          const active =
+            current.id === source.id &&
+            current.source.adapter === 'codex' &&
+            current.source.id === source.threadId &&
+            current.generation === source.generation
+          // A temporary Desktop naming failure must not hold up message delivery.
+          await this.updateTitle(source, native, active).catch(() => {})
+          if (!active) continue
           // Persist visible native messages before hook events from their turn.
           await this.scan(source, native)
           const files = await readdir(join(this.directory, 'outbox')).catch(
