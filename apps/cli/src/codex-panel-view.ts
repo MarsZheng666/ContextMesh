@@ -11,7 +11,9 @@ export const codexPanelHtml = `<!doctype html>
 :root {
   color-scheme: light dark;
   font: 14px/1.45 system-ui, sans-serif;
-  --surface: light-dark(#fff, #000);
+  --surface: light-dark(#fff, #191919);
+  --page-gutter: clamp(12px, 4vw, 32px);
+  --section-inset: clamp(4px, 1.5vw, 14px);
   --ink: light-dark(#171717, #f5f5f5);
   --muted: light-dark(#606060, #aaa);
   --border: light-dark(#ddd, #343434);
@@ -30,7 +32,7 @@ export const codexPanelHtml = `<!doctype html>
 :root[data-theme="light"] { color-scheme: light; }
 *, *::before, *::after { box-sizing: border-box; }
 [hidden] { display: none !important; }
-body { margin: 0 auto; max-width: 660px; padding: 0 16px 18px; }
+body { margin: 0 auto; max-width: 800px; padding: 0 var(--page-gutter) 28px; }
 h1, h2, p { margin: 0; }
 h1 { font-size: 18px; font-weight: 650; letter-spacing: -.025em; }
 h2 { font-size: 14px; font-weight: 650; }
@@ -43,7 +45,7 @@ input { accent-color: light-dark(#262626, #ddd); }
 .header, .header-actions, .section-heading, .folder-row, .job-title {
   display: flex; justify-content: space-between; align-items: center; gap: 8px;
 }
-.panel-top { position: sticky; top: 0; z-index: 3; background: var(--surface); padding-top: 12px; }
+.panel-top { position: sticky; top: 0; z-index: 3; background: var(--surface); padding-top: clamp(12px, 2vw, 22px); }
 .header { padding-bottom: 8px; }
 #connection { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 #connection::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
@@ -54,7 +56,7 @@ input { accent-color: light-dark(#262626, #ddd); }
   background: transparent; border: 0; border-radius: 7px;
 }
 .quiet:hover:not(:disabled), nav button:hover { background: var(--hover); }
-nav { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; padding-bottom: 9px; border-bottom: 1px solid var(--border); }
+nav { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; padding-bottom: 9px; }
 nav button[aria-pressed="true"] { background: var(--selected); color: var(--ink); font-weight: 620; }
 .badge {
   border: 1px solid var(--border); border-radius: 6px; color: var(--muted);
@@ -65,7 +67,7 @@ nav button[aria-pressed="true"] { background: var(--selected); color: var(--ink)
 .badge[data-status="recovery"], .badge[data-status="attention"], .badge[data-status="busy"] { color: var(--warning); }
 .badge[data-status="failed"] { color: var(--danger); }
 .page, form, .thread-field, .folder-value, .source-text { display: grid; min-width: 0; }
-.page { padding-top: 14px; gap: 10px; }
+.page { padding: clamp(16px, 3vw, 28px) var(--section-inset) 0; gap: 12px; }
 form { gap: 10px; }
 .thread-field { gap: 5px; }
 #receive { border-top: 1px solid var(--border); padding-top: 11px; }
@@ -136,6 +138,9 @@ legend { padding: 0 0 5px; }
 #queuedNotice { padding-top: 8px; }
 #queuedNotice button { margin-inline-start: 6px; }
 article { border-top: 1px solid var(--border); padding: 9px 0; display: grid; gap: 4px; justify-items: start; overflow-wrap: anywhere; }
+#jobs article { grid-template-columns: minmax(0, 1fr); border-top: 0; padding: 16px clamp(8px, 2vw, 20px); gap: 6px; }
+#jobs article + article { border-top: 1px solid var(--border); }
+#jobs article > p:not(.muted) { max-width: 65ch; }
 .job-title { width: 100%; align-items: start; }
 article details, article code { font-size: 12px; color: var(--muted); }
 article code { display: block; user-select: all; }
@@ -153,8 +158,10 @@ dl { display: grid; grid-template-columns: fit-content(40%) minmax(0, 1fr); gap:
 dt { color: var(--muted); overflow-wrap: anywhere; }
 dd { margin: 0; overflow-wrap: anywhere; }
 .dialog-actions { justify-content: end; margin-top: 13px; }
-@media (max-width: 360px) {
-  body { padding-inline: 10px; }
+@media (max-width: 420px) {
+  nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  :root { scroll-padding-top: 140px; }
+  .header { flex-wrap: wrap; }
   .source-row, .job-title { gap: 5px; }
 }
 @media (pointer: coarse) {
