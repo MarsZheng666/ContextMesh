@@ -7,12 +7,14 @@ import { TOKEN } from '../fixture.js'
 import { SharedClient } from '../../packages/client/src/shared.js'
 import { ConfirmedCodexTakeover } from '../../packages/adapter-codex/src/takeover.js'
 import { CodexSharedSync } from '../../packages/adapter-codex/src/shared-sync.js'
+import { NativeCodex } from '../../packages/adapter-codex/src/native.js'
 import { codexModel } from '../helpers/codex-model.js'
 
 it.skipIf(!process.env.CONTEXTMESH_TEST_CODEX_BIN)(
   'keeps one live conversation through DSH → native Codex → DSH and rejects the old writer',
   async () => {
     const f = await environment()
+    f.defer(f.close)
     const a = await f.launch('A', f.source)
     const b = await f.launch('B', f.target)
     const sessionId = randomUUID(),
@@ -28,6 +30,10 @@ it.skipIf(!process.env.CONTEXTMESH_TEST_CODEX_BIN)(
       sessionId,
       text: 'READ_WORKSPACE remember CODEX-RELAY-731 total=17.',
     })
+    const isShared = async (id: string) =>
+      (await f.store.listSummaries(f.namespace)).find((row) => row.id === id)
+        ?.liveShared
+    expect(await isShared(sessionId)).toBe(false)
     const shared = (await a.rpc('m1', {
       command: {
         action: 'shared-publish',
@@ -36,6 +42,7 @@ it.skipIf(!process.env.CONTEXTMESH_TEST_CODEX_BIN)(
         confirmed: true,
       },
     })) as { id: string }
+    expect(await isShared(sessionId)).toBe(true)
     const client = new SharedClient(f.client)
     const first = await client.pull(shared.id)
     expect(first.events.length).toBeGreaterThan(0)
@@ -99,6 +106,12 @@ it.skipIf(!process.env.CONTEXTMESH_TEST_CODEX_BIN)(
       generation: 1,
     })
     const source = (await receiver.sources())[0]!
+    expect(await isShared(sessionId)).toBe(false)
+    const native = new NativeCodex(options.native)
+    f.defer(() => native.close())
+    await native.init()
+    const marked = await native.threadName(source.threadId)
+    expect(marked).toMatch(/^🔗 /)
     expect((await client.pull(shared.id)).share.activity).toBe('idle')
     await b.rpc('m1', { command: { action: 'shared-follow', id: shared.id } })
     const preview = (await b.rpc('m1', {
@@ -134,6 +147,10 @@ it.skipIf(!process.env.CONTEXTMESH_TEST_CODEX_BIN)(
       text: 'Continue after the return handoff, keep total=17.',
     })
     await receiver.tick()
+    expect(await isShared(continued.sessionId)).toBe(true)
+    expect(await native.threadName(source.threadId)).toBe(
+      marked!.slice('🔗 '.length),
+    )
     const followed = (await receiver.followers.list())[0]!
     expect(followed.share.id).toBe(shared.id)
     expect(

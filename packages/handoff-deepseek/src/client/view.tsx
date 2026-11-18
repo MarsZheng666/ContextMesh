@@ -986,7 +986,7 @@ export function RemotePanelView({
                   </div>
                   <div className="cm-actions">
                     <button
-                      disabled={busy}
+                      disabled={busy || session.liveShared}
                       onClick={() => {
                         if (window.confirm(t('liveConfirm')))
                           void run(
@@ -1002,7 +1002,7 @@ export function RemotePanelView({
                           )
                       }}
                     >
-                      {t('liveShare')}
+                      {t(session.liveShared ? 'sharedBadge' : 'liveShare')}
                     </button>
                     <button
                       disabled={busy}
@@ -1295,6 +1295,9 @@ export function HandoffDock({
           </button>
         )}
       <strong>{t('app')}</strong>
+      {session.liveShared && (
+        <span className="cm-badge">{t('sharedBadge')}</span>
+      )}
       <span>
         {session.handoffState
           ? stateLabel(session.handoffState, t)
@@ -1351,6 +1354,15 @@ export function SessionDeviceView({
 }: Locale & { data?: Snapshot; sessionId: string; detail?: boolean }) {
   const session = data?.sessions.find((s) => s.id === sessionId)
   if (!data || !session) return null
+  const marker = session.liveShared ? (
+    detail ? (
+      <span>{t('sharedBadge')} </span>
+    ) : (
+      <span role="img" title={t('sharedBadge')} aria-label={t('sharedBadge')}>
+        🔗
+      </span>
+    )
+  ) : null
   if (session.successorSessionId) {
     const label = `${t('continuedInCodex')}: ${session.successorSessionId}`
     return detail ? (
@@ -1361,21 +1373,26 @@ export function SessionDeviceView({
       </span>
     )
   }
-  if (!session.activeNodeName) return null
+  if (!session.activeNodeName) return marker
   const remote = session.activeNodeId !== data.nodeId
-  if (!remote && !detail) return null
+  if (!remote && !detail) return marker
   const label = `${remote ? t('remote') : t('local')}: ${session.activeNodeName}`
-  return detail ? (
-    <span style={{ fontSize: 12, opacity: 0.75 }}>{label}</span>
-  ) : (
-    <span
-      role="img"
-      aria-label={label}
-      title={label}
-      style={{ color: '#8297ec', fontSize: 13 }}
-    >
-      ↗
-    </span>
+  return (
+    <>
+      {marker}
+      {detail ? (
+        <span style={{ fontSize: 12, opacity: 0.75 }}>{label}</span>
+      ) : (
+        <span
+          role="img"
+          aria-label={label}
+          title={label}
+          style={{ color: '#8297ec', fontSize: 13 }}
+        >
+          ↗
+        </span>
+      )}
+    </>
   )
 }
 export function SessionDevice({

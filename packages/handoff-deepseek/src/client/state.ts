@@ -69,6 +69,7 @@ export const snapshotSchema = z.object({
       handoffId: z.string().nullable(),
       handoffState: z.string().nullable(),
       recoveryRequired: z.boolean(),
+      liveShared: z.boolean().optional(),
       successorSessionId: z.string().nullable().optional(),
     }),
   ),

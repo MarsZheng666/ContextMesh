@@ -53,6 +53,7 @@ export const remoteSessionSchema = z.object({
   handoffId: z.uuid().nullable(),
   handoffState: handoffState.nullable(),
   recoveryRequired: z.boolean(),
+  liveShared: z.boolean().optional(),
   successorSessionId: z.string().nullable().optional(),
 })
 export class HandoffClient {
