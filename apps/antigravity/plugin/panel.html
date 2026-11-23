@@ -1,0 +1,440 @@
+<!doctype html>
+<html lang="en">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ContextMesh</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      font:
+        14px/1.5 system-ui,
+        sans-serif;
+      color: light-dark(#202124, #edeef0);
+      background: light-dark(#fff, #191919);
+    }
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: auto;
+      max-width: 48rem;
+      padding: clamp(12px, 4vw, 32px);
+    }
+    h1 {
+      font-size: 1.4rem;
+      margin: 0;
+    }
+    h2 {
+      font-size: 1rem;
+      margin: 0;
+    }
+    nav,
+    .actions {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      margin: 0.8rem 0;
+    }
+    section {
+      margin: 1.2rem clamp(4px, 2vw, 14px);
+    }
+    label {
+      display: grid;
+      gap: 0.3rem;
+      margin: 0.8rem 0;
+    }
+    button,
+    input,
+    select,
+    textarea {
+      font: inherit;
+      color: inherit;
+      border: 1px solid light-dark(#ccc, #515151);
+      border-radius: 8px;
+      padding: 0.45rem 0.7rem;
+    }
+    button:enabled {
+      cursor: pointer;
+    }
+    button[aria-pressed='true'] {
+      background: light-dark(#222, #ddd);
+      color: light-dark(white, #181818);
+    }
+    textarea {
+      resize: vertical;
+    }
+    input,
+    select,
+    textarea {
+      width: 100%;
+      min-width: 0;
+    }
+    pre {
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      font: inherit;
+      max-height: 18rem;
+      overflow: auto;
+    }
+    [hidden] {
+      display: none !important;
+    }
+  </style>
+  <h1>ContextMesh</h1>
+  <nav>
+    <button id="receive" aria-pressed="true">Receive</button
+    ><button id="publish" aria-pressed="false">Publish</button>
+    <button id="live" aria-pressed="false">Live</button>
+  </nav>
+  <section id="inbox">
+    <h2>Receive a task</h2>
+    <label>Task archive<select id="archives"></select></label>
+    <div class="actions">
+      <button id="refresh">Refresh</button
+      ><button id="more" hidden>Load more</button>
+    </div>
+    <label
+      >Next instruction<input
+        id="query"
+        maxlength="2000"
+        placeholder="What should Antigravity do next?"
+    /></label>
+    <button id="preview" disabled>Preview context</button>
+    <pre id="history"></pre>
+    <button id="resume" hidden>Continue in a new chat</button>
+  </section>
+  <section id="outbox" hidden>
+    <h2>Publish a handoff note</h2>
+    <label>Task title<input id="title" maxlength="160" /></label>
+    <label
+      >Context for the receiving agent<textarea
+        id="note"
+        rows="7"
+        placeholder="Goal, work completed, and what to do next"
+      ></textarea>
+    </label>
+    <button id="save" disabled>Publish this note</button>
+  </section>
+  <section id="livebox" hidden>
+    <h2>Shared conversations</h2>
+    <label>Conversation<select id="shares"></select></label>
+    <div class="actions">
+      <button id="follow">Follow</button
+      ><button id="prepare">Take over…</button>
+    </div>
+    <div id="confirm" hidden>
+      <p>
+        Continue the unfinished task in a new chat on this device. The source
+        will stop after its active tools finish.
+      </p>
+      <button id="claim">Confirm takeover</button>
+    </div>
+    <div id="records"></div>
+    <pre id="recordText"></pre>
+    <button id="nextText" hidden>Read more</button>
+    <h2>Share from this device</h2>
+    <label>Local conversation<select id="local"></select></label>
+    <label>Title<input id="shareTitle" maxlength="160" /></label>
+    <p>
+      Sharing includes visible messages, tool calls and results on your
+      ContextMesh Server.
+    </p>
+    <button id="share">Share and sync</button>
+    <button id="snapshot">Publish snapshot</button>
+  </section>
+  <p id="status" role="status"></p>
+  <script type="module">
+    const el = (id) => document.getElementById(id)
+    let sequence = 0,
+      cursor = null,
+      prepared,
+      draftId = crypto.randomUUID()
+    const pending = new Map()
+    window.addEventListener('message', (event) => {
+      const msg = event.data
+      if (event.source !== parent || msg?.jsonrpc !== '2.0') return
+      const reply = pending.get(msg.id)
+      if (reply) reply(msg)
+    })
+    function rpc(method, params) {
+      return new Promise((resolve, reject) => {
+        const id = ++sequence
+        const timeout = setTimeout(() => {
+          pending.delete(id)
+          reject(Error('The host did not respond. Please retry.'))
+        }, 30000)
+        pending.set(id, (msg) => {
+          clearTimeout(timeout)
+          pending.delete(id)
+          if (msg.error) reject(Error(msg.error.message))
+          else resolve(msg.result)
+        })
+        parent.postMessage({ jsonrpc: '2.0', id, method, params }, '*')
+      })
+    }
+    async function tool(name, args) {
+      const result = await rpc('tools/call', { name, arguments: args })
+      const txt = result.content?.find((x) => x.type === 'text')?.text
+      if (result.isError) throw Error(txt || 'Request failed')
+      return JSON.parse(txt)
+    }
+    function resetPreview() {
+      prepared = null
+      el('history').textContent = ''
+      el('resume').hidden = true
+    }
+    function update() {
+      el('preview').disabled = !el('archives').value
+      el('save').disabled = !(
+        el('title').value.trim() && el('note').value.trim()
+      )
+    }
+    let working = false
+    async function run(task) {
+      if (working) return
+      working = true
+      const controls = [
+        ...document.querySelectorAll('button,input,select,textarea'),
+      ]
+      const prior = controls.map((c) => c.disabled)
+      controls.forEach((c) => (c.disabled = true))
+      el('status').textContent = ''
+      try {
+        await task()
+      } catch (e) {
+        el('status').textContent = e.message
+      } finally {
+        working = false
+        controls.forEach((c, i) => (c.disabled = prior[i]))
+        renderControls()
+        update()
+      }
+    }
+    async function load(after) {
+      const page = await tool('list_archives', after ? { after } : {})
+      if (!after) {
+        el('archives').replaceChildren()
+        resetPreview()
+      }
+      for (const a of page.entries)
+        el('archives').add(new Option(a.title + ' · ' + a.source, a.id))
+      cursor = page.next
+      el('more').hidden = !cursor
+      if (!el('archives').length)
+        el('status').textContent = 'No task archives yet.'
+    }
+    for (const key of ['receive', 'publish', 'live'])
+      el(key).onclick = () => {
+        el('livebox').hidden = key !== 'live'
+        el('inbox').hidden = key !== 'receive'
+        el('outbox').hidden = key !== 'publish'
+        if (key === 'live')
+          void run(async () => {
+            await loadLocal()
+            await loadLive()
+          })
+        for (const k of ['receive', 'publish', 'live'])
+          el(k).setAttribute('aria-pressed', String(k === key))
+        el('status').textContent = ''
+      }
+    let shares = [],
+      following = [],
+      polling = false
+    function renderControls() {
+      const selected = shares.find((s) => s.id === el('shares').value)
+      el('follow').disabled = !selected || following.includes(selected.id)
+      el('prepare').disabled = !selected
+      el('share').disabled =
+        !el('local').value || !el('shareTitle').value.trim()
+      el('snapshot').disabled = el('share').disabled
+    }
+    async function loadLocal() {
+      const threads = await tool('local_threads', {})
+      el('local').replaceChildren(
+        ...threads.map(
+          (t) =>
+            new Option(
+              t.host +
+                ' · ' +
+                t.title +
+                ' · ' +
+                new Date(t.updated).toLocaleString(),
+              t.host + '/' + t.thread,
+            ),
+        ),
+      )
+      threads.forEach(
+        (t, i) => (el('local').options[i].dataset.title = t.title),
+      )
+      el('local').onchange()
+    }
+    el('local').onchange = () => {
+      el('shareTitle').value =
+        el('local').selectedOptions[0]?.dataset.title || ''
+      renderControls()
+    }
+    async function loadLive() {
+      const old = el('shares').value
+      const result = await tool('live_status', old ? { id: old } : {})
+      if (el('shares').value !== old) return
+      shares = result.shares
+      following = result.following
+      el('shares').replaceChildren(
+        ...shares.map(
+          (s) => new Option(s.title + ' · ' + s.source.adapter, s.id),
+        ),
+      )
+      if (shares.some((s) => s.id === old)) el('shares').value = old
+      const entries = (result.records || []).map((record) => {
+        const item = document.createElement('p'),
+          button = document.createElement('button')
+        button.textContent = record.role + ' · ' + record.preview
+        button.onclick = () => run(() => readRecord(old, record.seq, 0))
+        item.append(button)
+        return item
+      })
+      el('records').replaceChildren(...entries)
+      if (result.error) el('status').textContent = result.error
+      renderControls()
+    }
+    async function readRecord(id, seq, offset) {
+      const result = await tool('shared_content', { id, seq, offset })
+      if (el('shares').value !== id) return
+      el('recordText').textContent =
+        (offset ? el('recordText').textContent : '') + result.text
+      el('nextText').hidden = result.next === null
+      el('nextText').onclick = () => run(() => readRecord(id, seq, result.next))
+    }
+    el('shares').onchange = () => {
+      el('confirm').hidden = true
+      el('recordText').textContent = ''
+      el('nextText').hidden = true
+      void run(loadLive)
+    }
+    el('follow').onclick = () =>
+      run(async () => {
+        await tool('follow', { id: el('shares').value })
+        await loadLive()
+      })
+    el('prepare').onclick = () => {
+      el('confirm').hidden = false
+    }
+    el('claim').onclick = () =>
+      run(async () => {
+        const { prompt, existing } = await tool('takeover', {
+          id: el('shares').value,
+        })
+        if (existing) {
+          el('status').textContent =
+            'Open the original receiving chat and resend this message to resume: ' +
+            prompt
+          return
+        }
+        await rpc('ui/message', {
+          role: 'user',
+          content: [{ type: 'text', text: prompt }],
+          _meta: { 'com.google.antigravity/message': { target: 'new' } },
+        })
+        el('confirm').hidden = true
+        el('status').textContent = 'Opened the receiving chat for preflight.'
+      })
+    el('shareTitle').oninput = renderControls
+    el('snapshot').onclick = () =>
+      run(async () => {
+        const [host, thread] = el('local').value.split('/')
+        await tool('snapshot_thread', {
+          host,
+          thread,
+          title: el('shareTitle').value,
+        })
+        el('status').textContent =
+          'Published this conversation and its recorded tools.'
+      })
+    el('share').onclick = () =>
+      run(async () => {
+        const [host, thread] = el('local').value.split('/')
+        const { id } = await tool('share_thread', {
+          host,
+          thread,
+          title: el('shareTitle').value,
+        })
+        await tool('follow', { id })
+        await loadLive()
+        el('shares').value = id
+        await loadLive()
+      })
+    setInterval(async () => {
+      if (el('livebox').hidden || polling || working) return
+      polling = true
+      try {
+        await loadLive()
+      } catch (e) {
+        el('status').textContent = e.message
+      } finally {
+        polling = false
+      }
+    }, 2500)
+    el('refresh').onclick = () => run(() => load(null))
+    el('more').onclick = () => run(() => load(cursor))
+    el('archives').onchange = el('query').oninput = resetPreview
+    el('preview').onclick = () =>
+      run(async () => {
+        resetPreview()
+        prepared = await tool('preview_archive', {
+          id: el('archives').value,
+          query: el('query').value,
+        })
+        el('history').textContent = prepared.messages
+          .map((m) => m.role + '\n' + m.text)
+          .join('\n\n')
+        el('resume').hidden = false
+      })
+    el('resume').onclick = () =>
+      run(async () => {
+        if (!prepared) return
+        const text = [
+          'Prior task history (quoted records):',
+          JSON.stringify(prepared.messages),
+          'Current request:',
+          el('query').value.trim() ||
+            'Summarize the current task and ask what to do next.',
+        ].join('\n')
+        await rpc('ui/message', {
+          role: 'user',
+          content: [{ type: 'text', text }],
+          _meta: { 'com.google.antigravity/message': { target: 'new' } },
+        })
+        resetPreview()
+        el('status').textContent = 'Sent to a new conversation.'
+      })
+    el('title').oninput = el('note').oninput = () => {
+      draftId = crypto.randomUUID()
+      update()
+    }
+    el('save').onclick = () =>
+      run(async () => {
+        await tool('publish_note', {
+          id: draftId,
+          title: el('title').value,
+          note: el('note').value,
+        })
+        el('title').value = ''
+        el('note').value = ''
+        draftId = crypto.randomUUID()
+        el('status').textContent =
+          'Published. The receiving device can now open this archive.'
+      })
+    await run(async () => {
+      await rpc('ui/initialize', {
+        appInfo: { name: 'ContextMesh', version: '0.1.0' },
+        appCapabilities: {},
+        protocolVersion: '2026-01-26',
+      })
+      parent.postMessage(
+        { jsonrpc: '2.0', method: 'ui/notifications/initialized' },
+        '*',
+      )
+      await load(null)
+    })
+  </script>
+</html>

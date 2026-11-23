@@ -7,6 +7,7 @@ import {
 } from '../../protocol/src/archives.js'
 import {
   sharedInfo,
+  sharedTransfer,
   sharedPage,
   sharedCreate,
   sharedItem,
@@ -22,9 +23,10 @@ export class SharedClient {
   async list() {
     return z
       .object({ shares: z.array(sharedInfo) })
-      .parse(await this.mesh.request('/v2/shared-sessions')).shares
+      .parse(await this.mesh.request('/v2/shared-sessions?include=antigravity'))
+      .shares
   }
-  async find(adapter: 'deepseek' | 'codex', id: string) {
+  async find(adapter: 'deepseek' | 'codex' | 'antigravity', id: string) {
     return sharedInfo
       .nullable()
       .parse(
@@ -94,6 +96,14 @@ export class SharedClient {
       state,
       tool,
     })
+  }
+  async transfer(id: string, input: z.input<typeof sharedTransfer>) {
+    return sharedInfo.parse(
+      await this.mesh.request(
+        this.path(id) + '/transfer',
+        sharedTransfer.parse(input),
+      ),
+    )
   }
   async adoptCodex(
     id: string,

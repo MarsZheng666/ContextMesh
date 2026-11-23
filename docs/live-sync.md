@@ -8,7 +8,7 @@ DSH shows 🔗 in the sidebar row and **Shared** above the composer. Codex shows
 
 ## Set up
 
-1. Use matching clients and a schema **10** Server advertising `live-session-sync-v1`. Devices need credentials for the same Server namespace; sharing follows that existing access boundary.
+1. Use matching clients and a schema **10 or later** Server advertising `live-session-sync-v1`. Devices need credentials for the same Server namespace; sharing follows that existing access boundary.
 2. In DSH, open ContextMesh and choose **Share and sync** beside the conversation. In the Codex sidebar, select a saved conversation on the publish page, choose its sharing scope, then **Share and sync**. Confirm that future records may be sent to your paired devices.
 3. For Codex, review and trust ContextMesh's lifecycle hooks in the native hook settings (`/hooks` in the CLI). Changed hook definitions require review again. Source hooks coordinate new prompts, tool starts/completions and turn completion; keep them enabled while using shared ownership. The plugin installer supplies the hooks and never disables native trust checks.
 4. On another device, open **Live conversations**, select the conversation, and choose **Receive and follow**. Leave DSH or the Codex integration running. Codex's sync worker keeps running when the panel closes; the panel and native session-start hook restart it when needed.

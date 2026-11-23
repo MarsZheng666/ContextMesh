@@ -88,7 +88,7 @@ export class BasePostgresStore {
       COALESCE((SELECT enabled FROM cm_maintenance WHERE namespace=$1),false) AS enabled,
       (SELECT count(*)::int FROM cm_sessions WHERE namespace=$1 AND active_handle IS NOT NULL) AS writers,
       (SELECT count(*)::int FROM cm_sessions WHERE namespace=$1 AND (active_handoff IS NOT NULL OR active_model_relay IS NOT NULL OR recovery_required)) AS unresolved,
-      (SELECT count(*)::int FROM cm_takeovers WHERE namespace=$1 AND state='requested') AS takeovers,
+      ((SELECT count(*) FROM cm_takeovers WHERE namespace=$1 AND state='requested') + (SELECT count(*) FROM cm_shared_sessions WHERE namespace=$1 AND live_transfer->>'phase' IN ('requested','stopped')))::int AS takeovers,
       (SELECT max(version)::int FROM cm_schema) AS schema`,
       [ns],
     )

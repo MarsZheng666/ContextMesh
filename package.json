@@ -8,7 +8,8 @@
     "node": ">=24.9.0"
   },
   "scripts": {
-    "build": "tsup && pnpm --filter dsh-contextmesh build && pnpm --filter dsh-contextmesh-handoff build",
+    "build:antigravity": "tsx apps/antigravity/build.ts",
+    "build": "tsup && pnpm --filter dsh-contextmesh build && pnpm --filter dsh-contextmesh-handoff build && pnpm build:antigravity",
     "typecheck": "tsc --noEmit && tsc -p packages/handoff-deepseek/tsconfig.client.json",
     "test": "pnpm build && node --import tsx scripts/test.ts",
     "test:integration": "node --import tsx scripts/test.ts tests/integration tests/conformance",

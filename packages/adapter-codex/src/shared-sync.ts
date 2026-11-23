@@ -142,13 +142,31 @@ export class CodexSharedSync {
           },
           writerToken: source.writerToken,
         })
-      await this.client.activity(
-        source.id,
-        source,
-        input.turn_id ?? 'unknown',
-        'busy',
-        input.hook_event_name === 'PreToolUse' ? input.tool_use_id : undefined,
-      )
+      await this.client
+        .activity(
+          source.id,
+          source,
+          input.turn_id ?? 'unknown',
+          'busy',
+          input.hook_event_name === 'PreToolUse'
+            ? input.tool_use_id
+            : undefined,
+        )
+        .catch(async (error) => {
+          if (
+            input.hook_event_name === 'PreToolUse' &&
+            error?.code === 'TRANSFER_PENDING'
+          ) {
+            const op = (await this.client.find('codex', source.threadId))
+              ?.transfer
+            if (op?.phase === 'requested')
+              await atomicJson(
+                join(this.directory, 'interrupted', op.id + '.json'),
+                true,
+              )
+          }
+          throw error
+        })
     }
     // Every invocation has a separate durable file, so concurrent hooks never overwrite each other.
     await atomicJson(
@@ -165,6 +183,25 @@ export class CodexSharedSync {
       input,
     )
     return { shared: true }
+  }
+  async bindTransferred(
+    info: import('../../protocol/src/shared.js').SharedInfo,
+    threadId: string,
+    writerToken: string,
+    native: NativeCodex,
+  ) {
+    const value: Binding = {
+      endpoint: this.client.mesh.endpoint,
+      threadId,
+      id: info.id,
+      title: info.title,
+      scope: info.scope,
+      writerToken,
+      generation: info.generation,
+      registered: true,
+      seen: {},
+    }
+    await this.saveBaseline(value, native)
   }
   async prepareAdoption(
     sourceId: string,
@@ -189,7 +226,16 @@ export class CodexSharedSync {
     const native = new NativeCodex(this.options.native)
     try {
       await native.init()
-      await native.scanShared(threadId, info.scope, async (key, record) => {
+      await this.saveBaseline(value, native)
+    } finally {
+      await native.close()
+    }
+  }
+  private async saveBaseline(value: Binding, native: NativeCodex) {
+    await native.scanShared(
+      value.threadId,
+      value.scope,
+      async (key, record) => {
         value.seen[key] = digest({
           key,
           turn: record.turn,
@@ -198,11 +244,9 @@ export class CodexSharedSync {
           status: record.status,
           text: record.text,
         })
-      })
-    } finally {
-      await native.close()
-    }
-    await atomicJson(this.path(threadId), value)
+      },
+    )
+    await atomicJson(this.path(value.threadId), value)
   }
   private async send(
     source: Binding,
@@ -392,6 +436,31 @@ export class CodexSharedSync {
             await rm(path, { force: true })
           }
           await this.scan(source, native)
+          if (current.transfer?.phase === 'requested') {
+            const head = await this.client.find('codex', source.threadId)
+            if (
+              head?.activity === 'idle' &&
+              (await native.threadSettled(source.threadId))
+            )
+              await this.client.mesh.request(
+                '/v2/shared-sessions/' + source.id + '/transfer',
+                {
+                  action: 'stopped',
+                  interrupted:
+                    (await optionalJson(
+                      join(
+                        this.directory,
+                        'interrupted',
+                        current.transfer.id + '.json',
+                      ),
+                    )) === true,
+                  operationId: current.transfer.id,
+                  generation: source.generation,
+                  thread: source.threadId,
+                  token: source.writerToken,
+                },
+              )
+          }
           delete source.error
           await atomicJson(this.path(source.threadId), source)
         } catch (error) {

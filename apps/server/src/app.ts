@@ -231,6 +231,7 @@ export function buildServer(options: ServerOptions) {
       leaseMs: options.store.leaseMs,
       features: [
         sharedFeature,
+        'antigravity-transfer-v1',
         'native-agent-storage-v1',
         'cross-agent-takeover-v1',
         'codex-context-return-v1',

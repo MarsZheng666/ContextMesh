@@ -180,3 +180,7 @@ Live sharing adds shared identities, source generations, append-only updates and
 4. Verify authenticated `/health/ready` reports `schemaVersion: 10` and `live-session-sync-v1`, and existing records remain readable. Update clients, refresh the existing Codex plugin, and review its lifecycle hooks before resuming shared work.
 
 Managed same-schema upgrades do not perform this migration automatically. A rollback to schema 9 requires an explicitly approved restore of the corresponding backup; a binary replacement cannot undo the migration. Shared Codex blocks use a separate pool with the same configured `CONTEXTMESH_ARCHIVE_QUOTA_BYTES` capacity; include that pool when planning disk usage. Both archive and live data are covered by PostgreSQL backups.
+
+## Migrate schema 10 to 11
+
+Finish outstanding transfers, stop client workers and native tools, enable maintenance, and take a verified schema-10 PostgreSQL backup. Stop the API and start the matching schema-11 Server on the existing volume. Startup adds the transfer state in a transaction. Verify authenticated readiness reports `schemaVersion: 11`, check existing conversations, update the device plugins, then resume writes. Returning to schema 10 requires restoring the matching backup.

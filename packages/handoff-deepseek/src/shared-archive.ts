@@ -9,6 +9,7 @@ export async function prepareSharedArchive(
   client: SharedClient,
   directory: string,
   id: string,
+  previewActive = false,
 ) {
   let page = await client.pull(id)
   const generation = page.share.generation
@@ -22,7 +23,16 @@ export async function prepareSharedArchive(
   }
   const share = page.share,
     cut = page.next
-  if (share.source.adapter !== 'codex' || share.activity !== 'idle')
+  if (
+    (share.source.adapter === 'deepseek' &&
+      share.transfer?.phase !== 'stopped') ||
+    (share.activity !== 'idle' &&
+      !(
+        previewActive &&
+        share.source.adapter === 'antigravity' &&
+        share.activity !== 'reserved'
+      ))
+  )
     throw new Error('Wait for the current turn and its tools to finish')
   const spool = new ArchiveSpool(
     join(directory, id, String(generation), String(cut)),

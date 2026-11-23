@@ -32,7 +32,7 @@ Server 部署一次。各设备使用同一个 HTTPS 地址和独立凭据连接
 
 ## 首次共享，持续自动跟随
 
-源设备点击**共享并同步**，每台接收设备首次点击**接收并跟随**。之后，新消息与工具记录在现有 ContextMesh 面板内自动更新，断线后自动补齐；需要换设备执行时，点击**在此继续**并确认接管，共享会话身份保持不变。需要 schema 10，并在 Codex 上启用生命周期钩子。[配置持续同步 →](docs/live-sync.zh.md)
+源设备点击**共享并同步**，每台接收设备首次点击**接收并跟随**。之后，新消息与工具记录在现有 ContextMesh 面板内自动更新，断线后自动补齐；需要换设备执行时，点击**在此继续**并确认接管，共享会话身份保持不变。需要 schema 10 或更高版本（Antigravity 需要 11），并在 Codex 上启用生命周期钩子。[配置持续同步 →](docs/live-sync.zh.md)
 
 ## 当前支持范围
 
@@ -49,7 +49,7 @@ Codex 快照导入会创建独立会话并保留来源。**DSH → Codex 接管�
 
 ## 安装前了解
 
-**0.8.0-dev.19 为尚未发布的源码预览版。** 插件依赖本仓库锁定的 **DSH 0.2.1-rc.3 和兼容补丁**。请使用下方锁定版本的源码构建，不支持直接装入任意全局 DSH。
+**0.8.0-dev.21 为尚未发布的源码预览版。** 插件依赖本仓库锁定的 **DSH 0.2.1-rc.3 和兼容补丁**。请使用下方锁定版本的源码构建，不支持直接装入任意全局 DSH。
 
 Server 与设备客户端请使用同一经审核的源码版本。以下采用源码安装方式。CI 也会构建包含运行环境的 macOS Apple Silicon 和 Linux x64 安装包，但目前它们是**候选产物，尚未作为正式 Release 发布**。候选包的安装与升级方式见[运行包指南](docs/runtime.zh.md)。
 
@@ -238,3 +238,5 @@ Server 和参与设备需要使用兼容版本。升级前备份 PostgreSQL 并�
 在已构建的客户端源码目录运行 `pnpm check`，检查格式、类型、构建、上游夹具和测试。测试使用隔离的 PostgreSQL，不需要模型 API 凭据。
 
 参阅 [CONTRIBUTING.md](CONTRIBUTING.md)、[插件接口](docs/api/deepseek-adapter.md)，或提交 [GitHub Issue](https://github.com/MarsZheng666/ContextMesh/issues)。
+
+[Antigravity 桌面插件与安装说明](apps/antigravity/plugin/README.md#中文)

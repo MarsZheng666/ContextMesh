@@ -1,3 +1,4 @@
+import { setTimeout as delay } from 'node:timers/promises'
 import { atomicJson, optionalJson } from '../../runtime-manager/src/files.js'
 import { prepareSharedArchive } from './shared-archive.js'
 import { ArchiveClient } from '../../client/src/archives.js'
@@ -14,6 +15,8 @@ import {
   ToolBoundary,
   stageContinuation,
   wakeContinuation,
+  stageTransferredMessage,
+  wakeTransferredMessage,
 } from './continuation.js'
 import { CodexContextImport } from './codex-import.js'
 import { codexArchives } from '../../client/src/codex-context.js'
@@ -696,10 +699,83 @@ export class HandoffCoordinator {
     this.controls.get(id)?.release()
     this.controls.delete(id)
   }
+  private async stopForAntigravity() {
+    for (const share of await this.shared.list()) {
+      const op = share.transfer
+      if (
+        share.source.adapter !== 'deepseek' ||
+        op?.phase !== 'requested' ||
+        op.sourceInstance !== this.client.mesh.instanceId
+      )
+        continue
+      const id = share.source.id
+      await this.exclusive(id, async () => {
+        const agent = this.ctx.agents.get(SessionId(id))
+        if (agent) {
+          if (this.controls.has(id) && !this.fenced.has(id)) return
+          const control = this.freeze(id)
+          try {
+            await bounded(
+              control.quiesce(),
+              this.config.waitIdleMs,
+              this.abort.signal,
+            )
+            await this.toolBoundary.pause(
+              agent.id,
+              AbortSignal.any([
+                this.abort.signal,
+                AbortSignal.timeout(this.config.waitIdleMs),
+              ]),
+            )
+            await this.resources(agent)
+            if (agent.status === 'running' || pending(agent) > 0) {
+              await atomicJson(
+                join(this.config.stateDir, 'interrupted', op.id + '.json'),
+                true,
+              )
+              if (agent.status === 'running')
+                agent.cancel(
+                  { kind: 'hook', reason: 'contextmesh-handoff:' + op.id },
+                  { keepInbox: true },
+                )
+            }
+            await bounded(
+              agent.whenIdle(),
+              this.config.waitIdleMs,
+              this.abort.signal,
+            )
+            await this.resources(agent)
+            await this.ctx.sessions.flush(agent.session)
+            await control.stop()
+            this.fenced.add(id)
+          } finally {
+            this.release(id)
+          }
+        }
+        await this.client.mesh.request(
+          '/v2/shared-sessions/' + share.id + '/transfer',
+          {
+            action: 'stopped',
+            interrupted:
+              (await optionalJson(
+                join(this.config.stateDir, 'interrupted', op.id + '.json'),
+              )) === true,
+            operationId: op.id,
+            generation: share.generation,
+            thread: this.client.mesh.instanceId,
+            token: this.client.mesh.instanceId,
+          },
+        )
+      })
+    }
+  }
   private async heartbeat() {
     if (this.closing || this.heartbeating) return
     this.heartbeating = (async () => {
       await this.client.heartbeat()
+      await this.stopForAntigravity().catch((error) =>
+        this.warn('antigravity', error),
+      )
       if (Date.now() - this.catalogRefreshed > 30000) {
         await this.client.register(this.config.nodeName, await this.models())
         this.catalogRefreshed = Date.now()
@@ -2015,6 +2091,8 @@ export class HandoffCoordinator {
         generation: z.number().int(),
         cut: z.number().int(),
         archiveId: archiveIdSchema,
+        previewId: archiveIdSchema.optional(),
+        resumeTask: z.boolean().optional(),
       })
       .parse(value)
     if (parsed.endpoint !== this.client.mesh.endpoint)
@@ -2143,6 +2221,7 @@ export class HandoffCoordinator {
           this.shared,
           join(this.config.stateDir, 'shared-previews'),
           id,
+          true,
         ),
       )
     }
@@ -2160,18 +2239,112 @@ export class HandoffCoordinator {
         })
         .parse(input)
       return this.exclusive('codex-import:' + command.operationId, async () => {
-        const value = {
+        const old = await this.sharedReturn(command.operationId)
+        if (
+          old &&
+          (old.id !== command.id ||
+            old.generation !== command.generation ||
+            (old.previewId ?? old.archiveId) !== command.sourceId)
+        )
+          throw new Error('This transfer already uses another shared cut')
+        const current = (await this.shared.pull(command.id)).share
+        let value = old ?? {
           endpoint: this.client.mesh.endpoint,
           id: command.id,
           generation: command.generation,
           cut: command.cut,
           archiveId: command.sourceId,
+          previewId: command.sourceId,
+          resumeTask: false,
         }
-        const old = await this.sharedReturn(command.operationId)
-        if (old && JSON.stringify(old) !== JSON.stringify(value))
-          throw new Error('This transfer already uses a different shared cut')
+        if (
+          !old &&
+          current.source.adapter === 'antigravity' &&
+          (current.activity !== 'idle' ||
+            (current.transfer?.id === command.operationId &&
+              current.transfer.phase === 'stopped'))
+        ) {
+          if (current.generation !== command.generation)
+            throw Error('Refresh the shared conversation')
+          const archive = await new ArchiveClient(this.client.mesh).info(
+            command.sourceId,
+          )
+          const reviewed = archive.manifest.header.source
+          if (
+            reviewed.id !== current.source.id ||
+            reviewed.incarnation !== current.source.incarnation ||
+            reviewed.eventCount !== command.cut
+          )
+            throw Error('Refresh the preview for this shared conversation')
+          await this.codexImporter().checkSharedReceiver(
+            command.sourceId,
+            command.cwd,
+            this.receiverModel(),
+            command.operationId,
+            command.resume,
+          )
+          const tokenPath = join(
+            this.config.stateDir,
+            'shared-proofs',
+            command.operationId + '.json',
+          )
+          const token =
+            z
+              .uuid()
+              .optional()
+              .parse(await optionalJson(tokenPath)) ?? randomUUID()
+          await atomicJson(tokenPath, token)
+          let head = await this.shared.transfer(command.id, {
+            action: 'request',
+            receiver: 'deepseek',
+            operationId: command.operationId,
+            thread: command.operationId,
+            generation: command.generation,
+            token,
+          })
+          while (head.transfer?.phase === 'requested') {
+            await delay(500, undefined, { signal: this.abort.signal })
+            head = (await this.shared.pull(command.id)).share
+            if (head.transfer?.id !== command.operationId)
+              throw Error('The requested transfer changed')
+          }
+          const final = await prepareSharedArchive(
+            this.shared,
+            join(this.config.stateDir, 'shared-previews'),
+            command.id,
+          )
+          value = {
+            ...value,
+            previewId: command.sourceId,
+            archiveId: final.archiveId,
+            cut: final.cut,
+            resumeTask: head.transfer?.interrupted === true,
+          }
+        }
         await atomicJson(this.sharedReturnPath(command.operationId), value)
-        return this.importCodex(command)
+        const result = await this.importCodex({
+          ...command,
+          sourceId: value.archiveId,
+          resume:
+            value.previewId !== value.archiveId && command.resume
+              ? { ...command.resume, planDigest: undefined }
+              : command.resume,
+        })
+        if (value.resumeTask) {
+          const agent = this.ctx.agents.get(SessionId(result.sessionId))
+          if (!agent)
+            throw Error(
+              'Open the receiving conversation to continue the transferred task',
+            )
+          stageTransferredMessage(
+            agent,
+            command.operationId,
+            command.operationId,
+          )
+          await this.ctx.sessions.flush(agent.session)
+          wakeTransferredMessage(agent, command.operationId)
+        }
+        return result
       })
     }
     if (action === 'shared-status')

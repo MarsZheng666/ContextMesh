@@ -1,0 +1,50 @@
+{
+  "contextmesh": {
+    "enabled": true,
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "node ./hook.mjs PreInvocation",
+        "timeout": 90
+      }
+    ],
+    "PostInvocation": [
+      {
+        "type": "command",
+        "command": "node ./hook.mjs PostInvocation",
+        "timeout": 12
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./hook.mjs PreToolUse",
+            "timeout": 12
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./hook.mjs PostToolUse",
+            "timeout": 12
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "node ./hook.mjs Stop",
+        "timeout": 120
+      }
+    ]
+  }
+}

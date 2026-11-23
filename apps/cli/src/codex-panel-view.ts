@@ -302,7 +302,7 @@ const $ = (id) => document.getElementById(id)
 const pending = new Map()
 const tabs = [...document.querySelectorAll('[data-view]')]
 const pages = [...document.querySelectorAll('[data-page]')]
-const agentLabels = {deepseek: 'DeepSeek Harness', codex: 'Codex'}
+const agentLabels = {antigravity:'Antigravity', deepseek: 'DeepSeek Harness', codex: 'Codex'}
 const kindLabels = {takeover:'kindTakeover', import:'kindImport', publish:'kindPublish'}
 let language = navigator.language?.toLowerCase().startsWith('zh') ? 'zh' : 'en'
 let seq = 0, confirmation, preparing = false, starting = false, refreshing = false, refreshingJobs = false
@@ -849,7 +849,7 @@ $('take').addEventListener('click', async () => {
   ]
   const common = {sourceId:source.id, title, target, confirmed:true}
   if (source.status !== 'import') {
-    review(t('reviewTakeover'), fields, t('takeoverNote'), t('confirmTakeover'), {kind:'takeover', ...common})
+    review(t('reviewTakeover'), fields, t('takeoverNote'), t('confirmTakeover'), {kind:'takeover', ...(source.adapter==='antigravity'?{sourceAdapter:'antigravity'}:{}), ...common})
     return
   }
   let resume, records = []
@@ -962,7 +962,7 @@ function renderShared() {
   if(sharedData?.shares.some(value=>value.id===selected))$('sharedChoice').value=selected
   const followed=sharedData?.following.find(value=>value.share.id===$('sharedChoice').value)
   const current=sharedData?.shares.find(value=>value.id===$('sharedChoice').value)
-  $('sharedContinue').hidden=current?.source.adapter!=='deepseek'
+  $('sharedContinue').hidden=!['deepseek','antigravity'].includes(current?.source.adapter)
   $('sharedFollow').hidden=!!followed
   $('sharedFollow').disabled=!$('sharedChoice').value
   $('sharedRecords').replaceChildren()
@@ -993,9 +993,9 @@ $('sharedContinue').addEventListener('click',async()=>{
   const current=sharedData?.shares.find(value=>value.id===$('sharedChoice').value)
   if(!current)return
   await refresh()
-  const source=remote.find(value=>value.adapter==='deepseek'&&value.id===current.source.id)
+  const source=remote.find(value=>value.adapter===current.source.adapter && value.id===(current.source.adapter==='antigravity'?current.id:current.source.id))
   if(source?.status!=='takeover'||!catalog?.takeoverAvailable){notice('sharedNotice',t('liveSourceUnavailable'),true);return}
-  selectedSource='deepseek:'+current.source.id
+  selectedSource=sourceKey(source)
   renderSources();updateReceive();showPage('receive')
 })
 $('sharedChoice').addEventListener('change',()=>{sharedCount=100;$('sharedText').textContent='';$('sharedMore').hidden=true;renderShared()})
