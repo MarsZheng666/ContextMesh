@@ -7,41 +7,109 @@
     :root {
       color-scheme: light dark;
       font:
-        14px/1.5 system-ui,
+        14px/1.45 system-ui,
         sans-serif;
-      color: light-dark(#202124, #edeef0);
-      background: light-dark(#fff, #191919);
+      --surface: light-dark(#fff, #191919);
+      --ink: light-dark(#171717, #f5f5f5);
+      --muted: light-dark(#606060, #aaa);
+      --line: light-dark(#ddd, #343434);
+      --hover: light-dark(#f5f5f5, #141414);
+      --selected: light-dark(#eee, #202020);
+      --primary: light-dark(#000, #fff);
+      --primary-ink: light-dark(#fff, #000);
+      --good: light-dark(#275742, #b3dec2);
+      --warning: light-dark(#79531c, #edce9e);
+      --danger: light-dark(#8f3832, #ffb8b2);
+      background: var(--surface);
+      color: var(--ink);
+      scroll-padding-top: 105px;
     }
-    * {
+    :root[data-theme='dark'] {
+      color-scheme: dark;
+    }
+    :root[data-theme='light'] {
+      color-scheme: light;
+    }
+    *,
+    *::before,
+    *::after {
       box-sizing: border-box;
     }
+    [hidden],
+    .notice:empty,
+    #history:empty,
+    #recordText:empty,
+    #records:empty {
+      display: none !important;
+    }
     body {
-      margin: auto;
-      max-width: 48rem;
-      padding: clamp(12px, 4vw, 32px);
+      margin: 0 auto;
+      max-width: 800px;
+      padding: 0 clamp(12px, 4vw, 32px) 28px;
+    }
+    h1,
+    h2,
+    p,
+    pre {
+      margin: 0;
     }
     h1 {
-      font-size: 1.4rem;
-      margin: 0;
+      font-size: 18px;
+      font-weight: 650;
+      letter-spacing: -0.025em;
     }
     h2 {
-      font-size: 1rem;
-      margin: 0;
+      font-size: 14px;
+      font-weight: 650;
     }
-    nav,
-    .actions {
+    .top {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      background: var(--surface);
+      padding-top: clamp(12px, 2vw, 22px);
+    }
+    header,
+    .tools,
+    .actions,
+    .record-heading {
       display: flex;
-      gap: 0.5rem;
+      align-items: center;
+      gap: 8px;
+    }
+    header,
+    .record-heading {
+      justify-content: space-between;
+    }
+    header {
       flex-wrap: wrap;
-      margin: 0.8rem 0;
+      padding-bottom: 8px;
     }
-    section {
-      margin: 1.2rem clamp(4px, 2vw, 14px);
+    #connection {
+      font-size: 12px;
+      color: var(--muted);
+      display: inline-flex;
+      gap: 5px;
+      align-items: center;
     }
-    label {
+    #connection::before {
+      content: '';
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+    #connection[data-state='connected'] {
+      color: var(--good);
+    }
+    #connection[data-state='unavailable'] {
+      color: var(--warning);
+    }
+    nav {
       display: grid;
-      gap: 0.3rem;
-      margin: 0.8rem 0;
+      grid-template-columns: 1fr 1.3fr 1fr;
+      gap: 4px;
+      padding-bottom: 9px;
     }
     button,
     input,
@@ -49,110 +117,255 @@
     textarea {
       font: inherit;
       color: inherit;
-      border: 1px solid light-dark(#ccc, #515151);
-      border-radius: 8px;
-      padding: 0.45rem 0.7rem;
     }
-    button:enabled {
+    button {
+      min-height: 34px;
+      padding: 6px 10px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 7px;
       cursor: pointer;
     }
-    button[aria-pressed='true'] {
-      background: light-dark(#222, #ddd);
-      color: light-dark(white, #181818);
+    button:hover:not(:disabled) {
+      background: var(--hover);
+    }
+    button:disabled {
+      cursor: default;
+      opacity: 0.5;
+    }
+    nav button,
+    .quiet {
+      padding: 4px 8px;
+      color: var(--muted);
+      background: transparent;
+      border: 0;
+    }
+    nav button[aria-pressed='true'] {
+      background: var(--selected);
+      color: var(--ink);
+      font-weight: 620;
+    }
+    .primary {
+      background: var(--primary);
+      border-color: var(--primary);
+      color: var(--primary-ink);
+      font-weight: 620;
+    }
+    .primary:hover:not(:disabled) {
+      background: var(--primary);
+      opacity: 0.85;
+    }
+    .main-action {
+      width: 100%;
+      min-height: 40px;
+    }
+    :focus-visible {
+      outline: 2px solid light-dark(#505050, #d5d5d5);
+      outline-offset: 2px;
+    }
+    main {
+      padding: clamp(16px, 3vw, 28px) clamp(4px, 1.5vw, 14px) 0;
+    }
+    section,
+    .stack,
+    #manualChat {
+      display: grid;
+      gap: 12px;
+      min-width: 0;
+    }
+    label {
+      display: grid;
+      gap: 5px;
+      font-size: 13px;
+      min-width: 0;
+    }
+    input,
+    textarea,
+    select {
+      width: 100%;
+      min-width: 0;
+      min-height: 38px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      padding: 7px 9px;
+      font-size: 14px;
     }
     textarea {
       resize: vertical;
     }
-    input,
-    select,
-    textarea {
-      width: 100%;
-      min-width: 0;
+    .actions {
+      flex-wrap: wrap;
     }
-    pre {
+    .actions:has(> #more[hidden]) {
+      display: none;
+    }
+    .notice,
+    .hint,
+    .record-meta {
+      font-size: 12px;
+      color: var(--muted);
+      overflow-wrap: anywhere;
+    }
+    #status:not(:empty) {
+      margin-bottom: 12px;
+    }
+    #status[data-error='true'] {
+      color: var(--danger);
+    }
+    .subsection,
+    #confirm,
+    #manualChat {
+      border-top: 1px solid var(--line);
+      padding-top: 14px;
+    }
+    #history,
+    #recordText {
+      max-height: 19rem;
+      overflow: auto;
+      overscroll-behavior: contain;
+    }
+    pre,
+    .excerpt {
       white-space: pre-wrap;
       overflow-wrap: anywhere;
       font: inherit;
-      max-height: 18rem;
-      overflow: auto;
     }
-    [hidden] {
-      display: none !important;
+    article {
+      display: grid;
+      gap: 5px;
+      padding: 12px clamp(6px, 1.5vw, 15px);
+      border-top: 1px solid var(--line);
+      min-width: 0;
+    }
+    article button {
+      justify-self: start;
+    }
+    article strong {
+      font-size: 13px;
+    }
+    @media (max-width: 360px) {
+      nav button {
+        font-size: 13px;
+        padding-inline: 3px;
+      }
+    }
+    @media (pointer: coarse) {
+      button {
+        min-height: 44px;
+      }
     }
   </style>
-  <h1>ContextMesh</h1>
-  <nav>
-    <button id="receive" aria-pressed="true">Receive</button
-    ><button id="publish" aria-pressed="false">Publish</button>
-    <button id="live" aria-pressed="false">Live</button>
-  </nav>
-  <section id="inbox">
-    <h2>Receive a task</h2>
-    <label>Task archive<select id="archives"></select></label>
-    <div class="actions">
-      <button id="refresh">Refresh</button
-      ><button id="more" hidden>Load more</button>
-    </div>
-    <label
-      >Next instruction<input
-        id="query"
-        maxlength="2000"
-        placeholder="What should Antigravity do next?"
-    /></label>
-    <button id="preview" disabled>Preview context</button>
-    <pre id="history"></pre>
-    <button id="resume" hidden>Continue in a new chat</button>
-  </section>
-  <section id="outbox" hidden>
-    <h2>Publish a handoff note</h2>
-    <label>Task title<input id="title" maxlength="160" /></label>
-    <label
-      >Context for the receiving agent<textarea
-        id="note"
-        rows="7"
-        placeholder="Goal, work completed, and what to do next"
-      ></textarea>
-    </label>
-    <button id="save" disabled>Publish this note</button>
-  </section>
-  <section id="livebox" hidden>
-    <h2>Shared conversations</h2>
-    <label>Conversation<select id="shares"></select></label>
-    <div class="actions">
-      <button id="follow">Follow</button
-      ><button id="prepare">Take over…</button>
-    </div>
-    <div id="confirm" hidden>
-      <p>
-        Continue the unfinished task in a new chat on this device. The source
-        will stop after its active tools finish.
+  <div class="top">
+    <header>
+      <h1>ContextMesh</h1>
+      <div class="tools">
+        <span id="connection" role="status">Connecting…</span
+        ><button id="refresh" class="quiet">Refresh</button>
+      </div>
+    </header>
+    <nav aria-label="ContextMesh">
+      <button id="receive" aria-controls="inbox" aria-pressed="true">
+        Receive
+      </button>
+      <button id="live" aria-controls="livebox" aria-pressed="false">
+        Live conversations
+      </button>
+      <button id="publish" aria-controls="outbox" aria-pressed="false">
+        Publish
+      </button>
+    </nav>
+  </div>
+  <main>
+    <p id="status" class="notice" role="status"></p>
+    <section id="inbox" aria-labelledby="receiveHeading">
+      <h2 id="receiveHeading">Receive a task</h2>
+      <label>Task archive<select id="archives"></select></label>
+      <div class="actions">
+        <button id="more" class="quiet" hidden>Load more</button>
+      </div>
+      <label
+        >Next instruction (optional)<input
+          id="query"
+          maxlength="2000"
+          placeholder="What should Antigravity do next?"
+      /></label>
+      <button id="preview" class="primary main-action" disabled>
+        Preview context
+      </button>
+      <div id="history" aria-label="Context preview"></div>
+      <p id="chatHint" class="hint" hidden></p>
+      <button id="resume" class="primary main-action" hidden>
+        Continue in a new chat
+      </button>
+    </section>
+    <section id="livebox" aria-labelledby="liveHeading" hidden>
+      <h2 id="liveHeading">Live conversations</h2>
+      <label>Shared conversation<select id="shares"></select></label>
+      <div class="actions">
+        <button id="follow" class="primary">Follow</button
+        ><button id="prepare">Take over…</button>
+      </div>
+      <div id="confirm" class="stack" hidden>
+        <p>
+          Continue the unfinished task in a new chat on this device. The source
+          will stop after its active tools finish.
+        </p>
+        <button id="claim" class="primary">Confirm takeover</button>
+      </div>
+      <div id="records"></div>
+      <pre id="recordText"></pre>
+      <button id="nextText" hidden>Read more</button>
+    </section>
+    <section id="outbox" aria-labelledby="publishHeading" hidden>
+      <h2 id="publishHeading">Share from this device</h2>
+      <label>Local conversation<select id="local"></select></label>
+      <label>Title<input id="shareTitle" maxlength="160" /></label>
+      <p class="hint">
+        Sharing includes visible messages, tool calls and results on your
+        ContextMesh Server.
       </p>
-      <button id="claim">Confirm takeover</button>
+      <div class="actions">
+        <button id="share" class="primary">Share and sync</button
+        ><button id="snapshot">Publish snapshot</button>
+      </div>
+      <div class="stack subsection">
+        <h2>Publish a handoff note</h2>
+        <label>Task title<input id="title" maxlength="160" /></label>
+        <label
+          >Context for the receiving agent<textarea
+            id="note"
+            rows="5"
+            placeholder="Goal, work completed, and what to do next"
+          ></textarea>
+        </label>
+        <button id="save" disabled>Publish this note</button>
+      </div>
+    </section>
+    <div id="manualChat" hidden>
+      <p id="manualHelp" class="hint" role="status"></p>
+      <label
+        >Message for the new chat<textarea
+          id="chatText"
+          rows="4"
+          readonly
+        ></textarea></label
+      ><button id="copyChat">Copy message</button>
     </div>
-    <div id="records"></div>
-    <pre id="recordText"></pre>
-    <button id="nextText" hidden>Read more</button>
-    <h2>Share from this device</h2>
-    <label>Local conversation<select id="local"></select></label>
-    <label>Title<input id="shareTitle" maxlength="160" /></label>
-    <p>
-      Sharing includes visible messages, tool calls and results on your
-      ContextMesh Server.
-    </p>
-    <button id="share">Share and sync</button>
-    <button id="snapshot">Publish snapshot</button>
-  </section>
-  <p id="status" role="status"></p>
+  </main>
   <script type="module">
     const el = (id) => document.getElementById(id)
     let sequence = 0,
       cursor = null,
       prepared,
       draftId = crypto.randomUUID()
+    let canSend = false
     const pending = new Map()
     window.addEventListener('message', (event) => {
       const msg = event.data
       if (event.source !== parent || msg?.jsonrpc !== '2.0') return
+      if (msg.method === 'ui/notifications/host-context-changed')
+        applyTheme(msg.params)
       const reply = pending.get(msg.id)
       if (reply) reply(msg)
     })
@@ -178,10 +391,119 @@
       if (result.isError) throw Error(txt || 'Request failed')
       return JSON.parse(txt)
     }
+    function applyTheme(context) {
+      if (context?.theme === 'light' || context?.theme === 'dark')
+        document.documentElement.dataset.theme = context.theme
+    }
+    function connection(state) {
+      el('connection').dataset.state = state
+      el('connection').textContent =
+        state === 'connected' ? 'Connected' : 'Unavailable'
+    }
+    async function readServer(name, args) {
+      try {
+        const result = await tool(name, args)
+        connection('connected')
+        return result
+      } catch (error) {
+        connection('unavailable')
+        throw error
+      }
+    }
+    function recordRow(role, text, status) {
+      const article = document.createElement('article')
+      const heading = document.createElement('div')
+      heading.className = 'record-heading'
+      const author = document.createElement('strong')
+      author.textContent =
+        { user: 'You', assistant: 'Assistant', reference: 'Tool / reference' }[
+          role
+        ] || role
+      heading.append(author)
+      if (status) {
+        const meta = document.createElement('span')
+        meta.className = 'record-meta'
+        meta.textContent = status
+        heading.append(meta)
+      }
+      const excerpt = document.createElement('p')
+      excerpt.className = 'excerpt'
+      excerpt.textContent = text
+      article.append(heading, excerpt)
+      return article
+    }
     function resetPreview() {
+      clearManualChat()
+      el('chatHint').hidden = true
       prepared = null
       el('history').textContent = ''
       el('resume').hidden = true
+    }
+    function clearManualChat() {
+      el('manualChat').hidden = true
+      el('chatText').value = ''
+    }
+    function manualChat(button, text, help) {
+      button.after(el('manualChat'))
+      el('chatText').value = text
+      el('manualHelp').textContent = help
+      el('manualChat').hidden = false
+    }
+    async function copyChat() {
+      const field = el('chatText')
+      try {
+        await navigator.clipboard.writeText(field.value)
+      } catch {
+        field.focus()
+        field.select()
+        let copied = false
+        try {
+          copied = document.execCommand('copy')
+        } catch {
+          // Sandboxed views can also restrict the legacy clipboard command.
+        }
+        if (!copied) {
+          el('manualHelp').textContent =
+            'Copy the selected message, then paste and send it in a new Antigravity chat.'
+          return
+        }
+      }
+      el('manualHelp').textContent =
+        'Copied. Choose New Conversation in the destination project, then paste and send.'
+    }
+    el('copyChat').onclick = copyChat
+    async function newChat(button, text) {
+      clearManualChat()
+      if (!canSend) {
+        manualChat(
+          button,
+          text,
+          'Choose New Conversation in your project, then paste and send the message.',
+        )
+        await copyChat()
+        return false
+      }
+      el('status').textContent = 'Requesting a new conversation…'
+      try {
+        const result = await rpc('ui/message', {
+          role: 'user',
+          content: [{ type: 'text', text }],
+          _meta: { 'com.google.antigravity/message': { target: 'new' } },
+        })
+        if (!result || result.isError)
+          throw Error('Delivery was not confirmed.')
+      } catch {
+        el('status').textContent = ''
+        manualChat(
+          button,
+          text,
+          'Antigravity did not confirm delivery. Check the project conversation list first. If no new chat appeared, copy this message into a new conversation.',
+        )
+        return false
+      }
+      el('status').textContent =
+        'Sent. Look in this project’s conversation list for the new background chat.'
+      return true
     }
     function update() {
       el('preview').disabled = !el('archives').value
@@ -193,8 +515,11 @@
     async function run(task) {
       if (working) return
       working = true
+      el('status').dataset.error = 'false'
       const controls = [
-        ...document.querySelectorAll('button,input,select,textarea'),
+        ...document.querySelectorAll(
+          'button,input,select,textarea:not([readonly])',
+        ),
       ]
       const prior = controls.map((c) => c.disabled)
       controls.forEach((c) => (c.disabled = true))
@@ -202,6 +527,7 @@
       try {
         await task()
       } catch (e) {
+        el('status').dataset.error = 'true'
         el('status').textContent = e.message
       } finally {
         working = false
@@ -211,7 +537,7 @@
       }
     }
     async function load(after) {
-      const page = await tool('list_archives', after ? { after } : {})
+      const page = await readServer('list_archives', after ? { after } : {})
       if (!after) {
         el('archives').replaceChildren()
         resetPreview()
@@ -223,19 +549,26 @@
       if (!el('archives').length)
         el('status').textContent = 'No task archives yet.'
     }
-    for (const key of ['receive', 'publish', 'live'])
+    let activePage = 'receive'
+    function showPage(key) {
+      activePage = key
+      clearManualChat()
+      for (const [tab, page] of Object.entries({
+        receive: 'inbox',
+        live: 'livebox',
+        publish: 'outbox',
+      })) {
+        el(page).hidden = tab !== key
+        el(tab).setAttribute('aria-pressed', String(tab === key))
+      }
+      el('status').textContent = ''
+    }
+    for (const key of ['receive', 'live', 'publish'])
       el(key).onclick = () => {
-        el('livebox').hidden = key !== 'live'
-        el('inbox').hidden = key !== 'receive'
-        el('outbox').hidden = key !== 'publish'
-        if (key === 'live')
-          void run(async () => {
-            await loadLocal()
-            await loadLive()
-          })
-        for (const k of ['receive', 'publish', 'live'])
-          el(k).setAttribute('aria-pressed', String(k === key))
-        el('status').textContent = ''
+        if (activePage === key) return
+        showPage(key)
+        if (key === 'live') void run(loadLive)
+        if (key === 'publish') void run(loadLocal)
       }
     let shares = [],
       following = [],
@@ -249,6 +582,7 @@
       el('snapshot').disabled = el('share').disabled
     }
     async function loadLocal() {
+      const previous = el('local').value
       const threads = await tool('local_threads', {})
       el('local').replaceChildren(
         ...threads.map(
@@ -266,34 +600,58 @@
       threads.forEach(
         (t, i) => (el('local').options[i].dataset.title = t.title),
       )
-      el('local').onchange()
+      if (
+        previous &&
+        [...el('local').options].some((option) => option.value === previous)
+      )
+        el('local').value = previous
+      else el('local').onchange()
     }
     el('local').onchange = () => {
       el('shareTitle').value =
         el('local').selectedOptions[0]?.dataset.title || ''
       renderControls()
     }
+    let shareListKey, recordListKey
     async function loadLive() {
       const old = el('shares').value
-      const result = await tool('live_status', old ? { id: old } : {})
+      const result = await readServer('live_status', old ? { id: old } : {})
       if (el('shares').value !== old) return
       shares = result.shares
       following = result.following
-      el('shares').replaceChildren(
-        ...shares.map(
-          (s) => new Option(s.title + ' · ' + s.source.adapter, s.id),
-        ),
-      )
-      if (shares.some((s) => s.id === old)) el('shares').value = old
-      const entries = (result.records || []).map((record) => {
-        const item = document.createElement('p'),
-          button = document.createElement('button')
-        button.textContent = record.role + ' · ' + record.preview
-        button.onclick = () => run(() => readRecord(old, record.seq, 0))
-        item.append(button)
-        return item
-      })
-      el('records').replaceChildren(...entries)
+      const options = shares.map((s) => [
+        s.id,
+        s.title + ' · ' + s.source.adapter,
+      ])
+      const listKey = JSON.stringify(options)
+      if (listKey !== shareListKey) {
+        el('shares').replaceChildren(
+          ...options.map(([id, title]) => new Option(title, id)),
+        )
+        if (shares.some((s) => s.id === old)) el('shares').value = old
+        shareListKey = listKey
+      }
+      const selected = el('shares').value
+      const records = selected && selected === old ? result.records || [] : []
+      const key = JSON.stringify([selected, records])
+      if (recordListKey !== key) {
+        const entries = records.map((record) => {
+          const item = recordRow(record.role, record.preview, record.status)
+          const button = document.createElement('button')
+          button.className = 'quiet'
+          button.textContent = 'Read record'
+          button.onclick = () => run(() => readRecord(selected, record.seq, 0))
+          item.append(button)
+          return item
+        })
+        el('records').replaceChildren(...entries)
+        recordListKey = key
+      }
+      if (old && old !== selected) {
+        el('confirm').hidden = true
+        el('recordText').textContent = ''
+        el('nextText').hidden = true
+      }
       if (result.error) el('status').textContent = result.error
       renderControls()
     }
@@ -306,6 +664,7 @@
       el('nextText').onclick = () => run(() => readRecord(id, seq, result.next))
     }
     el('shares').onchange = () => {
+      clearManualChat()
       el('confirm').hidden = true
       el('recordText').textContent = ''
       el('nextText').hidden = true
@@ -325,18 +684,14 @@
           id: el('shares').value,
         })
         if (existing) {
-          el('status').textContent =
-            'Open the original receiving chat and resend this message to resume: ' +
-            prompt
+          manualChat(
+            el('claim'),
+            prompt,
+            'If you already sent this request, resume in the original receiving chat. Otherwise copy it into a new chat in the destination project.',
+          )
           return
         }
-        await rpc('ui/message', {
-          role: 'user',
-          content: [{ type: 'text', text: prompt }],
-          _meta: { 'com.google.antigravity/message': { target: 'new' } },
-        })
-        el('confirm').hidden = true
-        el('status').textContent = 'Opened the receiving chat for preflight.'
+        if (await newChat(el('claim'), prompt)) el('confirm').hidden = true
       })
     el('shareTitle').oninput = renderControls
     el('snapshot').onclick = () =>
@@ -359,6 +714,7 @@
           title: el('shareTitle').value,
         })
         await tool('follow', { id })
+        showPage('live')
         await loadLive()
         el('shares').value = id
         await loadLive()
@@ -369,43 +725,57 @@
       try {
         await loadLive()
       } catch (e) {
+        el('status').dataset.error = 'true'
         el('status').textContent = e.message
       } finally {
         polling = false
       }
     }, 2500)
-    el('refresh').onclick = () => run(() => load(null))
+    el('refresh').onclick = () =>
+      run(async () => {
+        if (activePage === 'live') return loadLive()
+        if (activePage === 'publish') {
+          await readServer('list_archives', {})
+          return loadLocal()
+        }
+        return load(null)
+      })
     el('more').onclick = () => run(() => load(cursor))
     el('archives').onchange = el('query').oninput = resetPreview
     el('preview').onclick = () =>
       run(async () => {
         resetPreview()
-        prepared = await tool('preview_archive', {
-          id: el('archives').value,
+        const archiveId = el('archives').value
+        const preview = await tool('preview_archive', {
+          id: archiveId,
           query: el('query').value,
         })
-        el('history').textContent = prepared.messages
-          .map((m) => m.role + '\n' + m.text)
-          .join('\n\n')
+        if (el('archives').value !== archiveId) return
+        prepared = { ...preview, archiveId }
+        el('history').replaceChildren(
+          ...prepared.messages.map((m) => recordRow(m.role, m.text)),
+        )
+        el('chatHint').textContent = canSend
+          ? 'Antigravity starts the new chat in the background in this project.'
+          : 'For one-click continuation, open ContextMesh in a project conversation’s side panel. From this view, copy the message into a new chat.'
+        el('chatHint').hidden = false
+        el('resume').textContent = canSend
+          ? 'Continue in a new chat'
+          : 'Copy for a new chat'
         el('resume').hidden = false
       })
     el('resume').onclick = () =>
       run(async () => {
         if (!prepared) return
         const text = [
+          'ContextMesh source: ' + prepared.archiveId,
           'Prior task history (quoted records):',
           JSON.stringify(prepared.messages),
           'Current request:',
           el('query').value.trim() ||
             'Summarize the current task and ask what to do next.',
         ].join('\n')
-        await rpc('ui/message', {
-          role: 'user',
-          content: [{ type: 'text', text }],
-          _meta: { 'com.google.antigravity/message': { target: 'new' } },
-        })
-        resetPreview()
-        el('status').textContent = 'Sent to a new conversation.'
+        if (await newChat(el('resume'), text)) resetPreview()
       })
     el('title').oninput = el('note').oninput = () => {
       draftId = crypto.randomUUID()
@@ -425,16 +795,20 @@
           'Published. The receiving device can now open this archive.'
       })
     await run(async () => {
-      await rpc('ui/initialize', {
+      const host = await rpc('ui/initialize', {
         appInfo: { name: 'ContextMesh', version: '0.1.0' },
         appCapabilities: {},
         protocolVersion: '2026-01-26',
       })
+      applyTheme(host?.hostContext)
+      canSend = !!host?.hostCapabilities?.message?.text
+      if (!canSend) el('claim').textContent = 'Prepare receiving message'
       parent.postMessage(
         { jsonrpc: '2.0', method: 'ui/notifications/initialized' },
         '*',
       )
       await load(null)
     })
+    if (!el('connection').dataset.state) connection('unavailable')
   </script>
 </html>
