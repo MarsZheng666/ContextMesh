@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "mesh": {
+      "command": "node",
+      "args": ["${PLUGIN_ROOT}/server.mjs"],
+      "env": { "CONTEXTMESH_CONFIG": "${CONNECTION_FILE}" },
+      "variables": [
+        {
+          "name": "CONNECTION_FILE",
+          "title": "ContextMesh connection file",
+          "description": "Absolute path to this device’s paired ContextMesh connection.json"
+        }
+      ]
+    }
+  }
+}

@@ -180,3 +180,7 @@ schema 8 程序无法打开 schema 9 数据库。恢复已验证的 schema 8 备
 4. 确认带认证的 `/health/ready` 返回 `schemaVersion: 10` 和 `live-session-sync-v1`，并核验旧记录可读。更新客户端、刷新现有 Codex 插件，审阅生命周期钩子后恢复共享任务。
 
 托管的同 schema 升级不会自动执行这次迁移。回退 schema 9 需要明确批准恢复对应备份，仅替换程序不能撤销迁移。共享 Codex 数据块使用独立容量池，上限同样由 `CONTEXTMESH_ARCHIVE_QUOTA_BYTES` 配置；规划磁盘时需一并计入。归档及持续共享数据均包含在 PostgreSQL 备份中。
+
+## 从 schema 10 迁移到 11
+
+完成未结束的交接，停止客户端同步进程和原生工具，进入维护模式并验证 schema 10 的 PostgreSQL 备份。停止 API，在原数据卷上启动匹配的 schema 11 Server。启动事务会添加接管状态字段。确认鉴权后的就绪检查返回 `schemaVersion: 11`，核对已有会话，更新设备插件后恢复写入。如需回退到 schema 10，请恢复对应版本的备份。

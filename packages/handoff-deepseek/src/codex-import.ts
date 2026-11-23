@@ -471,6 +471,27 @@ export class CodexContextImport {
       resume,
     )
   }
+  async checkSharedReceiver(
+    id: string,
+    cwd: string,
+    model: ModelRoute,
+    operationId: string,
+    resume?: ArchiveResumeOptions,
+  ) {
+    const directory = await realpath(cwd)
+    if (!(await stat(directory)).isDirectory())
+      throw new Error('Choose an existing project directory')
+    const plan = await this.plan(id, directory, model, resume)
+    const session = deepSeekImportSession(
+      plan.context,
+      'dsh:' + operationId,
+      directory,
+      model,
+      operationId,
+      Date.now(),
+    )
+    await this.options.preflight(session, model)
+  }
   async preview(
     id: string,
     cwd: string,

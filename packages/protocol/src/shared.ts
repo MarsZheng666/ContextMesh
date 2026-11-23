@@ -3,10 +3,24 @@ import { integer, nativeId } from './index.js'
 
 export const sharedFeature = 'live-session-sync-v1'
 export const sharedSource = z.object({
-  adapter: z.enum(['deepseek', 'codex']),
+  adapter: z.enum(['deepseek', 'codex', 'antigravity']),
   id: nativeId,
   incarnation: z.uuid(),
 })
+export const sharedTransfer = z
+  .object({
+    action: z.enum(['request', 'stopped', 'claim']),
+    operationId: z.uuid(),
+    generation: integer,
+    thread: z.uuid(),
+    token: z.string().min(32).max(128),
+    cut: integer.optional(),
+    interrupted: z.boolean().optional(),
+    receiver: z
+      .enum(['antigravity', 'codex', 'deepseek'])
+      .default('antigravity'),
+  })
+  .strict()
 export const sharedInfo = z.object({
   id: z.uuid(),
   title: z.string().min(1).max(160),
@@ -16,6 +30,14 @@ export const sharedInfo = z.object({
   nextSeq: integer,
   activity: z.enum(['unknown', 'busy', 'idle', 'reserved']),
   reservation: z.uuid().nullable(),
+  transfer: z
+    .object({
+      id: z.uuid(),
+      phase: z.enum(['requested', 'stopped', 'claimed']),
+      interrupted: z.boolean().optional(),
+      sourceInstance: z.uuid().optional(),
+    })
+    .optional(),
 })
 export type SharedInfo = z.infer<typeof sharedInfo>
 export const sharedContent = z.object({

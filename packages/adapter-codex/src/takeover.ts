@@ -117,7 +117,7 @@ export class ConfirmedCodexTakeover {
       await mesh.close(handle, randomUUID())
     }
   }
-  private async probe(target: StartTarget, context: PortableContext) {
+  async probe(target: StartTarget, context: PortableContext) {
     await privateDirectory(this.options.stateDir)
     const cwd = await mkdtemp(join(this.options.stateDir, 'probe-'))
     const native = new NativeCodex(this.options.native)

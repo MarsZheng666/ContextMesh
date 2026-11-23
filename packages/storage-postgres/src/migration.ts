@@ -222,7 +222,14 @@ export async function migrate(pool: Pool): Promise<void> {
       await client.query(v9)
       version = 9
     }
-    if (version === 9) await client.query(v10)
+    if (version === 9) {
+      await client.query(v10)
+      version = 10
+    }
+    if (version === 10)
+      await client.query(
+        `ALTER TABLE cm_shared_sessions ADD COLUMN IF NOT EXISTS live_transfer jsonb; INSERT INTO cm_schema(version) VALUES(11)`,
+      )
     await client.query('COMMIT')
   } catch (error) {
     await client.query('ROLLBACK')

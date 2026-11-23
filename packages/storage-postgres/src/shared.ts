@@ -9,6 +9,7 @@ import {
 } from '../../protocol/src/archives.js'
 import {
   sharedInfo,
+  sharedTransfer,
   sharedCreate,
   sharedAppend,
   sharedActivity,
@@ -34,6 +35,7 @@ export class SharedPostgresStore extends ArchivePostgresStore {
       nextSeq: Number(row.next_seq),
       activity: row.activity,
       reservation: row.reservation,
+      transfer: row.live_transfer ?? undefined,
     })
   }
   private async shared(db: PoolClient, ns: string, id: string) {
@@ -66,7 +68,7 @@ export class SharedPostgresStore extends ArchivePostgresStore {
       if (old) {
         const row = await this.shared(db, ns, old.share_id)
         if (
-          source.adapter === 'codex' &&
+          source.adapter !== 'deepseek' &&
           row.writer_hash !== hash(input.writerToken)
         )
           throw new MeshError(
@@ -287,7 +289,8 @@ export class SharedPostgresStore extends ArchivePostgresStore {
       row.publisher !== publisher ||
       row.writer_hash !== hash(request.writerToken) ||
       Number(row.generation) !== request.generation ||
-      row.activity === 'reserved'
+      row.activity === 'reserved' ||
+      row.live_transfer?.phase === 'stopped'
     )
       throw new MeshError(
         'OWNERSHIP_LOST',
@@ -303,7 +306,7 @@ export class SharedPostgresStore extends ArchivePostgresStore {
     return this.tx(async (db) => {
       const row = await this.shared(db, ns, id)
       this.authorize(row, publisher, input)
-      if (row.source_adapter !== 'codex')
+      if (row.source_adapter === 'deepseek')
         throw new MeshError(
           'ADAPTER_MISMATCH',
           'DSH records are collected from the persisted native log',
@@ -355,6 +358,11 @@ export class SharedPostgresStore extends ArchivePostgresStore {
     return this.tx(async (db) => {
       const row = await this.shared(db, ns, id)
       this.authorize(row, publisher, input)
+      if (input.state === 'busy' && row.live_transfer?.phase === 'requested')
+        throw new MeshError(
+          'TRANSFER_PENDING',
+          'A receiving device has requested this conversation',
+        )
       if (row.active_turn && row.active_turn !== input.turn) {
         // A delayed Stop must never mark a newer prompt idle or block its outbox.
         if (input.state === 'idle') return { accepted: false }
@@ -429,8 +437,173 @@ export class SharedPostgresStore extends ArchivePostgresStore {
       return this.info(await this.shared(db, ns, id))
     })
   }
+  async transferShared(
+    ns: string,
+    publisher: string,
+    id: string,
+    input: z.infer<typeof sharedTransfer>,
+  ) {
+    return this.tx(async (db) => {
+      const row = await this.shared(db, ns, id)
+      const op = row.live_transfer
+      const same = op?.id === input.operationId
+      const destination =
+        same &&
+        op.thread === input.thread &&
+        op.receiver === input.receiver &&
+        op.target === publisher &&
+        op.hash === hash(input.token)
+      if (
+        (input.action === 'claim' || input.action === 'request') &&
+        destination &&
+        op.phase === 'claimed' &&
+        Number(row.generation) === input.generation + 1
+      )
+        return this.info(row)
+      if (
+        Number(row.generation) !== input.generation ||
+        row.activity === 'reserved'
+      )
+        throw new MeshError(
+          'SOURCE_CHANGED',
+          'Shared source changed; refresh the conversation',
+        )
+      if (input.action === 'request') {
+        if (destination) return this.info(row)
+        if (row.source_id === input.thread || (op && op.phase !== 'claimed'))
+          throw new MeshError('TRANSFER_BUSY', 'Another transfer is pending')
+        if (
+          input.receiver !== 'antigravity' &&
+          row.source_adapter !== 'antigravity'
+        )
+          throw new MeshError(
+            'ADAPTER_MISMATCH',
+            'Use the native takeover flow for this source',
+          )
+        let sourceOwner
+        if (row.source_adapter === 'deepseek') {
+          const native = await this.session(db, ns, row.source_id)
+          if (
+            native.incarnation !== row.incarnation ||
+            native.recovery_required ||
+            native.successor_session ||
+            native.active_handoff ||
+            !native.active_handle ||
+            !native.lease_valid
+          )
+            throw new MeshError(
+              'SOURCE_BUSY',
+              'Open the source on its owning DSH device first',
+            )
+          sourceOwner = (
+            await db.query(
+              `SELECT h.id AS "sourceHandle", h.instance_id AS "sourceInstance", c.id AS "sourceCredential"
+            FROM cm_handles h JOIN cm_nodes n ON n.namespace=h.namespace AND n.instance_id=h.instance_id
+            LEFT JOIN cm_device_credentials c ON c.namespace=n.namespace AND c.node_id=n.id AND NOT c.revoked
+            WHERE h.namespace=$1 AND h.id=$2 AND NOT h.closed LIMIT 1`,
+              [ns, native.active_handle],
+            )
+          ).rows[0]
+          if (!sourceOwner)
+            throw new MeshError(
+              'SOURCE_BUSY',
+              'The source device is unavailable',
+            )
+        }
+        await db.query(
+          'UPDATE cm_shared_sessions SET live_transfer=$3 WHERE namespace=$1 AND id=$2',
+          [
+            ns,
+            id,
+            {
+              ...sourceOwner,
+              id: input.operationId,
+              thread: input.thread,
+              target: publisher,
+              receiver: input.receiver,
+              hash: hash(input.token),
+              phase: 'requested',
+            },
+          ],
+        )
+      } else if (input.action === 'stopped') {
+        if (row.source_adapter === 'deepseek') {
+          const native = await this.session(db, ns, row.source_id)
+          const closed = (
+            await db.query(
+              'SELECT closed AND NOT close_failed AS clean FROM cm_handles WHERE namespace=$1 AND id=$2',
+              [ns, op?.sourceHandle],
+            )
+          ).rows[0]?.clean
+          if (
+            !same ||
+            op.sourceInstance !== input.thread ||
+            (publisher !== 'owner' && publisher !== op.sourceCredential) ||
+            !closed ||
+            native.active_handle ||
+            native.recovery_required ||
+            native.active_handoff ||
+            native.incarnation !== row.incarnation ||
+            (native.successor_session && native.successor_session !== op.thread)
+          )
+            throw new MeshError(
+              'SOURCE_BUSY',
+              'DSH has not confirmed clean source shutdown',
+            )
+          await db.query(
+            'UPDATE cm_sessions SET successor_session=$3 WHERE namespace=$1 AND id=$2',
+            [ns, row.source_id, op.thread],
+          )
+        } else if (
+          !same ||
+          row.source_id !== input.thread ||
+          row.publisher !== publisher ||
+          row.writer_hash !== hash(input.token) ||
+          row.active_tools.length ||
+          row.activity !== 'idle'
+        )
+          throw new MeshError(
+            'SOURCE_BUSY',
+            'Wait for confirmed source shutdown and final records',
+          )
+        if (op.phase === 'stopped') return this.info(row)
+        await db.query(
+          `UPDATE cm_shared_sessions SET activity='idle',live_transfer=live_transfer || $3::jsonb WHERE namespace=$1 AND id=$2`,
+          [
+            ns,
+            id,
+            JSON.stringify({
+              phase: 'stopped',
+              interrupted: input.interrupted === true,
+            }),
+          ],
+        )
+      } else {
+        if (
+          input.receiver === 'deepseek' ||
+          !destination ||
+          op.phase !== 'stopped' ||
+          Number(row.next_seq) !== input.cut
+        )
+          throw new MeshError(
+            'TRANSFER_PENDING',
+            'Wait for the source to finish and preview the final history',
+          )
+        await db.query(
+          `UPDATE cm_shared_sessions SET source_adapter=$6,source_id=$3::text,incarnation=$3::text::uuid,generation=generation+1,writer_hash=$4,publisher=$5,active_turn=NULL,activity='unknown',stop_requested=false,live_transfer=jsonb_set(live_transfer,'{phase}','"claimed"'::jsonb) WHERE namespace=$1 AND id=$2`,
+          [ns, id, input.thread, hash(input.token), publisher, input.receiver],
+        )
+        await db.query(
+          'INSERT INTO cm_shared_bindings VALUES($1,$5,$2::text,$2::text::uuid,$3,$4)',
+          [ns, input.thread, id, input.generation + 1, input.receiver],
+        )
+      }
+      return this.info(await this.shared(db, ns, id))
+    })
+  }
   async reserveShared(
     ns: string,
+    publisher: string,
     id: string,
     input: {
       generation: number
@@ -448,7 +621,15 @@ export class SharedPostgresStore extends ArchivePostgresStore {
         return this.info(row)
       if (
         Number(row.generation) !== input.generation ||
-        row.source_adapter !== 'codex' ||
+        row.source_adapter === 'deepseek' ||
+        (row.live_transfer &&
+          row.live_transfer.phase !== 'claimed' &&
+          !(
+            row.live_transfer.receiver === 'deepseek' &&
+            row.live_transfer.phase === 'stopped' &&
+            row.live_transfer.id === input.operationId &&
+            row.live_transfer.target === publisher
+          )) ||
         row.activity !== 'idle' ||
         Number(row.next_seq) !== input.cut
       )
@@ -512,7 +693,7 @@ export class SharedPostgresStore extends ArchivePostgresStore {
         )
       await db.query(
         `UPDATE cm_shared_sessions SET source_adapter='deepseek',source_id=$3,incarnation=$4,generation=generation+1,source_offset=$5,
-        activity='unknown',active_turn=NULL,active_tools='{}',stop_requested=false,reservation=NULL WHERE namespace=$1 AND id=$2`,
+        activity='unknown',active_turn=NULL,active_tools='{}',stop_requested=false,reservation=NULL,live_transfer=NULL WHERE namespace=$1 AND id=$2`,
         [ns, id, target.id, target.incarnation, target.next_seq],
       )
       await db.query(

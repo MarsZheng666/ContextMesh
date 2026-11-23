@@ -6,6 +6,7 @@ import {
   sharedCreate,
   sharedAppend,
   sharedActivity,
+  sharedTransfer,
   sharedSource,
 } from '../../../packages/protocol/src/shared.js'
 import {
@@ -23,9 +24,18 @@ export function registerSharedRoutes(
 ) {
   const id = z.object({ id: z.uuid() })
   const count = z.coerce.number().int().nonnegative()
-  app.get('/v2/shared-sessions', async () => ({
-    shares: await store.listShared(ns),
-  }))
+  app.get('/v2/shared-sessions', async (req) => {
+    const { include } = z
+      .object({ include: z.string().optional() })
+      .parse(req.query)
+    const shares = await store.listShared(ns)
+    return {
+      shares:
+        include === 'antigravity'
+          ? shares
+          : shares.filter((s) => s.source.adapter !== 'antigravity'),
+    }
+  })
   app.get('/v2/shared-sessions/find', (req) => {
     const input = sharedSource.omit({ incarnation: true }).parse(req.query)
     return store.findShared(ns, input.adapter, input.id)
@@ -75,9 +85,18 @@ export function registerSharedRoutes(
         .parse(req.body),
     ),
   )
+  app.post('/v2/shared-sessions/:id/transfer', (req) =>
+    store.transferShared(
+      ns,
+      principal(req),
+      id.parse(req.params).id,
+      sharedTransfer.parse(req.body),
+    ),
+  )
   app.post('/v2/shared-sessions/:id/reserve', (req) =>
     store.reserveShared(
       ns,
+      principal(req),
       id.parse(req.params).id,
       z
         .object({

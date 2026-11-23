@@ -32,7 +32,7 @@ Deploy the Server once. Devices share its HTTPS URL and use separate credentials
 
 ## Share once, follow automatically
 
-Choose **Share and sync** on the source device, then **Receive and follow** once on each receiver. New messages and tool records update in the existing ContextMesh panel, with automatic catch-up after disconnects. Choose **Continue here** to confirm a change of executing device while keeping the same shared conversation. Requires schema 10 and the Codex lifecycle hooks where applicable. [Set up live synchronization →](docs/live-sync.md)
+Choose **Share and sync** on the source device, then **Receive and follow** once on each receiver. New messages and tool records update in the existing ContextMesh panel, with automatic catch-up after disconnects. Choose **Continue here** to confirm a change of executing device while keeping the same shared conversation. Requires schema 10 or later (11 for Antigravity) and the Codex lifecycle hooks where applicable. [Set up live synchronization →](docs/live-sync.md)
 
 ## What works today
 
@@ -49,7 +49,7 @@ Codex snapshot imports create a separate conversation and retain source provenan
 
 ## Before you install
 
-**0.8.0-dev.19 is an unreleased source preview.** The plugin requires this repository's pinned **DSH 0.2.1-rc.3 and compatibility patches**. Use the pinned source build below; installing the plugin into an arbitrary global DSH is not supported.
+**0.8.0-dev.21 is an unreleased source preview.** The plugin requires this repository's pinned **DSH 0.2.1-rc.3 and compatibility patches**. Use the pinned source build below; installing the plugin into an arbitrary global DSH is not supported.
 
 Use the same reviewed source version for the Server and device clients. The instructions below use the source installation path. Self-contained macOS Apple Silicon and Linux x64 packages are also built by CI, but are currently **candidate artifacts, not published releases**. Their installation and upgrade commands are covered in the [runtime guide](docs/runtime.md).
 
@@ -238,3 +238,5 @@ Keep the server and participating devices on compatible versions. Back up Postgr
 Run `pnpm check` from a built client checkout to check formatting, types, builds, upstream fixtures, and tests. Tests use an isolated PostgreSQL instance and need no model API credentials.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md), the [plugin API](docs/api/deepseek-adapter.md), or [open an issue](https://github.com/MarsZheng666/ContextMesh/issues).
+
+[Antigravity desktop plugin and setup](apps/antigravity/plugin/README.md)

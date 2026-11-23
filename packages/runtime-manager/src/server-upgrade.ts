@@ -16,6 +16,7 @@ const supportedSchema = z.union([
   z.literal(8),
   z.literal(9),
   z.literal(10),
+  z.literal(11),
 ])
 const deployment = z.object({
   version: z.literal(1),

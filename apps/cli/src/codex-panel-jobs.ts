@@ -1,3 +1,4 @@
+import { receiveAntigravity } from '../../../packages/adapter-codex/src/shared-takeover.js'
 import { captureCodexArchive } from '../../../packages/adapter-codex/src/archive-export.js'
 import { CodexSharedSync } from '../../../packages/adapter-codex/src/shared-sync.js'
 import { callLocal } from '../../../packages/handoff-deepseek/src/local-control.js'
@@ -54,7 +55,10 @@ const receiveAction = z
   .strict()
 
 export const confirmedAction = z.discriminatedUnion('kind', [
-  receiveAction.extend({ kind: z.literal('takeover') }),
+  receiveAction.extend({
+    kind: z.literal('takeover'),
+    sourceAdapter: z.literal('antigravity').optional(),
+  }),
   receiveAction.extend({
     kind: z.literal('import'),
     sourceAdapter: z.enum(['deepseek', 'codex']),
@@ -153,9 +157,12 @@ export class CodexPanelJobs {
   async catalog() {
     this.requireConnection()
     const { features = [] } = await this.bridge.client.capabilities()
-    const [sessions, archives] = await Promise.all([
+    const [sessions, archives, shares] = await Promise.all([
       new HandoffClient(this.bridge.client, '').sessions(),
       codexArchives(this.bridge.client, features),
+      features.includes('antigravity-transfer-v1')
+        ? this.shared.client.list()
+        : [],
     ])
     return {
       publishAvailable:
@@ -165,6 +172,14 @@ export class CodexPanelJobs {
       takeoverAvailable: features.includes('cross-agent-takeover-v1'),
       importAvailable: features.includes('native-agent-storage-v1'),
       sessions: [
+        ...shares
+          .filter((s) => s.source.adapter === 'antigravity')
+          .map((s) => ({
+            id: s.id,
+            title: s.title,
+            adapter: 'antigravity',
+            status: s.nextSeq ? 'takeover' : 'empty',
+          })),
         ...sessions.map((session) => ({
           id: session.id,
           title: session.title,
@@ -375,7 +390,21 @@ export class CodexPanelJobs {
     job.pid = process.pid
     await atomicJson(file, job)
     try {
-      if (job.action.kind === 'takeover') {
+      if (
+        job.action.kind === 'takeover' &&
+        job.action.sourceAdapter === 'antigravity'
+      ) {
+        await this.shared.followers.follow(job.action.sourceId)
+        await this.startSync()
+        job.threadId = await receiveAntigravity(
+          this.shared,
+          job.action.sourceId,
+          id,
+          job.action.target,
+        )
+        job.state = 'completed'
+        job.message = 'The task continued in the linked Codex conversation.'
+      } else if (job.action.kind === 'takeover') {
         const result = await new ConfirmedCodexTakeover(this.options).takeover({
           ...job.action,
           operationId: id,

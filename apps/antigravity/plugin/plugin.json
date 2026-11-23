@@ -1,0 +1,10 @@
+{
+  "$schema": "https://antigravity.google/schemas/v1/plugin.json",
+  "name": "contextmesh",
+  "displayName": "ContextMesh",
+  "description": "Share conversations, follow live messages and tool results, and take over tasks on this device.",
+  "version": "0.1.0",
+  "suggestedPrompts": [
+    "Open ContextMesh to continue a task from another device."
+  ]
+}

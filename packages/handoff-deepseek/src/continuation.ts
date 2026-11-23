@@ -31,39 +31,50 @@ function bridge(agent: Agent): ContinuationAgent {
 export function stageContinuation(agent: Agent, record: HandoffRecord) {
   const plan = record.manifest.continuation
   if (!plan) return
+  stageTransferredMessage(agent, record.id, plan.messageId, plan.turn)
+}
+export function stageTransferredMessage(
+  agent: Agent,
+  operationId: string,
+  messageId: string,
+  turn?: number,
+) {
   // A consumed or explicitly discarded instruction must never be enqueued again.
   if (
     agent.session
       .snapshotEvents()
       .some(
         (e) =>
-          (e.type === 'user/message' && e.data.id === plan.messageId) ||
+          (e.type === 'user/message' && e.data.id === messageId) ||
           (e.type === 'agent/inbox/spliced' &&
-            e.data.inserted.some((m) => m.id === plan.messageId)),
+            e.data.inserted.some((m) => m.id === messageId)),
       )
   )
     return
   bridge(agent).stageContinuation({
-    id: MessageId(plan.messageId),
+    id: MessageId(messageId),
     role: 'user',
     source: {
       kind: 'contextmesh-continuation',
-      handoffId: record.id,
-      sourceTurn: plan.turn,
+      handoffId: operationId,
+      sourceTurn: turn ?? 0,
       form: 'notice',
       summary: 'Task transferred here. Continuing unfinished work.',
     },
     content: [
       {
         type: 'text',
-        text: `ContextMesh transferred this conversation while turn ${plan.turn} was unfinished. Continue the original user's unfinished task now using the preceding conversation, completed tool results and current workspace. This is an automatic continuation after the confirmed handoff, not a new task. Do not repeat completed operations. Check the current state before any action whose effects are uncertain. If necessary files or permissions are unavailable, explain what is missing instead of guessing. Complete the original task and report its result.`,
+        text: `ContextMesh transferred this conversation while ${turn ? `turn ${turn} was unfinished` : 'work was unfinished'}. Continue the original user's unfinished task now using the preceding conversation, completed tool results and current workspace. This is an automatic continuation after the confirmed handoff, not a new task. Do not repeat completed operations. Check the current state before any action whose effects are uncertain. If necessary files or permissions are unavailable, explain what is missing instead of guessing. Complete the original task and report its result.`,
       },
     ],
   })
 }
 export function wakeContinuation(agent: Agent, record: HandoffRecord) {
   const plan = record.manifest.continuation
-  if (plan && agent.inbox.nextTurn.some((m) => m.id === plan.messageId))
+  if (plan) wakeTransferredMessage(agent, plan.messageId)
+}
+export function wakeTransferredMessage(agent: Agent, messageId: string) {
+  if (agent.inbox.nextTurn.some((m) => m.id === messageId))
     bridge(agent).wakePending()
 }
 

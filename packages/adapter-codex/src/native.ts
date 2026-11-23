@@ -244,6 +244,13 @@ export class NativeCodex {
       }),
     ).thread
   }
+  async threadSettled(threadId: string) {
+    const thread = await this.readThread(threadId)
+    return (
+      thread.id === threadId &&
+      ['idle', 'notLoaded'].includes(thread.status.type)
+    )
+  }
   async threadName(threadId: string) {
     const thread = await this.readThread(threadId)
     if (thread.id !== threadId)
